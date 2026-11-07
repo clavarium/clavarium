@@ -2,29 +2,62 @@
 # ---------------------------------------------------------------------------
 # THE MAINTENANCE PROGRAM OF A CLAVARIUM RELAY. Runs as root, on the relay.
 #
-#   clavarium-relay status                 what is set up, what runs, what is due
+#   clavarium-relay status                 what is set up, what runs, what is due, the homes
 #   clavarium-relay repair                 writes the rules and the port service again
 #   clavarium-relay update-os [--reboot]   Ubuntu's updates now (and a restart if one is due)
 #   clavarium-relay update-relay X.Y.Z     this program at exactly that version, from npm
 #   clavarium-relay rotate-key tunnel|keeper "ssh-ed25519 AAAA... name"
-#   clavarium-relay setup --key LINE [--keeper-key LINE]   (relay.sh runs it once)
+#   clavarium-relay homes                  the homes this relay serves: names, ports, connected or not
+#   clavarium-relay add-home NAME --key "ssh-ed25519 AAAA... name"   one more home; prints its ports
+#   clavarium-relay remove-home NAME       that home out: its key, its ports, its tunnel cut
+#   clavarium-relay name-principal NAME    the name of the first home (a relay set up before 0.2.0 has none)
+#   clavarium-relay setup --key LINE [--keeper-key LINE] [--name NAME]   (relay.sh runs it once)
 #   clavarium-relay version
 #
-# WHO RUNS IT. Root, by hand; or the home machine, through the maintenance
-# account "clavarium-keeper": that account's SSH key leads to "door" (below)
-# and nowhere else, and sudo lets it run this one program, nothing else.
+# WHO RUNS IT. Root, by hand; or the FIRST home (the principal), through the
+# maintenance account "clavarium-keeper": that account's SSH key leads to
+# "door" (below) and nowhere else, and sudo lets it run this one program,
+# nothing else. Only the principal holds that key. Another home never gets
+# it, nor any way to log in here: the principal's owner adds it (add-home,
+# usually through a one-time code typed on the new home, see deploy/online.mjs
+# of Clavarium), and removes it.
+#
+# SEVERAL HOMES, ONE RELAY. Each home has its own tunnel key and its own two
+# ports. The list is /etc/clavarium-relay/homes, one home a line:
+#     NAMES TLS-PORT HTTP-PORT ssh-ed25519 AAAA... [comment]
+# NAMES is one name or several, separated by commas; "-" while not known (a
+# relay set up before 0.2.0 knew no name). The first line is the principal:
+# ports 8443 and 8080, as before, which its tunnel may hold on any address.
+# Every other home gets the next free pair (8444 and 8081, then 8445 and
+# 8082...), which its tunnel may hold on 127.0.0.1 ONLY: the key line says
+# permitlisten="127.0.0.1:<its port>", so a home can never take the ports of
+# another one, nor be reached but through the router.
+#
+# WHAT ARRIVES ON 443 AND 80:
+#   - while a home has no name (a relay of one home, set up before 0.2.0): a
+#     kernel rule sends 443 to 8443 and 80 to 8080, exactly as before;
+#   - once every home has a name: THE ROUTER, a small Node.js program written
+#     by this one (below, router.js). On 443 it reads the name the browser
+#     asks for (SNI, in the clear in the first TLS message) WITHOUT decrypting
+#     anything, then passes the raw bytes, untouched, to that home's port. On
+#     80 it reads the Host line and does the same. A name it does not know is
+#     closed (443) or answered "421" (80): never sent to a default home.
+#   The relay stays blind: TLS still starts in the browser and ends at home;
+#   no certificate and no secret is here.
 #
 # IT NEVER TAKES CODE FROM THE HOME MACHINE. update-relay is told a version
 # number only; it fetches the package "clavarium-relay" of that version from
 # the npm registry itself, checks it against the registry's sha512, and only
-# then replaces this file.
+# then replaces this file. The router is part of this file, so it comes the
+# same way. Its first run (repair) moves a relay of one home to the list:
+# that home stays the principal, on the same ports, with the same key.
 #
 # Exit codes: 0 done (status: all is well); 1 something is wrong (said);
 # 64 bad parameters; 78 refused.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-VERSION_OF_THIS="0.1.1"
+VERSION_OF_THIS="0.2.0-next.1"
 # Tests run it on a folder that stands for "/": nothing outside it is touched.
 ROOT="${CLAVARIUM_RELAY_ROOT:-}"
 REGISTRY="https://registry.npmjs.org"
@@ -34,20 +67,34 @@ TUNNEL="clavarium-tunnel"
 KEEPER="clavarium-keeper"
 TLS_PORT="8443"
 HTTP_PORT="8080"
+# Homes after the first: TLS on TLS_PORT+N, HTTP on HTTP_PORT+N, N from 1 to HOMES_MAX.
+HOMES_MAX="200"
 PROGRAM="/usr/local/sbin/clavarium-relay"
 KEYS="/etc/ssh/clavarium-relay"
+HOMES="$ROOT/etc/clavarium-relay/homes"
+ROUTER_JS="/usr/local/lib/clavarium-relay/router.js"
 SSHD_FILE="$ROOT/etc/ssh/sshd_config.d/10-clavarium-relay.conf"
 RULES="$ROOT/etc/clavarium-relay.nft"
 UNIT="$ROOT/etc/systemd/system/clavarium-relay-ports.service"
+ROUTER_UNIT="$ROOT/etc/systemd/system/clavarium-relay-router.service"
 SUDOERS="$ROOT/etc/sudoers.d/clavarium-relay"
 UPGRADES="$ROOT/etc/apt/apt.conf.d/52clavarium-relay"
 KEY_RE='^ssh-ed25519 [A-Za-z0-9+/]{68}( [A-Za-z0-9@._-]{1,64})?$'
 VERSION_RE='^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$'
+NAME_RE='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$'
 
-bad() { echo "clavarium-relay: $*" >&2; echo "usage: clavarium-relay status | repair | update-os [--reboot] | update-relay X.Y.Z | rotate-key tunnel|keeper KEY | version" >&2; exit 64; }
+bad() { echo "clavarium-relay: $*" >&2; echo "usage: clavarium-relay status | repair | update-os [--reboot] | update-relay X.Y.Z | rotate-key tunnel|keeper KEY | homes | add-home NAME --key KEY | remove-home NAME | name-principal NAME | version" >&2; exit 64; }
 refuse() { echo "clavarium-relay: REFUSED: $*" >&2; exit 78; }
 as_root() { [ -n "$ROOT" ] || [ "$(id -u)" -eq 0 ] || refuse "run it as root (sudo)"; }
 key_ok() { case "$1" in *"PRIVATE KEY"*) return 1 ;; esac; [[ "$1" =~ $KEY_RE ]]; }
+# NAMES: one host name or several, separated by commas (8 at most), lower case.
+names_ok() {
+    local n list
+    [[ "$1" =~ ^[a-z0-9.,-]{1,600}$ ]] || return 1
+    IFS=, read -r -a list <<< "$1"
+    [ "${#list[@]}" -ge 1 ] && [ "${#list[@]}" -le 8 ] || return 1
+    for n in "${list[@]}"; do [[ "$n" =~ $NAME_RE ]] || return 1; done
+}
 
 # --- fetch_relay: shared, word for word, with deploy/relay.sh (a test says so) ---
 # fetch_relay VERSION DIR: the package clavarium-relay@VERSION from the registry,
@@ -68,34 +115,283 @@ fetch_relay() {
 }
 # --- end of fetch_relay ---
 
-write_key() { # write_key ACCOUNT LINE: the one key of that account, in a file root owns
-    local account="$1" key="$2" options
-    key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
-    if [ "$account" = "$TUNNEL" ]; then options="restrict,port-forwarding,permitlisten=\"$TLS_PORT\",permitlisten=\"$HTTP_PORT\""; else options="restrict"; fi
+# ------------------------------- the homes -------------------------------
+# The list, read into four arrays (H_NAMES, H_TLS, H_HTTP, H_KEY), index 0 the principal.
+H_NAMES=(); H_TLS=(); H_HTTP=(); H_KEY=()
+read_homes() {
+    H_NAMES=(); H_TLS=(); H_HTTP=(); H_KEY=()
+    [ -s "$HOMES" ] || return 0
+    local names tls http rest
+    while read -r names tls http rest; do
+        case "$names" in ''|'#'*) continue ;; esac
+        [[ "$tls" =~ ^[0-9]{1,5}$ && "$http" =~ ^[0-9]{1,5}$ ]] && key_ok "$rest" || refuse "$HOMES has a line that is not NAMES TLS-PORT HTTP-PORT KEY: not changed here"
+        [ "$names" = "-" ] || names_ok "$names" || refuse "$HOMES has a name that is not a host name: $names"
+        H_NAMES+=("$names"); H_TLS+=("$tls"); H_HTTP+=("$http"); H_KEY+=("$rest")
+    done < "$HOMES"
+}
+write_homes() {
+    local i
+    install -d -m 0755 "$(dirname "$HOMES")"
+    {
+        echo "# Clavarium relay: the homes it serves, one a line: NAMES TLS-PORT HTTP-PORT KEY."
+        echo "# The first is the principal. Written by clavarium-relay: change it with add-home / remove-home."
+        for i in "${!H_NAMES[@]}"; do printf '%s %s %s %s\n' "${H_NAMES[$i]}" "${H_TLS[$i]}" "${H_HTTP[$i]}" "${H_KEY[$i]}"; done
+    } > "$HOMES.new"
+    chmod 0644 "$HOMES.new"
+    mv -f -- "$HOMES.new" "$HOMES"
+}
+# A relay set up before 0.2.0 kept its one tunnel key alone, in the account's key file: it becomes the
+# first home of the list, the principal, with no name yet, on the same ports. Nothing else changes.
+migrate() {
+    [ ! -s "$HOMES" ] || return 0
+    [ -s "$ROOT$KEYS/$TUNNEL" ] || return 0
+    local line key
+    line="$(grep -m1 'ssh-ed25519 ' "$ROOT$KEYS/$TUNNEL" || true)"
+    key="ssh-ed25519 ${line#*ssh-ed25519 }"
+    key_ok "$key" || refuse "the tunnel key of this relay ($KEYS/$TUNNEL) is not in the form this program writes: not moved"
+    H_NAMES=("-"); H_TLS=("$TLS_PORT"); H_HTTP=("$HTTP_PORT"); H_KEY=("$key")
+    write_homes
+    echo "the home of this relay is now the first of its list ($HOMES)"
+}
+body_of() { local k="${1#ssh-ed25519 }"; echo "${k%% *}"; }
+# index_of NAME: the home that has this name among its names (-1: none).
+index_of() {
+    local i n list
+    for i in "${!H_NAMES[@]}"; do
+        IFS=, read -r -a list <<< "${H_NAMES[$i]}"
+        for n in "${list[@]}"; do [ "$n" = "$1" ] && { echo "$i"; return; }; done
+    done
+    echo -1
+}
+index_of_key() {
+    local i b; b="$(body_of "$1")"
+    for i in "${!H_KEY[@]}"; do [ "$(body_of "${H_KEY[$i]}")" = "$b" ] && { echo "$i"; return; }; done
+    echo -1
+}
+all_named() { local n; [ "${#H_NAMES[@]}" -gt 0 ] || return 1; for n in "${H_NAMES[@]}"; do [ "$n" != "-" ] || return 1; done; }
+listening() { ss -ltnH "sport = :$1" 2>/dev/null | grep -q .; }
+host_print() { ssh-keygen -l -f "$ROOT/etc/ssh/ssh_host_ed25519_key.pub" 2>/dev/null | cut -d' ' -f2; }
+
+# The tunnel account's keys, one line per home, each bounded to its own ports. The principal's line is
+# the one written before 0.2.0, word for word (its tunnel asks for its ports on every address).
+write_tunnel_keys() {
+    local i
     install -d -m 0755 "$ROOT$KEYS"
-    printf '%s %s\n' "$options" "$key" > "$ROOT$KEYS/$account.new"
-    chmod 0644 "$ROOT$KEYS/$account.new"
-    mv -f -- "$ROOT$KEYS/$account.new" "$ROOT$KEYS/$account"
+    {
+        for i in "${!H_KEY[@]}"; do
+            if [ "$i" -eq 0 ]; then printf 'restrict,port-forwarding,permitlisten="%s",permitlisten="%s" %s\n' "${H_TLS[0]}" "${H_HTTP[0]}" "${H_KEY[0]}"
+            else printf 'restrict,port-forwarding,permitlisten="127.0.0.1:%s",permitlisten="127.0.0.1:%s" %s\n' "${H_TLS[$i]}" "${H_HTTP[$i]}" "${H_KEY[$i]}"; fi
+        done
+    } > "$ROOT$KEYS/$TUNNEL.new"
+    chmod 0644 "$ROOT$KEYS/$TUNNEL.new"
+    mv -f -- "$ROOT$KEYS/$TUNNEL.new" "$ROOT$KEYS/$TUNNEL"
 }
 
-do_repair() {
-    as_root
-    [ -s "$ROOT$KEYS/$TUNNEL" ] || refuse "this machine has no tunnel key: set it up with relay.sh --key ..."
-    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
-    local missing=""
-    command -v nft >/dev/null 2>&1 || missing="nftables"
-    [ -e "$ROOT/usr/bin/unattended-upgrade" ] || missing="$missing unattended-upgrades"
-    if [ -n "$missing" ]; then
-        # shellcheck disable=SC2086
-        apt-get update -qq && apt-get install -y -qq $missing >/dev/null || refuse "could not install:$missing"
-    fi
-    id "$TUNNEL" >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin "$TUNNEL"
-    # The keeper's commands go through its shell to "door": it needs one, and
-    # has no password and no other command.
-    if [ -s "$ROOT$KEYS/$KEEPER" ]; then id "$KEEPER" >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /bin/sh "$KEEPER"; fi
+write_keeper_key() {
+    key_ok "$1" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+    install -d -m 0755 "$ROOT$KEYS"
+    printf 'restrict %s\n' "$1" > "$ROOT$KEYS/$KEEPER.new"
+    chmod 0644 "$ROOT$KEYS/$KEEPER.new"
+    mv -f -- "$ROOT$KEYS/$KEEPER.new" "$ROOT$KEYS/$KEEPER"
+}
 
+# -------------------------------- the router --------------------------------
+# WHY A SMALL NODE.JS PROGRAM, and not HAProxy or nginx: it is about 150 lines with no dependency, it
+# comes INSIDE this file (so update-relay brings it with the same sha512 check, and the package stays
+# one program), it reads the list of homes itself (no configuration language written and reloaded at
+# each add-home), and the very same file is tried on real sockets by Clavarium's tests. Node.js itself
+# comes from Ubuntu's own packages, so Ubuntu's security updates keep it patched. Written for the oldest
+# Node.js an Ubuntu LTS still ships (12): CommonJS, nothing newer.
+write_router() {
+    install -d -m 0755 "$(dirname "$ROOT$ROUTER_JS")"
+    cat > "$ROOT$ROUTER_JS.new" <<'ROUTER'
+'use strict';
+/* THE ROUTER OF A CLAVARIUM RELAY, written by clavarium-relay (do not change it here: repair writes it
+ * again). Several homes behind one relay, each found by the name the visitor asks for:
+ *
+ *   443: the first TLS message (ClientHello) carries the name in the clear (SNI). It is read WITHOUT
+ *        decrypting anything, then every byte, that message included, goes untouched to that home's
+ *        port: TLS still ends at home, the relay holds no certificate and sees no page.
+ *   80:  the Host line of the request; the same, to that home's HTTP port (certificate challenges,
+ *        and the home's own redirect to https).
+ *
+ * A name not in the list: 443 closed, 80 answered "421 Misdirected Request". NEVER a default home.
+ * The list (/etc/clavarium-relay/homes) is read again when it changes: adding a home restarts nothing.
+ * It logs no visitor: only why it could not start.
+ *
+ *   node router.js [--homes FILE] [--tls PORT] [--http PORT] [--bind ADDRESS]
+ */
+var net = require('net');
+var fs = require('fs');
+
+var args = process.argv.slice(2);
+function opt(name, value) { var i = args.indexOf(name); return i >= 0 && i + 1 < args.length ? args[i + 1] : value; }
+var LIST = opt('--homes', '/etc/clavarium-relay/homes');
+var TLS_PORT = Number(opt('--tls', '443'));
+var HTTP_PORT = Number(opt('--http', '80'));
+var BIND = opt('--bind', '');
+var HOME_ADDRESS = '127.0.0.1';
+var HELLO_MAX = 65536;      /* a ClientHello larger than this is not one */
+var HEAD_MAX = 16384;       /* the same for the head of an HTTP request */
+var WAIT_MS = 10000;        /* the first bytes must come within this */
+var WAITING_MAX = 4096;     /* connections not yet sent anywhere, at most */
+var waiting = 0;
+
+var seen = ''; var table = {};
+function homes() {
+    var st;
+    try { st = fs.statSync(LIST); } catch (e) { seen = ''; table = {}; return table; }
+    var stamp = st.ino + ':' + st.size + ':' + st.mtimeMs;
+    if (stamp === seen) return table;
+    var next = {};
+    fs.readFileSync(LIST, 'utf8').split('\n').forEach(function (line) {
+        var w = line.trim().split(/\s+/);
+        if (w.length < 3 || w[0].charAt(0) === '#' || w[0] === '-') return;
+        var tls = Number(w[1]); var http = Number(w[2]);
+        if (!(tls > 0 && tls < 65536 && http > 0 && http < 65536)) return;
+        w[0].split(',').forEach(function (n) { if (n) next[n.toLowerCase()] = { tls: tls, http: http }; });
+    });
+    table = next; seen = stamp;
+    return table;
+}
+function clean(name) {
+    var n = String(name).toLowerCase().replace(/\.$/, '');
+    return /^[a-z0-9.-]{1,253}$/.test(n) ? n : null;
+}
+
+/* The name in a ClientHello. undefined: more bytes needed; null: not a ClientHello, or no name. */
+function sniOf(buf) {
+    var at = 0; var parts = []; var size = 0; var need = -1;
+    for (;;) {
+        if (buf.length < at + 5) return undefined;
+        if (buf[at] !== 22 || buf[at + 1] !== 3) return null;
+        var len = buf.readUInt16BE(at + 3);
+        if (len === 0 || len > 18432) return null;
+        if (buf.length < at + 5 + len) return undefined;
+        parts.push(buf.slice(at + 5, at + 5 + len)); size += len; at += 5 + len;
+        var hs = Buffer.concat(parts, size);
+        if (need < 0 && hs.length >= 4) {
+            if (hs[0] !== 1) return null;
+            need = 4 + hs.readUIntBE(1, 3);
+            if (need > HELLO_MAX) return null;
+        }
+        if (need >= 0 && hs.length >= need) return nameInHello(hs.slice(4, need));
+    }
+}
+function nameInHello(h) {
+    var p = 34;                                    /* version, random */
+    if (h.length < p + 1) return null;
+    p += 1 + h[p];                                 /* session id */
+    if (h.length < p + 2) return null;
+    p += 2 + h.readUInt16BE(p);                    /* cipher suites */
+    if (h.length < p + 1) return null;
+    p += 1 + h[p];                                 /* compression methods */
+    if (h.length < p + 2) return null;
+    var end = Math.min(h.length, p + 2 + h.readUInt16BE(p)); p += 2;
+    while (p + 4 <= end) {
+        var type = h.readUInt16BE(p); var len = h.readUInt16BE(p + 2); p += 4;
+        if (p + len > end) return null;
+        if (type === 0 && len >= 2) {             /* server_name: a list of (kind, length, name) */
+            var stop = Math.min(p + len, p + 2 + h.readUInt16BE(p)); var q = p + 2;
+            while (q + 3 <= stop) {
+                var kind = h[q]; var n = h.readUInt16BE(q + 1); q += 3;
+                if (q + n > stop) return null;
+                if (kind === 0) return clean(h.slice(q, q + n).toString('latin1'));
+                q += n;
+            }
+            return null;
+        }
+        p += len;
+    }
+    return null;
+}
+/* The Host of an HTTP request. undefined: its head is not whole yet; null: none, or not HTTP. */
+function hostOf(buf) {
+    var end = buf.indexOf('\r\n\r\n');
+    if (end < 0) return buf.length > HEAD_MAX ? null : undefined;
+    var lines = buf.slice(0, end).toString('latin1').split('\r\n');
+    if (!/^[A-Z]{3,10} \S+ HTTP\/1\.[01]$/.test(lines[0])) return null;
+    for (var i = 1; i < lines.length; i++) {
+        var m = /^host:[ \t]*([^ \t]*)[ \t]*$/i.exec(lines[i]);
+        if (m) return clean(m[1].replace(/:[0-9]{1,5}$/, ''));
+    }
+    return null;
+}
+function answer(socket, status, text) {
+    socket.end('HTTP/1.1 ' + status + '\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ' + Buffer.byteLength(text)
+        + '\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n' + text);
+}
+
+function serve(port, kind) {
+    var server = net.createServer(function (client) {
+        client.on('error', function () {});
+        if (waiting >= WAITING_MAX) { client.destroy(); return; }
+        waiting += 1;
+        var buf = Buffer.alloc(0); var decided = false;
+        var timer = setTimeout(function () { decide(null, false); }, WAIT_MS);
+        function onData(piece) {
+            buf = Buffer.concat([buf, piece]);
+            var name = kind === 'tls' ? sniOf(buf) : hostOf(buf);
+            if (name === undefined) { if (buf.length > HELLO_MAX) decide(null, false); return; }
+            decide(name, true);
+        }
+        function decide(name, whole) {
+            if (decided) return;
+            decided = true; waiting -= 1; clearTimeout(timer);
+            client.removeListener('data', onData);
+            client.pause();
+            var home = name ? homes()[name] : null;
+            if (!home) {
+                if (kind === 'http' && whole) answer(client, '421 Misdirected Request', 'No home here has this name.\n');
+                else client.destroy();
+                return;
+            }
+            var upstream = net.connect(kind === 'tls' ? home.tls : home.http, HOME_ADDRESS);
+            var joined = false;
+            upstream.on('connect', function () {
+                joined = true;
+                upstream.write(buf);
+                client.pipe(upstream); upstream.pipe(client);
+                client.resume();
+            });
+            upstream.on('error', function () {
+                if (!joined && kind === 'http') answer(client, '502 Bad Gateway', 'This home is not connected to its relay just now.\n');
+                else client.destroy();
+            });
+            client.on('close', function () { upstream.destroy(); });
+            upstream.on('close', function () { if (joined) client.destroy(); });
+        }
+        client.on('data', onData);
+        client.on('end', function () { decide(null, false); });
+    });
+    server.on('error', function (e) { console.error('clavarium-relay router: port ' + port + ': ' + e.message); process.exit(1); });
+    return new Promise(function (resolve) {
+        server.listen(BIND ? { port: port, host: BIND } : { port: port }, function () { resolve(server.address().port); });
+    });
+}
+
+homes();
+Promise.all([serve(TLS_PORT, 'tls'), serve(HTTP_PORT, 'http')]).then(function (ports) {
+    console.log('clavarium-relay router: tls ' + ports[0] + ', http ' + ports[1]);
+});
+ROUTER
+    chmod 0644 "$ROOT$ROUTER_JS.new"
+    if [ -f "$ROOT$ROUTER_JS" ] && cmp -s "$ROOT$ROUTER_JS.new" "$ROOT$ROUTER_JS"; then rm -f -- "$ROOT$ROUTER_JS.new"; return 1; fi
+    mv -f -- "$ROOT$ROUTER_JS.new" "$ROOT$ROUTER_JS"
+}
+
+# --------------------------- writing it all down ---------------------------
+# The SSH rules, the tunnel keys, and what takes 443 and 80: the kernel rule (a home without a name)
+# or the router (every home named). Run after any change of the list; changes nothing that holds.
+apply() {
+    read_homes
+    write_tunnel_keys
+    local listens="" i
+    for i in "${!H_TLS[@]}"; do
+        if [ "$i" -eq 0 ]; then listens="${H_TLS[0]} ${H_HTTP[0]}"; else listens="$listens 127.0.0.1:${H_TLS[$i]} 127.0.0.1:${H_HTTP[$i]}"; fi
+    done
     install -d "$(dirname "$SSHD_FILE")"
-    cat > "$SSHD_FILE" <<SSHD
+    cat > "$SSHD_FILE.new" <<SSHD
 # Clavarium relay: what its two accounts may do. Written by clavarium-relay.
 Match User $TUNNEL
     AuthorizedKeysFile $KEYS/%u
@@ -103,7 +399,8 @@ Match User $TUNNEL
     KbdInteractiveAuthentication no
     AllowTcpForwarding remote
     GatewayPorts clientspecified
-    PermitListen $TLS_PORT $HTTP_PORT
+    # Each key may hold only its own two ports (its line in $KEYS/$TUNNEL says which).
+    PermitListen $listens
     PermitOpen none
     PermitTTY no
     X11Forwarding no
@@ -127,15 +424,62 @@ Match User $KEEPER
 # What follows this file in the server's settings is for everybody again.
 Match all
 SSHD
-    if ! sshd -t; then rm -f -- "$SSHD_FILE"; refuse "the SSH server refused these settings; they were taken out again"; fi
-    systemctl reload ssh.service 2>/dev/null || systemctl reload sshd.service
+    if ! cmp -s "$SSHD_FILE.new" "$SSHD_FILE" 2>/dev/null; then
+        local before=""; [ -f "$SSHD_FILE" ] && before="$(cat "$SSHD_FILE")"
+        mv -f -- "$SSHD_FILE.new" "$SSHD_FILE"
+        if ! sshd -t; then
+            if [ -n "$before" ]; then printf '%s\n' "$before" > "$SSHD_FILE"; else rm -f -- "$SSHD_FILE"; fi
+            refuse "the SSH server refused these settings; the ones before were put back"
+        fi
+        systemctl reload ssh.service 2>/dev/null || systemctl reload sshd.service
+    else rm -f -- "$SSHD_FILE.new"; fi
 
-    install -d "$(dirname "$SUDOERS")"
-    printf '# Clavarium relay: the maintenance account may run ONE program as root.\n%s ALL=(root) NOPASSWD: %s\n' "$KEEPER" "$PROGRAM" > "$SUDOERS.new"
-    visudo -cf "$SUDOERS.new" >/dev/null || { rm -f -- "$SUDOERS.new"; refuse "the sudo rule did not pass its check"; }
-    chmod 0440 "$SUDOERS.new"; mv -f -- "$SUDOERS.new" "$SUDOERS"
+    install -d "$(dirname "$UNIT")"
+    if all_named; then
+        command -v node >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq nodejs >/dev/null; } || refuse "could not install nodejs (the router)"
+        local changed="no"
+        write_router && changed="yes"
+        cat > "$ROUTER_UNIT.new" <<UNITFILE
+[Unit]
+Description=Clavarium relay - each name to its home (443 and 80)
+After=network-online.target
+Wants=network-online.target
 
-    cat > "$RULES" <<NFT
+[Service]
+ExecStart=$(command -v node || echo /usr/bin/node) $ROUTER_JS --homes /etc/clavarium-relay/homes
+DynamicUser=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+LimitNOFILE=65536
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNITFILE
+        cmp -s "$ROUTER_UNIT.new" "$ROUTER_UNIT" 2>/dev/null || changed="yes"
+        mv -f -- "$ROUTER_UNIT.new" "$ROUTER_UNIT"
+        # The kernel rule out first: it would send 443 past the router.
+        if [ -f "$UNIT" ] || [ -f "$RULES" ]; then
+            systemctl disable --quiet --now clavarium-relay-ports.service 2>/dev/null || true
+            rm -f -- "$UNIT" "$RULES"
+        fi
+        systemctl daemon-reload
+        systemctl enable --quiet clavarium-relay-router.service
+        # Restarted only when it changed: a restart cuts every visitor of every home.
+        if [ "$changed" = "yes" ]; then systemctl restart clavarium-relay-router.service; else systemctl start clavarium-relay-router.service; fi
+        systemctl is-active --quiet clavarium-relay-router.service || refuse "the router did not start: journalctl -u clavarium-relay-router"
+    else
+        if [ -f "$ROUTER_UNIT" ]; then
+            systemctl disable --quiet --now clavarium-relay-router.service 2>/dev/null || true
+            rm -f -- "$ROUTER_UNIT"
+        fi
+        cat > "$RULES" <<NFT
 # Clavarium relay: what arrives on 443 and 80 goes to the tunnel. Written by clavarium-relay.
 table inet clavarium_relay
 delete table inet clavarium_relay
@@ -147,8 +491,7 @@ table inet clavarium_relay {
   }
 }
 NFT
-    install -d "$(dirname "$UNIT")"
-    cat > "$UNIT" <<UNITFILE
+        cat > "$UNIT" <<UNITFILE
 [Unit]
 Description=Clavarium relay - 443 and 80 go to the tunnel
 After=network-pre.target
@@ -163,10 +506,37 @@ ExecStop=/usr/sbin/nft delete table inet clavarium_relay
 [Install]
 WantedBy=multi-user.target
 UNITFILE
-    systemctl daemon-reload
-    systemctl enable --quiet clavarium-relay-ports.service
-    systemctl restart clavarium-relay-ports.service
-    systemctl is-active --quiet clavarium-relay-ports.service || refuse "the port rule could not be loaded: journalctl -u clavarium-relay-ports"
+        systemctl daemon-reload
+        systemctl enable --quiet clavarium-relay-ports.service
+        systemctl restart clavarium-relay-ports.service
+        systemctl is-active --quiet clavarium-relay-ports.service || refuse "the port rule could not be loaded: journalctl -u clavarium-relay-ports"
+    fi
+}
+
+do_repair() {
+    as_root
+    migrate
+    read_homes
+    [ "${#H_KEY[@]}" -gt 0 ] || refuse "this machine has no tunnel key: set it up with relay.sh --key ..."
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
+    local missing=""
+    command -v nft >/dev/null 2>&1 || missing="nftables"
+    [ -e "$ROOT/usr/bin/unattended-upgrade" ] || missing="$missing unattended-upgrades"
+    if [ -n "$missing" ]; then
+        # shellcheck disable=SC2086
+        apt-get update -qq && apt-get install -y -qq $missing >/dev/null || refuse "could not install:$missing"
+    fi
+    id "$TUNNEL" >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin "$TUNNEL"
+    # The keeper's commands go through its shell to "door": it needs one, and
+    # has no password and no other command.
+    if [ -s "$ROOT$KEYS/$KEEPER" ]; then id "$KEEPER" >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /bin/sh "$KEEPER"; fi
+
+    install -d "$(dirname "$SUDOERS")"
+    printf '# Clavarium relay: the maintenance account may run ONE program as root.\n%s ALL=(root) NOPASSWD: %s\n' "$KEEPER" "$PROGRAM" > "$SUDOERS.new"
+    visudo -cf "$SUDOERS.new" >/dev/null || { rm -f -- "$SUDOERS.new"; refuse "the sudo rule did not pass its check"; }
+    chmod 0440 "$SUDOERS.new"; mv -f -- "$SUDOERS.new" "$SUDOERS"
+
+    apply
 
     # Ubuntu's security updates, by themselves, every day.
     install -d "$(dirname "$UPGRADES")"
@@ -177,7 +547,16 @@ APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 APT
     systemctl enable --quiet --now unattended-upgrades.service 2>/dev/null || true
-    echo "repaired: ssh rules, sudo rule, port rule, automatic updates"
+    echo "repaired: ssh rules, sudo rule, $(all_named && echo "the router" || echo "port rule"), automatic updates"
+}
+
+do_homes() {
+    read_homes
+    local i state
+    for i in "${!H_NAMES[@]}"; do
+        state="waiting"; listening "${H_TLS[$i]}" && state="connected"
+        printf '%-8s %-40s tls %-5s http %-5s %s\n' "$([ "$i" -eq 0 ] && echo principal || echo home)" "${H_NAMES[$i]}" "${H_TLS[$i]}" "${H_HTTP[$i]}" "$state"
+    done
 }
 
 do_status() {
@@ -190,12 +569,14 @@ do_status() {
     check keeper-account "id $KEEPER >/dev/null 2>&1"
     check ssh-rules "[ -s '$SSHD_FILE' ]"
     check sudo-rule "[ -s '$SUDOERS' ]"
-    check port-rules "systemctl is-active --quiet clavarium-relay-ports.service" ok "not loaded"
+    if [ -f "$ROUTER_UNIT" ]; then check router "systemctl is-active --quiet clavarium-relay-router.service" ok "not running"
+    else check port-rules "systemctl is-active --quiet clavarium-relay-ports.service" ok "not loaded"; fi
     check os-updates "[ -s '$UPGRADES' ]" automatic off
     line="waiting for home"
     ss -ltnH "sport = :$TLS_PORT" 2>/dev/null | grep -q . && line="connected"
     say tunnel "$line"
     if [ -e "$ROOT/var/run/reboot-required" ]; then say reboot needed; else say reboot no; fi
+    if [ -s "$HOMES" ]; then echo "homes:"; do_homes | sed 's/^/  /'; fi
     [ "$bad_count" -eq 0 ]
 }
 
@@ -220,31 +601,128 @@ do_update_relay() {
     mv -f -- "$ROOT$PROGRAM.new" "$ROOT$PROGRAM"
     rm -rf -- "$dir"
     echo "clavarium-relay $version installed"
-    # The new version writes its own rules.
+    # The new version writes its own rules (and moves an older relay to its list of homes).
     exec "$ROOT$PROGRAM" repair
 }
 
 do_rotate_key() {
     as_root
     local who="${1:-}"; shift || true
-    local key="$*"
-    case "$who" in tunnel) who="$TUNNEL" ;; keeper) who="$KEEPER" ;; *) bad "rotate-key tunnel|keeper KEY" ;; esac
-    write_key "$who" "$key"
-    echo "the key of $who was replaced"
+    local key="$*" at
+    case "$who" in
+        tunnel)
+            # The principal's tunnel key; another home's key is changed by removing it and adding it again.
+            key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+            migrate; read_homes
+            [ "${#H_KEY[@]}" -gt 0 ] || refuse "this machine has no tunnel key yet: set it up with relay.sh --key ..."
+            at="$(index_of_key "$key")"; [ "$at" -le 0 ] || refuse "this key is the key of another home"
+            H_KEY[0]="$key"; write_homes; apply >/dev/null
+            echo "the key of $TUNNEL was replaced" ;;
+        keeper) write_keeper_key "$key"; echo "the key of $KEEPER was replaced" ;;
+        *) bad "rotate-key tunnel|keeper KEY" ;;
+    esac
+}
+
+do_add_home() {
+    as_root
+    local names="${1:-}" key="" n at i tls http
+    shift || true
+    while [ $# -gt 0 ]; do
+        case "$1" in --key) key="${2:-}"; shift 2 || bad "--key needs a value" ;; *) bad "unknown parameter: $1" ;; esac
+    done
+    names_ok "$names" || bad "add-home NAME --key KEY: NAME is a host name, lower case (several: separated by commas)"
+    key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+    migrate; read_homes
+    [ "${#H_KEY[@]}" -gt 0 ] || refuse "this relay has no first home yet: set it up with relay.sh --key ..."
+    [ "${H_NAMES[0]}" != "-" ] || refuse "the first home of this relay has no name yet: name-principal NAME first (its own Clavarium does it)"
+    at="$(index_of_key "$key")"
+    if [ "$at" -ge 0 ]; then
+        # The same home asking again (a join tried twice): its ports again, nothing changed.
+        [ "$at" -gt 0 ] && [ "${H_NAMES[$at]}" = "$names" ] || refuse "this key is the key of another home of this relay"
+        tls="${H_TLS[$at]}"; http="${H_HTTP[$at]}"
+    else
+        IFS=, read -r -a list <<< "$names"
+        for n in "${list[@]}"; do [ "$(index_of "$n")" -lt 0 ] || refuse "$n is served by this relay already (remove-home $n first)"; done
+        [ "${#H_NAMES[@]}" -le "$HOMES_MAX" ] || refuse "this relay serves $HOMES_MAX homes already"
+        tls=""; http=""
+        for ((i = 1; i <= HOMES_MAX; i++)); do
+            local t=$((TLS_PORT + i)) h=$((HTTP_PORT + i)) used="no" j
+            for j in "${!H_TLS[@]}"; do
+                case " ${H_TLS[$j]} ${H_HTTP[$j]} " in *" $t "*|*" $h "*) used="yes" ;; esac
+            done
+            [ "$used" = "no" ] || continue
+            # Something else of this machine on that port: the next pair.
+            listening "$t" || listening "$h" || { tls="$t"; http="$h"; break; }
+        done
+        [ -n "$tls" ] || refuse "no free pair of ports left"
+        H_NAMES+=("$names"); H_TLS+=("$tls"); H_HTTP+=("$http"); H_KEY+=("$key")
+        write_homes
+        apply >/dev/null
+    fi
+    printf 'home %s\ntls-port %s\nhttp-port %s\nfingerprint %s\n' "$names" "$tls" "$http" "$(host_print)"
+}
+
+do_remove_home() {
+    as_root
+    local name="${1:-}" at pid
+    [[ "$name" =~ $NAME_RE ]] && [ $# -eq 1 ] || bad "remove-home NAME"
+    migrate; read_homes
+    at="$(index_of "$name")"
+    [ "$at" -ge 0 ] || refuse "no home of this relay has the name $name"
+    [ "$at" -gt 0 ] || refuse "$name is the first home of this relay, its principal: it is not removed here"
+    local tls="${H_TLS[$at]}" http="${H_HTTP[$at]}"
+    H_NAMES=("${H_NAMES[@]:0:$at}" "${H_NAMES[@]:$((at + 1))}")
+    H_TLS=("${H_TLS[@]:0:$at}" "${H_TLS[@]:$((at + 1))}")
+    H_HTTP=("${H_HTTP[@]:0:$at}" "${H_HTTP[@]:$((at + 1))}")
+    H_KEY=("${H_KEY[@]:0:$at}" "${H_KEY[@]:$((at + 1))}")
+    write_homes
+    apply >/dev/null
+    # Its key no longer opens the account; a tunnel already open is cut (the SSH session holding its ports).
+    for pid in $(ss -ltnpH "( sport = :$tls or sport = :$http )" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do kill "$pid" 2>/dev/null || true; done
+    echo "the home $name was removed: its key, its ports ($tls, $http)"
+}
+
+do_name_principal() {
+    as_root
+    local names="${1:-}" at
+    [ $# -eq 1 ] && names_ok "$names" || bad "name-principal NAME"
+    migrate; read_homes
+    [ "${#H_KEY[@]}" -gt 0 ] || refuse "this relay has no first home yet: set it up with relay.sh --key ..."
+    if [ "${H_NAMES[0]}" = "$names" ]; then echo "the principal is $names already"; return; fi
+    IFS=, read -r -a list <<< "$names"
+    for n in "${list[@]}"; do at="$(index_of "$n")"; [ "$at" -le 0 ] || refuse "$n is the name of another home of this relay"; done
+    H_NAMES[0]="$names"
+    write_homes
+    apply >/dev/null
+    echo "the principal is $names"
 }
 
 do_setup() {
     as_root
-    local key="" keeper=""
+    local key="" keeper="" name="" at
     while [ $# -gt 0 ]; do
         case "$1" in
             --key) key="${2:-}"; shift 2 || bad "--key needs a value" ;;
             --keeper-key) keeper="${2:-}"; shift 2 || bad "--keeper-key needs a value" ;;
+            --name) name="${2:-}"; shift 2 || bad "--name needs a value" ;;
             *) bad "unknown parameter: $1" ;;
         esac
     done
-    write_key "$TUNNEL" "$key"
-    [ -z "$keeper" ] || write_key "$KEEPER" "$keeper"
+    key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+    [ -z "$name" ] || names_ok "$name" || bad "--name is a host name, lower case"
+    [ -z "$keeper" ] || key_ok "$keeper" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+    # Whoever runs this as root sets up the principal: its key and name, the same ports as ever.
+    # The other homes, if any, stay as they are.
+    migrate; read_homes
+    if [ "${#H_KEY[@]}" -eq 0 ]; then
+        H_NAMES=("${name:--}"); H_TLS=("$TLS_PORT"); H_HTTP=("$HTTP_PORT"); H_KEY=("$key")
+    else
+        at="$(index_of_key "$key")"; [ "$at" -le 0 ] || refuse "this key is the key of another home of this relay"
+        if [ -n "$name" ]; then at="$(index_of "$name")"; [ "$at" -le 0 ] || refuse "$name is served by this relay as another home"; H_NAMES[0]="$name"; fi
+        H_KEY[0]="$key"
+    fi
+    write_homes
+    [ -z "$keeper" ] || write_keeper_key "$keeper"
     do_repair
 }
 
@@ -257,7 +735,7 @@ do_door() {
     local verb="${words[0]:-}"
     local sudo=(sudo -n "$PROGRAM")
     case "$verb" in
-        status|repair|version) [ "${#words[@]}" -eq 1 ] || bad "$verb takes nothing"; exec "${sudo[@]}" "$verb" ;;
+        status|repair|version|homes) [ "${#words[@]}" -eq 1 ] || bad "$verb takes nothing"; exec "${sudo[@]}" "$verb" ;;
         update-os) [ "${#words[@]}" -eq 1 ] || { [ "${#words[@]}" -eq 2 ] && [ "${words[1]}" = "--reboot" ]; } || bad "update-os [--reboot]"; exec "${sudo[@]}" "${words[@]}" ;;
         update-relay) [ "${#words[@]}" -eq 2 ] && [[ "${words[1]}" =~ $VERSION_RE ]] || bad "update-relay X.Y.Z"; exec "${sudo[@]}" update-relay "${words[1]}" ;;
         rotate-key)
@@ -265,6 +743,14 @@ do_door() {
             local key="${words[*]:2}"
             key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
             exec "${sudo[@]}" rotate-key "${words[1]}" "$key" ;;
+        add-home)
+            names_ok "${words[1]:-}" || bad "add-home NAME KEY"
+            local key="${words[*]:2}"
+            key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+            exec "${sudo[@]}" add-home "${words[1]}" --key "$key" ;;
+        remove-home|name-principal)
+            [ "${#words[@]}" -eq 2 ] && names_ok "${words[1]}" || bad "$verb NAME"
+            exec "${sudo[@]}" "$verb" "${words[1]}" ;;
         *) bad "not a verb of this door: ${verb:-nothing}" ;;
     esac
 }
@@ -276,6 +762,10 @@ case "$verb" in
     update-os) do_update_os "$@" ;;
     update-relay) do_update_relay "$@" ;;
     rotate-key) do_rotate_key "$@" ;;
+    homes) do_homes ;;
+    add-home) do_add_home "$@" ;;
+    remove-home) do_remove_home "$@" ;;
+    name-principal) do_name_principal "$@" ;;
     setup) do_setup "$@" ;;
     door) do_door ;;
     version|--version) echo "$VERSION_OF_THIS" ;;

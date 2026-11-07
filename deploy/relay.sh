@@ -1,45 +1,64 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# TURNS THIS MACHINE INTO THE RELAY OF ONE CLAVARIUM. One command, parameters
-# only. Run it on a small machine that has a public address; the machine at
-# home dials out to it, so home needs no open port and no fixed address.
+# TURNS THIS MACHINE INTO THE RELAY OF A CLAVARIUM -- and, later, of other
+# Clavarium homes too. One command, parameters only. Run it on a small machine
+# that has a public address; the machine at home dials out to it, so home
+# needs no open port and no fixed address.
 #
-#   sudo deploy/relay.sh --key "ssh-ed25519 AAAA... clavarium-tunnel"
+#   sudo deploy/relay.sh --key "ssh-ed25519 AAAA... clavarium-tunnel" --name clav.example.com
 #
 #   --key LINE         the PUBLIC tunnel key of the home machine (`sudo clavarium key`)
 #   --keeper-key LINE  the PUBLIC maintenance key of the home machine (optional)
+#   --name NAME        the home's name (its domain); with it, the relay routes by
+#                      name from the start, and other homes can be added later
 #   --dry-run          check the parameters, say what would be done, do nothing
 #
 # `sudo clavarium online --relay HOST` at home runs this script here by itself,
-# over SSH, with both keys.
+# over SSH, with both keys and the name. That home is the PRINCIPAL: the only
+# one that holds the maintenance key. Run again on a relay that serves homes
+# already, this script sets up the principal again (its key, its name) and
+# leaves the other homes as they are.
 #
 # THE RELAY IS BLIND. It carries bytes: TLS starts in the browser and ends at
 # home, so this machine never sees a page, a keystroke or a password. It holds
 # no certificate and no secret of yours.
 #
 # WHAT IT SETS UP:
-#   - an account, "clavarium-tunnel", that can do ONE thing: hold two
-#     listening ports (8443, 8080) forwarded to home. No shell, no terminal,
-#     no command, no other forwarding;
-#   - a rule that sends what arrives on 443 and 80 to those two ports;
+#   - an account, "clavarium-tunnel", that can do ONE thing: hold listening
+#     ports forwarded to home. Each home has its own key there, and each key
+#     may hold its own two ports only (the principal: 8443 and 8080). No
+#     shell, no terminal, no command, no other forwarding;
+#   - what takes 443 and 80: the router, which reads the name the visitor
+#     asks for and passes the bytes, untouched, to that home's ports (a name
+#     it does not know goes nowhere); or, for a relay of one home whose name
+#     it does not know (set up before names were given), a rule that sends
+#     443 and 80 to 8443 and 8080;
 #   - the maintenance program, clavarium-relay, fetched by THIS machine from
 #     npm at the version written below and checked against the registry's
 #     sha512; with --keeper-key, an account "clavarium-keeper" that may run
-#     that program, and nothing else (status, repair, updates);
+#     that program, and nothing else (status, repair, updates, the homes);
 #   - Ubuntu's security updates, by themselves (unattended-upgrades).
 #
+# ANOTHER HOME is added from the principal, never from here and never with
+# an account of this machine: `sudo clavarium relay invite NAME` there gives
+# a one-time code, typed on the new home (`sudo clavarium online --relay
+# PRINCIPAL --domain NAME --join CODE`). The principal adds the new home's
+# PUBLIC tunnel key here (clavarium-relay add-home) and tells it its ports.
+# A second owner is thus let in by the principal's owner, and by nobody else.
+#
 # WHAT A BLIND RELAY CAN STILL DO, and how to close it: whoever controls this
-# machine receives port 80 for your name, so it could answer a certificate
-# authority's challenge itself and obtain a valid certificate for your name.
-# One DNS record closes that: a CAA record that names YOUR certificate
-# account ("accounturi="). The end of this script says it again.
+# machine receives port 80 for every name it serves, so it could answer a
+# certificate authority's challenge itself and obtain a valid certificate for
+# such a name. One DNS record per name closes that: a CAA record that names
+# THAT home's certificate account ("accounturi="). The end of this script says
+# it again, and so does each home as it goes online.
 #
 # Exit codes: 0 done; 64 bad parameters; 78 this machine is refused.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 # The version of the maintenance program this Clavarium works with.
-RELAY_VERSION="0.1.1"
+RELAY_VERSION="0.2.0-next.1"
 ACCOUNT="clavarium-tunnel"
 TLS_PORT="8443"
 HTTP_PORT="8080"
@@ -49,15 +68,16 @@ ROOT="${CLAVARIUM_RELAY_ROOT:-}"
 REGISTRY="https://registry.npmjs.org"
 [ -z "$ROOT" ] || REGISTRY="${CLAVARIUM_RELAY_REGISTRY:-$REGISTRY}"
 
-bad() { echo "relay: $*" >&2; echo "usage: relay.sh --key \"ssh-ed25519 AAAA... name\" [--keeper-key \"ssh-ed25519 AAAA... name\"] [--dry-run]" >&2; exit 64; }
+bad() { echo "relay: $*" >&2; echo "usage: relay.sh --key \"ssh-ed25519 AAAA... name\" [--keeper-key \"ssh-ed25519 AAAA... name\"] [--name NAME] [--dry-run]" >&2; exit 64; }
 refuse() { echo "relay: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
-KEY=""; KEEPER_KEY=""; DRY="no"
+KEY=""; KEEPER_KEY=""; NAME=""; DRY="no"
 while [ $# -gt 0 ]; do
     case "$1" in
         --key) KEY="${2:-}"; shift 2 || bad "--key needs a value" ;;
         --keeper-key) KEEPER_KEY="${2:-}"; [ -n "$KEEPER_KEY" ] || bad "--keeper-key needs a value"; shift 2 ;;
+        --name) NAME="${2:-}"; [ -n "$NAME" ] || bad "--name needs a value"; shift 2 ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
@@ -70,12 +90,13 @@ done
 [[ "$KEY" =~ ^ssh-ed25519\ [A-Za-z0-9+/]{68}(\ [A-Za-z0-9@._-]{1,64})?$ ]] || bad "--key is one line: ssh-ed25519, the key, and optionally a name"
 [ -z "$KEEPER_KEY" ] || [[ "$KEEPER_KEY" =~ ^ssh-ed25519\ [A-Za-z0-9+/]{68}(\ [A-Za-z0-9@._-]{1,64})?$ ]] || bad "--keeper-key is one line: ssh-ed25519, the key, and optionally a name"
 [ "$KEY" != "$KEEPER_KEY" ] || bad "the tunnel and the maintenance keys are two different keys"
+[ -z "$NAME" ] || [[ "$NAME" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$ ]] || bad "--name is a host name, lower case, like clav.example.com"
 
 if [ "$DRY" = "yes" ]; then
     cat <<PLAN
 would make this machine a relay:
   account     $ACCOUNT: may hold ports $TLS_PORT and $HTTP_PORT forwarded to home, and nothing else
-  ports       443 -> $TLS_PORT, 80 -> $HTTP_PORT
+  ports       443 -> $TLS_PORT, 80 -> $HTTP_PORT, for $([ -n "$NAME" ] && echo "the name $NAME, through the router (other names: refused)" || echo "any name (no --name: one home only)")
   sees        nothing: TLS ends at home
   program     clavarium-relay@$RELAY_VERSION from npm, checked (sha512 of the registry)
   maintenance $([ -n "$KEEPER_KEY" ] && echo "clavarium-keeper: may run clavarium-relay, and nothing else" || echo "none (no --keeper-key)")
@@ -97,10 +118,12 @@ for k in "$KEY" "$KEEPER_KEY"; do
     ssh-keygen -l -f "$check" >/dev/null 2>&1 || { rm -f -- "$check"; refuse "this is not a key the SSH tools recognise"; }
 done
 rm -f -- "$check"
-for port in 443 80 "$TLS_PORT" "$HTTP_PORT"; do
-    # (On a second run, the tunnel itself holds two of them: that is the SSH server.)
-    if ss -ltnpH "sport = :$port" 2>/dev/null | grep -v '"sshd' | grep -q .; then refuse "something already listens on port $port here: a relay needs 443 and 80 for itself"; fi
-done
+# On a relay already (a second run), its own router holds 443 and 80, and the tunnels hold theirs.
+if [ ! -s "$ROOT/etc/clavarium-relay/homes" ] && [ ! -s "$ROOT/etc/ssh/clavarium-relay/$ACCOUNT" ]; then
+    for port in 443 80 "$TLS_PORT" "$HTTP_PORT"; do
+        if ss -ltnpH "sport = :$port" 2>/dev/null | grep -v '"sshd' | grep -q .; then refuse "something already listens on port $port here: a relay needs 443 and 80 for itself"; fi
+    done
+fi
 
 step "the maintenance program, from npm"
 for tool in curl openssl tar; do command -v "$tool" >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y -qq curl openssl tar ca-certificates >/dev/null; break; }; done
@@ -129,8 +152,10 @@ install -m 0755 "$work/package/clavarium-relay" "$ROOT$PROGRAM"
 rm -rf -- "$work"
 
 step "accounts, rules, ports, updates"
-if [ -n "$KEEPER_KEY" ]; then "$ROOT$PROGRAM" setup --key "$KEY" --keeper-key "$KEEPER_KEY"
-else "$ROOT$PROGRAM" setup --key "$KEY"; fi
+setup=(setup --key "$KEY")
+[ -z "$KEEPER_KEY" ] || setup+=(--keeper-key "$KEEPER_KEY")
+[ -z "$NAME" ] || setup+=(--name "$NAME")
+"$ROOT$PROGRAM" "${setup[@]}"
 
 echo
 echo "This machine is a relay. It waits for the home machine to dial in."
@@ -138,7 +163,8 @@ echo "Compare with what the home machine printed (it must be the same):"
 echo "    $(ssh-keygen -l -f "$ROOT/etc/ssh/ssh_host_ed25519_key.pub" | cut -d' ' -f2)"
 echo "Point your name at this machine's public address (ports 443 and 80 must reach it)."
 echo
-echo "TO KEEP THIS RELAY BLIND, add a CAA record to your DNS that names your certificate"
-echo "account (accounturi=...). Without it, whoever controls this machine could obtain a"
-echo "certificate for your name. The account address is at home, after the first certificate:"
+echo "TO KEEP THIS RELAY BLIND, add a CAA record to your DNS FOR EACH NAME it serves, that"
+echo "names that home's certificate account (accounturi=...). Without it, whoever controls"
+echo "this machine could obtain a certificate for that name. The account address is at"
+echo "each home, after its first certificate:"
 echo "    sudo grep -rho '\"location\": *\"[^\"]*\"' /var/lib/caddy/caddy/acme"

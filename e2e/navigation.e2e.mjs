@@ -78,7 +78,10 @@ async function walk(t, { phone }) {
         }
     };
     const inChat = async () => (await pressed('#view-chat')) && await shown('#simple');
+    /* On a wide screen the list folds when a conversation is opened (foldOnOpen): « » » brings it back, as a person would. */
+    const listOut = async () => { if (!phone && (await page.locator('#app').getAttribute('data-list')) === 'folded') await page.locator('#fold').click(); };
     const openCoder = async () => {
+        await listOut();
         await page.locator('#items .item', { hasText: 'coder' }).click();
         await until('coder is open, on its chat', inChat);
     };
@@ -95,6 +98,7 @@ async function walk(t, { phone }) {
     if (phone) assert.equal(await page.locator('#back').getAttribute('aria-label'), 'Conversations', 'its "<" says where it leads');
     /* THE SEARCH: a step; Back and Escape close it; Escape in its field empties it first, then closes it. */
     const onList = async () => new URL(page.url()).searchParams.get('c') === null && (!phone || await shown('#list'));
+    await listOut();
     await bothWays(() => page.locator('#search-open').click(), () => shown('#search-field'), async () => !(await shown('#search')) && await onList(), 'the search');
     await page.locator('#search-open').click();
     await page.locator('#search-field').fill('COD');
@@ -172,10 +176,21 @@ async function walk(t, { phone }) {
     const line = page.locator('#simple-thread .parley-system', { hasText: 'Sent by hand: site → main' });
     await until('the line of the sending', async () => (await line.count()) > 0);
     assert.match(await line.first().innerText(), /site → main, 1 commit/);
-    await bothWays(() => line.first().locator('button.parley-act', { hasText: 'See the commit' }).click(),
+    /* News of one topic is one folded line in the chat (Parley): unfolded first, as a person would, then its button. */
+    const seeCommit = async () => {
+        const button = line.first().locator('button.parley-act', { hasText: 'See the commit' });
+        const group = page.locator('#simple-thread .parley-group', { hasText: 'Sent by hand: site → main' });
+        await until('"See the commit" at hand', async () => {
+            if (await button.isVisible()) return true;
+            if ((await group.count()) > 0 && (await group.first().getAttribute('data-open')) !== 'true') await group.first().locator('.parley-group-line').click().catch(() => {});
+            return false;
+        });
+        await button.click();
+    };
+    await bothWays(seeCommit,
         async () => (await shown('#cassets #gitview')) && (await page.locator('#gitview-from').innerText()).includes(head.slice(0, 7)) && (await pressed('#view-assets')),
         async () => (await inChat()) && !(await shown('#gitview')), 'the review of the commits sent');
-    await line.first().locator('button.parley-act', { hasText: 'See the commit' }).click();
+    await seeCommit();
     await until('the review, from the chat', async () => (await shown('#gitview')) && (await page.locator('#gitview-commits').textContent()).includes('A light'));
     assert.equal(await page.locator('#gitview-close').innerText(), '‹ Chat', 'its link says it goes back to the chat');
     await shot(page, `${tag}-review-from-chat`);
@@ -213,7 +228,10 @@ async function walk(t, { phone }) {
 
     /* THE PAGES OF THE MENU: each a step, its link "< Conversations"; Back and Escape close it. */
     for (const [item, id] of [['assets', '#assets'], ['access', '#access'], ['settings', '#settings']]) {
-        await bothWays(() => page.locator(`#nav-${item}`).click(), () => shown(id), async () => !(await shown(id)) && new URL(page.url()).searchParams.get('open') === null, `the page ${item}`);
+        await bothWays(async () => { await listOut(); await page.locator(`#nav-${item}`).click(); }, () => shown(id), async () => !(await shown(id)) && new URL(page.url()).searchParams.get('open') === null, `the page ${item}`);
+        /* Assets has no way back of its own any more (0.2.364: the list and the bottom bar lead out): Back and Escape, above. */
+        if (item === 'assets') continue;
+        await listOut();
         await page.locator(`#nav-${item}`).click();
         await until(`${item} again`, () => shown(id));
         assert.equal(await page.locator(`#${item}-close`).innerText(), '‹ Conversations');
@@ -245,7 +263,7 @@ async function walk(t, { phone }) {
     for (const [kind, title, word, opened] of [
         ['device', 'Devices', 'New device', () => shown('#share-compose')],
         ['conversation', 'Conversations', 'New conversation', () => shown('#newconv')],
-        ['asset', 'Assets', 'New asset', async () => (await shown('#assets')) && (await page.locator('#assets-detail .as-kinds button').count()) === 9],
+        ['asset', 'Assets', 'New asset', async () => (await shown('#assets')) && (await page.locator('#assets-detail .as-kinds button').count()) === 10],
     ]) {
         if (phone) await page.locator('#links-phone .lk-kinds button', { hasText: title }).click();
         const plus = page.locator(`#links [data-add="${kind}"] >> visible=true`);

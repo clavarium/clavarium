@@ -13,6 +13,26 @@
  *   --port         this machine is reachable on 80 and 443 (a server at a host,
  *                  or a router whose ports were opened).
  *
+ * SEVERAL HOMES ON ONE RELAY. The machine that set the relay up is its
+ * PRINCIPAL: it alone holds the relay's maintenance key. Another Clavarium
+ * joins the same relay without any access to it:
+ *
+ *   on the principal   sudo clavarium relay invite NAME      a one-time code (8 letters and
+ *                      digits, 30 minutes, good once) for the domain NAME
+ *   on the new home    sudo clavarium online --relay PRINCIPAL --domain NAME --join CODE
+ *
+ * The new home sends the code and its PUBLIC tunnel key to the principal over
+ * HTTPS (POST /c/relay-join, server/relayjoin.mjs, then the host program, then
+ * `clavarium relay join` here, as root). The principal checks the code, spends
+ * it, adds the key to the relay (clavarium-relay add-home, through its
+ * maintenance key) and answers with the relay's address, its host key's
+ * fingerprint and the two ports the relay gave. The new home checks that
+ * fingerprint against the relay itself, and goes online on its own ports.
+ * Nothing else is copied by hand. By hand all the same (no code): on the
+ * principal `sudo clavarium relay add-home NAME --key KEY`, which prints the
+ * line to type on the new home (--relay-ports, --relay-fingerprint).
+ * A second owner is let in this way only: by the principal's owner.
+ *
  * NOTHING IS CUT BEFORE A REAL TEST FROM THE INTERNET HAS PASSED: Let's
  * Encrypt's staging service is asked for a certificate for the domain, so it
  * really comes to this machine (through the relay, or through the open
@@ -24,6 +44,7 @@
  * `sys`, so the tests can stand in for SSH, npm and DNS.
  */
 import { spawn } from 'node:child_process';
+import { createHash, randomInt } from 'node:crypto';
 import { relayOfUnit, TUNNEL_UNIT } from './tunnel.mjs';
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, mkdtempSync, renameSync, openSync, readSync, writeSync, closeSync } from 'node:fs';
 import { promises as dns } from 'node:dns';
@@ -37,6 +58,8 @@ import { doctor, servedCert, DOCTOR_PATHS } from './doctor.mjs';
 export const PATHS = {
     access: '/var/lib/clavarium-relay-access',
     tunnel: '/var/lib/clavarium-tunnel',
+    tunnelUnit: TUNNEL_UNIT,
+    relayDone: '/var/lib/clavarium/update/relay-version',
     relayConf: '/etc/clavarium/relay.conf',
     updateConf: '/etc/clavarium/update.conf',
     unit: '/etc/systemd/system/clavarium.service',
@@ -62,11 +85,13 @@ export class Failed extends Error {}
 export const USAGE = [
     'usage: sudo clavarium online --relay HOST --domain NAME [--relay-user USER] [--relay-port N] [--admin EMAIL]',
     '                             [--relay-fingerprint SHA256:...] [--keep-setup-key] [--yes]',
+    '   or: sudo clavarium online --relay PRINCIPAL --domain NAME --join CODE [--admin EMAIL]',
+    '   or: sudo clavarium online --relay HOST --domain NAME --relay-ports TLS,HTTP --relay-fingerprint SHA256:... [--relay-port N]',
     '   or: sudo clavarium online --port --domain NAME [--admin EMAIL]',
 ].join('\n');
 
 export function parseOnline(args) {
-    const o = { askRelay: false, relay: '', user: 'root', relayPort: '22', domain: '', admin: '', fingerprint: '', keepSetupKey: false, yes: false, port: false };
+    const o = { askRelay: false, relay: '', user: 'root', relayPort: '22', domain: '', admin: '', fingerprint: '', keepSetupKey: false, yes: false, port: false, join: '', ports: null };
     const value = (i, name) => { const v = args[i + 1]; if (v === undefined || v.startsWith('--')) throw new Bad(`${name} needs a value`); return v; };
     for (let i = 0; i < args.length; i++) {
         const a = args[i];
@@ -80,8 +105,24 @@ export function parseOnline(args) {
             case '--keep-setup-key': o.keepSetupKey = true; break;
             case '--yes': o.yes = true; break;
             case '--port': o.port = true; break;
+            case '--join': o.join = normalCode(value(i, a)); i++; if (!CODE.test(o.join)) throw new Bad('--join is the code the principal gave: 8 letters and digits, like ABCD-EFGH'); break;
+            case '--relay-ports': {
+                const m = /^(\d{4,5}),(\d{4,5})$/.exec(value(i, a)); i++;
+                if (!m || [m[1], m[2]].some((p) => +p < 1024 || +p > 65535)) throw new Bad('--relay-ports is the two ports the relay gave: TLS,HTTP');
+                o.ports = { tls: m[1], http: m[2] }; break;
+            }
             default: throw new Bad(`unknown parameter: ${a}`);
         }
+    }
+    if (o.join || o.ports) {
+        /* A home the principal adds: the relay is not set up from here, and no account of it is used. */
+        if (o.join && o.ports) throw new Bad('--join or --relay-ports, not both');
+        if (!o.relay) throw new Bad(o.join ? '--join goes with --relay PRINCIPAL: the name of the Clavarium that gave the code' : '--relay-ports goes with --relay HOST');
+        if (o.keepSetupKey || o.user !== 'root') throw new Bad('--relay-user and --keep-setup-key are for the relay\'s first home; a home that joins uses no account of the relay');
+        if (o.join && !DOMAIN.test(o.relay)) throw new Bad('--relay is the NAME of the Clavarium that gave the code (it is asked over HTTPS)');
+        if (o.join && (o.fingerprint || o.relayPort !== '22')) throw new Bad('with --join, the principal says the relay\'s address and fingerprint');
+        if (o.ports && !o.fingerprint) throw new Bad('--relay-ports goes with --relay-fingerprint (what the principal printed)');
+        if (o.join) o.principal = o.relay;
     }
     if (o.relay && o.port) throw new Bad('say how it will be reached: --relay HOST or --port, not both');
     /* Neither: the usual case -- the domain points to the relay, which is
@@ -168,6 +209,15 @@ export function readRelayConf(P = PATHS) {
     try { for (const line of readFileSync(P.relayConf, 'utf8').split('\n')) { const m = /^([A-Z_]+)=(.*)$/.exec(line.trim()); if (m) conf[m[1]] = m[2]; } } catch { return null; }
     return conf.HOST ? conf : null;
 }
+/* The relay of a machine put online before relay.conf existed (07-11, found on a test machine): only
+   its tunnel unit says it. Read there, as the updater does (tunnel.mjs, relayOfUnit); never written back. */
+export function relayOf(P = PATHS) {
+    const conf = readRelayConf(P);
+    if (conf) return conf;
+    let unit = null;
+    try { unit = relayOfUnit(readFileSync(P.tunnelUnit ?? TUNNEL_UNIT, 'utf8')); } catch { return null; }
+    return unit ? { HOST: unit.relay, PORT: unit.port } : null;
+}
 function writeRelayConf(P, conf) {
     mkdirSync(join(P.relayConf, '..'), { recursive: true });
     writeFileSync(`${P.relayConf}.new`, `# The relay of this Clavarium. Written by clavarium online.\n${Object.entries(conf).map(([k, v]) => `${k}=${v}`).join('\n')}\n`, { mode: 0o644 });
@@ -196,12 +246,19 @@ export async function keepRelayCurrent(sys, P = PATHS, { done, unit = TUNNEL_UNI
     let conf = readRelayConf(P);
     if (!conf) { try { const at = relayOfUnit(readFileSync(unit, 'utf8')); if (at) conf = { HOST: at.relay, PORT: at.port }; } catch { /* no tunnel */ } }
     if (!conf) return { state: 'none' };
+    /* A home the principal added: the relay is the principal's to keep. */
+    if (conf.ROLE === 'home') return { state: 'none' };
     if (!existsSync(keyFiles(P).keeper)) return { state: 'no-key' };
     const version = relayVersion(P);
     if (!version) return { state: 'none' };
     let last = '';
     try { last = readFileSync(done, 'utf8').trim(); } catch { /* never brought */ }
     if (last === version) return { state: 'current', version };
+    /* A new GENERATION of the relay program (0.1 -> 0.2: one relay for several homes, 07-11) is never brought
+       by the updater: the owner brings it once, `sudo clavarium relay update-relay`, when they want it.
+       Fixes within a generation still come by themselves. */
+    const gen = (v) => String(v).split('.').slice(0, 2).join('.');
+    if (gen(version) !== gen(last || '0.1.0')) return { state: 'held', version, why: `the relay program ${version} is a new generation: bring it with sudo clavarium relay update-relay` };
     const r = await keeper(sys, P, conf, ['update-relay', version]);
     if (r.code !== 0) {
         /* sys.run says { code, out, err } (realSys). */
@@ -407,6 +464,7 @@ async function setUpRelay(sys, P, o, keys) {
     const f = keyFiles(P);
     const conf = { HOST: o.relay, PORT: o.relayPort, USER: o.user };
     const prior = readRelayConf(P);
+    if (prior?.ROLE === 'home') throw new Refused(`this machine is a home of the relay ${prior.HOST}, added by its principal: it does not set a relay up`);
     /* Run again after the relay was set up (a test that failed, a DNS record
        made late): the maintenance account answers, the setup key is not needed. */
     if (prior && prior.HOST === o.relay && existsSync(f.knownHosts)) {
@@ -447,7 +505,7 @@ async function setUpRelay(sys, P, o, keys) {
        input, a program it starts (apt-get...) could eat the rest of it. */
     const runner = 'f="$(mktemp)"; cat > "$f"; bash "$f" "$@" </dev/null; s=$?; rm -f -- "$f"; exit $s';
     const r = await sys.run(['ssh', ...sshOptions(f.setup, f.knownHosts, o.relayPort), `${o.user}@${o.relay}`,
-        `${sudo}bash -c ${quote(runner)} relay.sh --key ${quote(keys.tunnel)} --keeper-key ${quote(keys.keeper)}`], { input: script, stream: true });
+        `${sudo}bash -c ${quote(runner)} relay.sh --key ${quote(keys.tunnel)} --keeper-key ${quote(keys.keeper)} --name ${quote(o.domain)}`], { input: script, stream: true });
     if (r.code !== 0) throw new Failed(`the relay could not be set up (exit ${r.code}, above: why). This machine is still in local mode`);
     const next = { ...conf, SETUP_KEY: 'kept' };
     writeRelayConf(P, next);
@@ -459,11 +517,52 @@ async function setUpRelay(sys, P, o, keys) {
     return readRelayConf(P);
 }
 
-/* The tunnel, for the test only: the service comes with server mode. */
+/* A HOME THE PRINCIPAL ADDED: the relay's host key checked against the fingerprint the principal gave
+   (`from`: who gave it), kept for the tunnel, and the relay and its ports kept in relay.conf. The relay
+   is maintained by its principal: this machine holds no key of its maintenance account. */
+async function useRelay(sys, P, o, at, from) {
+    o.relay = at.host; o.relayPort = String(at.port); o.ports = { tls: String(at.tls), http: String(at.http) };
+    const scanned = await scanRelay(sys, o, sys.now() + WAIT_MS);
+    const { file: pending, print } = await fingerprintOf(sys, P, scanned);
+    rmSync(pending, { force: true });
+    if (print !== at.fingerprint) throw new Refused(`${o.relay} answers with the key ${print}, not ${at.fingerprint} (said by ${from}): it may not be the relay. Nothing was changed`);
+    sys.print(`The relay ${o.relay}: its fingerprint is the one ${from} gave. Its ports for this machine: ${o.ports.tls} and ${o.ports.http}.`);
+    writeFileSync(join(P.tunnel, 'known_hosts'), `${scanned}\n`, { mode: 0o644 });
+    await sys.run(['chown', 'clavarium-tunnel:clavarium-tunnel', join(P.tunnel, 'known_hosts')]);
+    writeRelayConf(P, { HOST: o.relay, PORT: o.relayPort, TLS_PORT: o.ports.tls, HTTP_PORT: o.ports.http, ROLE: 'home', ...(o.principal ? { PRINCIPAL: o.principal } : {}) });
+}
+
+/* --join: the code and this machine's PUBLIC tunnel key to the principal, over HTTPS (its certificate
+   checked as any browser would); its answer is read field by field. Run again after a failed test: the
+   relay and the ports kept from the first time, no code needed. */
+async function joinRelay(sys, P, o, keys) {
+    const prior = readRelayConf(P);
+    if (prior?.ROLE === 'home' && prior.TLS_PORT && existsSync(join(P.tunnel, 'known_hosts'))) {
+        Object.assign(o, { relay: prior.HOST, relayPort: prior.PORT, ports: { tls: prior.TLS_PORT, http: prior.HTTP_PORT } });
+        sys.print(`This machine joined the relay ${prior.HOST} already (ports ${prior.TLS_PORT} and ${prior.HTTP_PORT}).`);
+        return;
+    }
+    sys.print(`Asking ${o.principal} to add this machine to its relay (code ${o.join.slice(0, 4)}-${o.join.slice(4)})...`);
+    let r;
+    try { r = await sys.post(`https://${o.principal}${JOIN_PATH}`, { code: o.join, key: keys.tunnel.split(' ').slice(0, 2).join(' ') }); } catch (error) { throw new Failed(`${o.principal} did not answer over HTTPS: ${error.message}`); }
+    const said = typeof r?.body?.error === 'string' ? r.body.error.slice(0, 200) : '';
+    if (r?.status === 403) throw new Refused(`${o.principal} refused the code${said ? `: ${said}` : ''}. Ask its owner for a new one: sudo clavarium relay invite ${o.domain}`);
+    if (r?.status === 429) throw new Failed(`${o.principal} says too many tries: wait a minute, then run this again`);
+    if (r?.status !== 200) throw new Failed(`${o.principal} did not add this machine (HTTP ${r?.status})${said ? `: ${said}` : ''}`);
+    const a = r.body ?? {};
+    if (a.name !== o.domain) throw new Refused(`the code was made for ${String(a.name).slice(0, 80)}, not ${o.domain}`);
+    const port = (v, lo) => Number.isInteger(v) && v >= lo && v <= 65535;
+    if (!HOST.test(a.relay?.host ?? '') || !port(a.relay?.port, 1) || !PRINT.test(a.relay?.fingerprint ?? '') || !port(a.ports?.tls, 1024) || !port(a.ports?.http, 1024)) throw new Failed(`${o.principal} answered something else than a relay and two ports`);
+    await useRelay(sys, P, o, { host: a.relay.host, port: a.relay.port, fingerprint: a.relay.fingerprint, tls: a.ports.tls, http: a.ports.http }, o.principal);
+}
+
+/* The tunnel, for the test only: the service comes with server mode. The relay's first home on 8443
+   and 8080 (every address, as ever); a home it added on its own ports, on the relay's loopback. */
 function startTunnel(sys, P, o) {
     const lines = [];
+    const forwards = o.ports ? ['-R', `127.0.0.1:${o.ports.tls}:127.0.0.1:443`, '-R', `127.0.0.1:${o.ports.http}:127.0.0.1:80`] : ['-R', '*:8443:127.0.0.1:443', '-R', '*:8080:127.0.0.1:80'];
     const proc = sys.start(['sudo', '-u', 'clavarium-tunnel', 'ssh', '-N', '-T', ...sshOptions(join(P.tunnel, 'key'), join(P.tunnel, 'known_hosts'), o.relayPort),
-        '-o', 'ExitOnForwardFailure=yes', '-R', '*:8443:127.0.0.1:443', '-R', '*:8080:127.0.0.1:80', `clavarium-tunnel@${o.relay}`], { onLine: (l) => lines.push(l) });
+        '-o', 'ExitOnForwardFailure=yes', ...forwards, `clavarium-tunnel@${o.relay}`], { onLine: (l) => lines.push(l) });
     return { proc, lines };
 }
 
@@ -477,6 +576,7 @@ async function switchToServer(sys, P, o) {
     const port = readConf(P.updateConf).PORT;
     const argv = ['/bin/bash', join(app, 'deploy', 'install.sh'), '--keep-release', '--domain', o.domain, '--operator', o.admin, '--port', port];
     if (o.relay) argv.push('--relay', o.relay, '--relay-port', o.relayPort, '--relay-installed');
+    if (o.relay && o.ports) argv.push('--relay-ports', `${o.ports.tls},${o.ports.http}`);
     sys.print('');
     sys.print('Switching to server mode: HTTPS, sign-in, the administrator...');
     const r = await sys.run(argv, { stream: true, inherit: true, env: { CLAVARIUM_PASSWORDS_TO: P.passwords } });
@@ -514,7 +614,9 @@ export async function online(o, sys, P = PATHS) {
     }
     await checkDns(sys, o);
     await portsFree(sys);
-    if (o.relay) await setUpRelay(sys, P, o, keys);
+    if (o.join) await joinRelay(sys, P, o, keys);
+    else if (o.ports) await useRelay(sys, P, o, { host: o.relay, port: o.relayPort, fingerprint: o.fingerprint, tls: o.ports.tls, http: o.ports.http }, 'the principal');
+    else if (o.relay) await setUpRelay(sys, P, o, keys);
     let tunnel = null;
     try {
         if (o.relay) {
@@ -532,7 +634,13 @@ export async function online(o, sys, P = PATHS) {
         await doctor(sys, {}, { ...DOCTOR_PATHS, unit: P.unit, relayConf: P.relayConf });
         sys.print('');
         sys.print(`Online: https://${o.domain}`);
-        if (o.relay) sys.print('The relay is watched from here: sudo clavarium relay status');
+        if (o.relay && !o.ports) sys.print('The relay is watched from here: sudo clavarium relay status');
+        if (o.relay && o.ports) {
+            sys.print(`The relay is kept by its principal${o.principal ? `, ${o.principal}` : ''}.`);
+            sys.print(`TO KEEP THE RELAY BLIND for ${o.domain}, add a CAA record to your DNS that names this machine's`);
+            sys.print('certificate account (accounturi=...); without it, whoever controls the relay could obtain a');
+            sys.print(`certificate for ${o.domain}. The account address: sudo grep -rho '"location": *"[^"]*"' /var/lib/caddy/caddy/acme`);
+        }
         sys.print('Anything wrong later: sudo clavarium doctor (it says what to do; --fix repairs what it can)');
         const pw = existsSync(P.passwords) ? readFileSync(P.passwords, 'utf8') : '';
         sys.print('');
@@ -543,12 +651,138 @@ export async function online(o, sys, P = PATHS) {
     } finally { rmSync(P.passwords, { force: true }); }
 }
 
+/* ------------------------- other homes on this relay ------------------------- */
+/* 31 letters and digits a person can read and type: no I, L, O, 0, 1. Eight of them: some 10^12 codes,
+   against WRONG_MAX wrong tries before every invitation is cancelled. */
+export const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const CODE = /^[A-HJKMNP-Z2-9]{8}$/;
+export const INVITE_MS = 30 * 60_000;
+export const WRONG_MAX = 10;
+export const JOIN_PATH = '/c/relay-join';
+export const normalCode = (s) => String(s ?? '').toUpperCase().replace(/[\s-]/g, '');
+const hashOf = (code) => createHash('sha256').update(code).digest('hex');
+const invitesFile = (P) => join(P.access, 'invites.json');
+/* Root's, in the access folder (0700): only the hash of each code is kept, with its name and its end. */
+function readInvites(P, now) {
+    let j = {};
+    try { j = JSON.parse(readFileSync(invitesFile(P), 'utf8')); } catch { /* none yet */ }
+    return {
+        invites: (Array.isArray(j.invites) ? j.invites : []).filter((x) => x && /^[0-9a-f]{64}$/.test(x.hash) && DOMAIN.test(x.name ?? '') && x.until > now),
+        wrong: (Array.isArray(j.wrong) ? j.wrong : []).filter((t) => typeof t === 'number' && t > now - INVITE_MS),
+    };
+}
+function writeInvites(P, v) {
+    mkdirSync(P.access, { recursive: true, mode: 0o700 });
+    writeFileSync(`${invitesFile(P)}.new`, `${JSON.stringify(v)}\n`, { mode: 0o600 });
+    renameSync(`${invitesFile(P)}.new`, invitesFile(P));
+}
+/* Only the principal adds homes: the machine that holds the relay's maintenance key, online. */
+function principal(P) {
+    const conf = relayOf(P);
+    if (!conf) throw new Refused('this machine has no relay (sudo clavarium online --relay HOST --domain NAME)');
+    if (conf.ROLE === 'home') throw new Refused(`this machine is a home of the relay ${conf.HOST}: only its principal${conf.PRINCIPAL ? ` (${conf.PRINCIPAL})` : ''} adds or removes homes`);
+    const domain = serverModeOf(P);
+    if (!domain) throw new Refused('this machine is not online yet (sudo clavarium online ...)');
+    return { conf, domain };
+}
+
+/* `relay invite NAME`: a one-time code for the home that will be NAME. A new one for the same name
+   replaces the one before. */
+export async function invite(sys, P, name) {
+    if (!DOMAIN.test(name ?? '')) throw new Bad('relay invite NAME: the domain of the new home, lower case, like clav2.example.com');
+    const { conf, domain } = principal(P);
+    if (name === domain) throw new Bad(`${name} is this machine`);
+    const now = sys.now();
+    const v = readInvites(P, now);
+    const code = Array.from({ length: 8 }, () => CODE_LETTERS[randomInt(CODE_LETTERS.length)]).join('');
+    v.invites = [...v.invites.filter((x) => x.name !== name), { hash: hashOf(code), name, until: now + INVITE_MS }];
+    writeInvites(P, v);
+    const shown = `${code.slice(0, 4)}-${code.slice(4)}`;
+    sys.print(`One-time code for ${name} (good once, for ${INVITE_MS / 60_000} minutes):   ${shown}`);
+    sys.print(`On that machine (Clavarium installed; ${name} leading to the relay, like ${domain}), type:`);
+    sys.print(`    sudo clavarium online --relay ${domain} --domain ${name} --join ${shown}`);
+    sys.print(`It joins the relay ${conf.HOST} on ports of its own. Then, for ${name}, a CAA record as for ${domain} keeps the relay blind.`);
+    return { code: shown, name };
+}
+
+/* The principal's name told to the relay (a relay set up before 0.2.0 knew none), then the home added.
+   What the relay printed, read line by line. */
+async function addHomeOnRelay(sys, P, conf, domain, name, key) {
+    const older = (r) => (/not a verb|unknown verb/.test(`${r.err ?? ''}`) ? ': the relay\'s program is older (sudo clavarium relay update-relay)' : '');
+    const n = await keeper(sys, P, conf, ['name-principal', domain]);
+    if (n.code !== 0) throw new Failed(`the relay did not take this machine's name (${tail(n)})${older(n)}`);
+    const r = await keeper(sys, P, conf, ['add-home', name, key]);
+    if (r.code === 78) throw new Refused(`the relay refused: ${tail(r).replace(/^clavarium-relay: REFUSED: /, '')}`);
+    if (r.code !== 0) throw new Failed(`the relay did not add ${name} (${tail(r)})${older(r)}`);
+    const get = (k) => new RegExp(`^${k} (\\S+)$`, 'm').exec(r.out ?? '')?.[1] ?? '';
+    const tls = Number(get('tls-port')); const http = Number(get('http-port')); const fingerprint = get('fingerprint');
+    if (!(tls >= 1024 && tls <= 65535 && http >= 1024 && http <= 65535) || !PRINT.test(fingerprint)) throw new Failed('the relay\'s answer is not two ports and a fingerprint');
+    return { name, relay: { host: conf.HOST, port: Number(conf.PORT), fingerprint }, ports: { tls, http } };
+}
+
+/* `relay join CODE KEY`, as root, for the server's /c/relay-join (through the host program): the code
+   must be one of the owner's, unused and not expired. It is spent BEFORE the relay is asked (good once,
+   whatever happens next); a wrong one is counted, and WRONG_MAX of them within INVITE_MS cancel every
+   invitation. The answer holds nothing secret: the relay's address, its public fingerprint, two ports. */
+export async function joinWithCode(sys, P, given, key) {
+    const code = normalCode(given);
+    if (!CODE.test(code) || !KEY.test(key ?? '')) throw new Bad('relay join CODE KEY');
+    const { conf, domain } = principal(P);
+    const now = sys.now();
+    const v = readInvites(P, now);
+    const at = v.invites.findIndex((x) => x.hash === hashOf(code));
+    if (at < 0) {
+        v.wrong.push(now);
+        const cancel = v.wrong.length >= WRONG_MAX;
+        if (cancel) v.invites = [];
+        writeInvites(P, v);
+        throw new Refused(cancel ? 'not a valid code; too many wrong codes: every invitation was cancelled' : 'not a valid code (wrong, used or expired)');
+    }
+    const [spent] = v.invites.splice(at, 1);
+    writeInvites(P, v);
+    return addHomeOnRelay(sys, P, conf, domain, spent.name, key);
+}
+
 /* `sudo clavarium relay VERB` */
 export async function relayCommand(args, sys, P = PATHS) {
-    const conf = readRelayConf(P);
+    const conf = relayOf(P);
     if (!conf) throw new Refused('this machine has no relay (sudo clavarium online --relay HOST --domain NAME)');
     const [verb, ...rest] = args;
+    if (conf.ROLE === 'home') throw new Refused(`this machine is a home of the relay ${conf.HOST}: the relay is kept by its principal${conf.PRINCIPAL ? `, ${conf.PRINCIPAL}` : ''}`);
     switch (verb) {
+        case 'invite': {
+            if (rest.length !== 1) throw new Bad('relay invite NAME');
+            await invite(sys, P, rest[0]);
+            return;
+        }
+        case 'join': {
+            if (rest.length !== 2) throw new Bad('relay join CODE KEY');
+            sys.print(JSON.stringify(await joinWithCode(sys, P, rest[0], rest[1])));
+            return;
+        }
+        case 'add-home': {
+            const [name, flag, ...words] = rest;
+            const key = words.join(' ');
+            if (!DOMAIN.test(name ?? '') || flag !== '--key' || !KEY.test(key)) throw new Bad('relay add-home NAME --key "ssh-ed25519 AAAA..." (the new home\'s tunnel key: sudo clavarium key tunnel, there)');
+            const { domain } = principal(P);
+            const a = await addHomeOnRelay(sys, P, conf, domain, name, key);
+            sys.print(`${name} is a home of the relay ${a.relay.host}, on its ports ${a.ports.tls} and ${a.ports.http}. On that machine, type:`);
+            sys.print(`    sudo clavarium online --relay ${a.relay.host} --domain ${name} --relay-ports ${a.ports.tls},${a.ports.http} --relay-fingerprint ${a.relay.fingerprint}${a.relay.port !== 22 ? ` --relay-port ${a.relay.port}` : ''}`);
+            return;
+        }
+        case 'remove-home': {
+            if (rest.length !== 1 || !DOMAIN.test(rest[0])) throw new Bad('relay remove-home NAME');
+            principal(P);
+            const r = await keeper(sys, P, conf, ['remove-home', rest[0]], { stream: true });
+            if (r.code !== 0) throw new Failed(`the relay did not remove ${rest[0]} (exit ${r.code})`);
+            return;
+        }
+        case 'homes': {
+            if (rest.length) throw new Bad('relay homes takes nothing');
+            const r = await keeper(sys, P, conf, ['homes'], { stream: true });
+            if (r.code !== 0) throw new Failed(`the relay answered with exit ${r.code}`);
+            return;
+        }
         case 'forget-setup-key': return forgetSetupKey(sys, P, conf);
         case 'status': case 'repair': case 'update-os': {
             if (rest.length && !(verb === 'update-os' && rest.length === 1 && rest[0] === '--reboot')) throw new Bad(`relay ${verb} takes nothing`);
@@ -561,9 +795,11 @@ export async function relayCommand(args, sys, P = PATHS) {
             if (!/^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/.test(version ?? '')) throw new Bad('relay update-relay [X.Y.Z]');
             const r = await keeper(sys, P, conf, ['update-relay', version], { stream: true });
             if (r.code !== 0) throw new Failed(`the relay did not update (exit ${r.code})`);
+            /* Said to the updater (keepRelayCurrent): this generation is the owner's choice now, its fixes come by themselves. */
+            try { const done = P.relayDone ?? '/var/lib/clavarium/update/relay-version'; writeFileSync(`${done}.new`, `${version}\n`); renameSync(`${done}.new`, done); } catch { /* the updater asks again: no harm */ }
             return;
         }
-        default: throw new Bad('usage: sudo clavarium relay status | repair | update-os [--reboot] | update-relay [X.Y.Z] | forget-setup-key');
+        default: throw new Bad('usage: sudo clavarium relay status | repair | update-os [--reboot] | update-relay [X.Y.Z] | forget-setup-key | homes | invite NAME | add-home NAME --key KEY | remove-home NAME');
     }
 }
 
@@ -601,6 +837,13 @@ export function realSys() {
             timer = setTimeout(done, ms);
             try { tty = createReadStream('/dev/tty'); tty.on('data', (d) => { if (d.includes(10) || d.includes(13)) done(); }); tty.on('error', () => {}); } catch { /* no keyboard: the timer alone */ }
         }),
+        /* JSON to an address in https, its certificate checked; never a redirect. */
+        post: async (url, body) => {
+            const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(60_000) });
+            let json = null;
+            try { json = await r.json(); } catch { /* not JSON */ }
+            return { status: r.status, body: json };
+        },
         hasKeyboard: () => { try { closeSync(openSync('/dev/tty', 'r')); return true; } catch { return false; } },
         askLine: async (question) => {
             let fd;

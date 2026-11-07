@@ -2124,6 +2124,7 @@
     let voiceOn = false;
     const chatVoice = () => (voiceOn && window.clavariumVoice ? window.clavariumVoice : null);
     async function offerVoice() {
+        if (DEVICE && !pairing) return;          /* asked again by start(), once there is a pairing to ask with */
         voiceOn = window.clavariumVoice ? await window.clavariumVoice.available() : false;
         $('mic').hidden = $('auto').hidden = !voiceOn;
         keysForChat();
@@ -3017,6 +3018,8 @@
     const deviceLang = () => (navigator.language || 'en');
     let chatWords = null;
     async function readWords() {
+        /* A device asks its own door only once it has its pairing (start): asked before, it was refused (401), and kept empty. */
+        if (DEVICE && !pairing) return {};
         if (!chatWords) chatWords = await fetch(`${API}/talk/words?${new URLSearchParams({ lang: deviceLang() })}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
         return chatWords;
     }
@@ -7303,6 +7306,8 @@
             refused: () => ['Relay not kept up to date: it refuses this server\'s key', 'Once: sudo clavarium key on this server, then relay.sh again on the relay, with --key and --keeper-key.', true],
             'no-key': () => ['Relay not kept up to date: no maintenance key', 'sudo clavarium online --relay HOST sets one up.', true],
             failed: (r) => [`Relay update failed: ${r.why ?? 'unknown'} · tried again later`, '', true],
+            /* 07-11: a new generation of the relay (several homes) waits for the owner, never brought by itself. */
+            held: (r) => [`Relay ${r.version} ready, not installed`, 'When you want it: sudo clavarium relay update-relay', false],
         };
         const relayBox = $('updates-relay');
         relayBox.hidden = !relay || !RELAY_SAID[relay.state];
@@ -8922,7 +8927,7 @@
         await paintAssets();
     });
     setConnexionProvider('google');
-    getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = { ...d.supported, classic: ['mail', 'calendar', 'contacts'] }; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
+    if (!DEVICE) getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = { ...d.supported, classic: ['mail', 'calendar', 'contacts'] }; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
     $('list-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true; $('cassets-error').hidden = true;

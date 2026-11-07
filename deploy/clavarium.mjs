@@ -11,7 +11,9 @@
  *   sudo clavarium online --relay HOST --domain NAME [...]   see deploy/online.mjs
  *   sudo clavarium online --port --domain NAME [...]
  *   sudo clavarium key                                       the public keys, text and QR
+ *   sudo clavarium online --relay PRINCIPAL --domain NAME --join CODE   another home on the same relay
  *   sudo clavarium relay status | repair | update-os | update-relay | forget-setup-key
+ *   sudo clavarium relay homes | invite NAME | add-home NAME --key KEY | remove-home NAME
  *   sudo clavarium doctor [--fix]                            what works, what does not, what to do
  *   sudo clavarium password EMAIL                            a new password for an administrator
  *   sudo clavarium client-id [ID]                            the sign-in client id (no ID: a random one)
@@ -70,7 +72,9 @@ if (verb !== 'install') {
         + '  sudo clavarium online --relay HOST --domain NAME                  then online, through a relay of yours\n'
         + '  sudo clavarium online --port --domain NAME                        or with ports 80 and 443 open\n'
         + '  sudo clavarium key                                                the public keys again (text and QR)\n'
+        + '  sudo clavarium online --relay PRINCIPAL --domain NAME --join CODE  another home on the relay of PRINCIPAL\n'
         + '  sudo clavarium relay status|repair|update-os|update-relay|forget-setup-key\n'
+        + '  sudo clavarium relay homes|invite NAME|add-home NAME --key KEY|remove-home NAME\n'
         + '  sudo clavarium doctor [--fix]                                     what works, what does not, what to do\n'
         + '  sudo clavarium password EMAIL                                     a new password for an administrator\n'
         + '  sudo clavarium client-id [ID]                                     the sign-in client id (no ID: a random one)\n\n'

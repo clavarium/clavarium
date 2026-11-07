@@ -9,7 +9,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     const alerted = [];
     const b = await bench(t, { alertSend: async (subscription, payload) => { alerted.push(JSON.parse(payload)); } });
     const me = await b.person({ locale: 'fr-FR' });
-    await me.create('helper');
+    await me.create('helper', 'Shell', { chat: false });
     await me.api('/api/alerts', { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/a-device', keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) } }, label: 'Phone' });
     /* Off, and said plainly what turning it on means. */
     await me.page.locator('#folders').click();
@@ -19,6 +19,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.until('it says what the tool will be asked', async () => /it is told to talk to you here, in French/.test(await me.page.locator('#talk-declare').innerText().catch(() => '')));
     /* What its tool is told about where it is (guide.mjs): the exact text behind "see", made from these
        settings; the owner's lines, as text; in its machine, and pointed to from its own instruction file. */
+    await me.chapter('general');          /* its chapter, folded until opened (Settings pages, 05-11) */
     await me.page.locator('#guide-see').click();
     await me.until('the guide says its chat is on', async () => /^- Chat with the person: on\. Parley is installed: run parley guide\. When you were given Parley as your own tools/m.test(await me.page.locator('#guide-text').innerText().catch(() => '')));
     await me.page.fill('#guide-lines', 'Answer in <b>French</b>.');
@@ -45,8 +46,8 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     /* Installed by the server, before: in the machine's /usr/local (here, under the stand-in machine's root, whose PATH the shell is given). */
     assert.match(readFileSync(join(process.env.FAKE_VM_DIR, 'vms', 'clv-helper', 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-docket-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-binder-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
     await me.type('clear; export PATH="$FAKE_VM_ROOT"/usr/local/bin:$PATH; grep -c sha256 "$FAKE_VM_ROOT"/tools/index.json');
-    /* One checksum per tool of the index: Parley, Docket and Binder. */
-    await me.printed('3', 30_000);
+    /* One checksum per tool of the index: Parley, Docket, Binder and Tether (0.2.265: the tools under the relay). */
+    await me.printed('4', 30_000);
     /* It says where it is, and asks, with choices; it does not wait. */
     await me.type('clear; parley status working "on the cover" && parley ask "Blue or red cover?" blue red >/dev/null && echo posted');
     await me.printed('posted');
@@ -57,7 +58,8 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.page.locator('#view-chat').click();
     const asked = me.page.locator('#simple-thread .parley-said[data-kind=ask]');
     await me.until('the question is on the chat screen, in French', async () => (await asked.innerText().catch(() => '')).includes('Blue or red cover?') && (await asked.innerText()).includes('Il vous demande'));
-    assert.equal(await me.page.locator('#simple-thread .parley-send').innerText(), 'Envoyer');
+    /* Send is an arrow (Parley): its word, in French, is its label. */
+    assert.equal(await me.page.locator('#simple-thread .parley-send').getAttribute('aria-label'), 'Envoyer');
     assert.equal(await me.page.locator('#simple-says').isVisible(), false, 'what its terminal shows is not on the chat screen');
     /* Above the box: its choices first, then the owner's own ready answers -- the first ones, as they came, say nothing of this chat and are not offered. */
     const quickly = () => me.page.locator('#simple-thread .parley-replies button').allInnerTexts();
@@ -80,7 +82,8 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     t.after(() => { delete process.env.FAKE_VM_LOG; });
     await asked.locator('button', { hasText: 'blue' }).click();
     await me.until('the answer is in the thread, and the choices are gone', async () => (await me.page.locator('#simple-thread .parley-said[data-from=person] .parley-text').first().innerText().catch(() => '')) === 'blue' && (await asked.locator('.parley-choices button').count()) === 0);
-    assert.match(await me.page.locator('#simple-thread .parley-said[data-from=person] .parley-inreply').first().innerText(), /En réponse à : Blue or red cover\?/, 'the answer says which question');
+    /* The question says its answer, ticked in it; the answer just under it no longer quotes it (Parley 0.17.67). */
+    assert.equal(await asked.locator('.parley-answered .parley-choice-taken').innerText(), 'blue', 'the question says which answer');
     await me.until('its choices left the quick answers', async () => (await quickly()).length === 0);
     /* With a keyboard: Shift+Enter is a new line, Enter sends, and the cursor stays in the box. */
     const chatBox = me.page.locator('#simple-thread .parley-box');
@@ -148,7 +151,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await report.locator('.parley-md').click();
     assert.equal(await report.getAttribute('aria-expanded'), 'true');
     assert.deepEqual(await me.page.locator('#simple-thread .parley-trail[data-for=s1] .parley-step').allInnerTexts(), ['counting the late orders'], 'opened above it, as they came');
-    /* The day, and the time of a message on hover; on a touch screen, a long press. */
+    /* The day, and the time of a message on hover; on a touch screen, a tap. */
     assert.ok((await me.page.locator('#simple-thread .parley-divider').allInnerTexts()).includes("Aujourd'hui"));
     const mine = me.page.locator('#simple-thread .parley-said[data-from=person]').first();
     const opacity = () => mine.locator('.parley-time').evaluate((e) => getComputedStyle(e).opacity);
@@ -158,8 +161,10 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     assert.match(await mine.locator('.parley-time').innerText(), /^\d{1,2}:\d{2}/);
     await me.page.mouse.move(0, 0);
     const pressed = me.page.locator('#simple-thread .parley-said[data-kind=ask]').first();
+    /* A long press is the browser's (it selects the text, Parley #38): a short tap shows its time. */
     await pressed.dispatchEvent('pointerdown', { pointerType: 'touch', bubbles: true });
-    await me.until('its time, after a long press', async () => (await pressed.getAttribute('data-reveal')) === 'true');
+    await pressed.dispatchEvent('pointerup', { pointerType: 'touch', bubbles: true });
+    await me.until('its time, after a tap', async () => (await pressed.getAttribute('data-reveal')) === 'true');
     assert.equal((await me.page.locator('#simple-thread').innerText()).includes('clv-e2e-secret'), false, 'the simple view shows nothing the person cannot open');
     await me.until('handled now: no sign left in the simple view', async () => (await me.page.locator('#simple-thread .parley-sign-state').count()) === 0);
     await me.page.locator('#simple-thread .parley-said[data-kind=show] .parley-open').first().click();
@@ -201,7 +206,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.until('a word that does not exist is refused', async () => /no such word: sned/.test(await me.page.locator('#words-error').innerText()));
     await me.page.locator('#settings-close').click();
     await me.page.locator('#view-chat').click();
-    await me.until('the button says it', async () => (await me.page.locator('#simple-thread .parley-send').innerText().catch(() => '')) === 'Clique ici pour faire <b>taratata</b>');
+    await me.until('the button says it', async () => (await me.page.locator('#simple-thread .parley-send').getAttribute('aria-label').catch(() => '')) === 'Clique ici pour faire <b>taratata</b>');
     /* A ready answer that presses Enter is sent from the chat at once; the other is put in its box, to be completed. */
     await me.api('/api/shortcuts', { label: 'Start with', text: 'Start with the cover', enter: false });
     await me.page.reload();
@@ -319,7 +324,8 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.chapter('sharing');
     const row = me.page.locator('#share-here .given-row', { hasText: 'A phone' });
     await me.until('the device is listed with its parts', async () => (await row.count()) === 1);
-    assert.match(await me.page.locator('#share-here').innerText(), /Chat off/);
+    /* Said in the owner's language (this screen is French: 0.2.364, the settings in French too). */
+    assert.match(await me.page.locator('#share-here').innerText(), /Chat coupé/);
     await row.locator('.kit-rights-pick button[data-value=both]').click();
     await me.until('its terminal is given', async () => (await me.api('/api/devices')).body.find((d) => d.id === pairing)?.grants[0].rights === 'rwx');
     await device.page.reload();

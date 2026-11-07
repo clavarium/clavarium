@@ -43,10 +43,12 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     /* The "microphone" is a recording: two seconds of room, one second of
        voice-like sound, silence. The speech-to-text engine of the bench hears
        "said out loud" whatever it is given: what is tested is everything
-       around it -- finding the phrase, sending it, typing the answer. */
+       around it -- finding the phrase, sending it, typing the answer. The silence after the voice is longer
+       than the chat's « send when I stop » waits after a phrase with no final mark (Parley: 3 s, 2 s more,
+       04-11), or the recording, played in a loop, speaks again before it is sent. */
     const second = (level) => { const s = new Float32Array(RATE); for (let i = 0; i < RATE; i++) s[i] = level * Math.sin((2 * Math.PI * 220 * i) / RATE); return s; };
     const microphone = join(mkdtempSync(join(tmpdir(), 'clv-mic-')), 'voice.wav');
-    writeFileSync(microphone, toWav([second(0.004), second(0.004), second(0.5), second(0.004), second(0.004), second(0.004)]));
+    writeFileSync(microphone, toWav([second(0.004), second(0.004), second(0.5), ...Array.from({ length: 7 }, () => second(0.004))]));
     const b = await bench(t, { microphone });
     const me = await b.person();
     await me.create('by-voice');
@@ -72,6 +74,8 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     const mic = me.page.locator('#simple-thread .parley-mic');
     const box = me.page.locator('#simple-thread .parley-box');
     await me.until('the chat has its microphone', async () => mic.isVisible());
+    /* Counted once the terminal behind is drawn again after the reload (else: an empty screen, counted too soon). */
+    await me.sees('command not found');
     const typed = (await me.screen()).split('said out loud').length;
     await mic.click();
     await me.until('what is said fills the box', async () => (await box.inputValue()).includes('said out loud'), 25_000);
@@ -304,6 +308,8 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     assert.match(await me.page.locator('#settings-people').innerText(), /Development mode|Administrators: /);
     assert.match(await me.page.locator('#settings-address').innerText(), /^Address: /);
     assert.equal(await me.page.locator('#settings-ch-people').count(), 0, 'People & address: merged into About');
+    /* Features (atop General) is drawn once its facts are read: waited for, not taken for a chapter with nothing to do. */
+    await me.until('the features are drawn', async () => (await me.page.locator('#settings-features button').count()) > 0);
     const idle = await me.page.locator('#settings details.chapter').evaluateAll((all) => all.filter((d) => !['s-about', 's-shortcuts'].includes(d.dataset.chapter) && !d.querySelector('.chapter-body button, .chapter-body select, .chapter-body input, .chapter-body textarea')).map((d) => d.dataset.chapter));
     assert.deepEqual(idle, [], 'a chapter that only ever shows text');
     /* No shortcut: one line, how to add one. */

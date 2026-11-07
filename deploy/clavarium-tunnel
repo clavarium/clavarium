@@ -4,7 +4,13 @@
 # written by install.sh and kept up to date by the updater). Root installs it at
 # /usr/local/sbin/clavarium-tunnel; it runs as the clavarium-tunnel account.
 #
-#   clavarium-tunnel RELAY PORT
+#   clavarium-tunnel RELAY PORT [TLS-PORT HTTP-PORT]
+#
+# WITHOUT TLS-PORT AND HTTP-PORT: the relay's first home (its principal), on
+# 8443 and 8080, held on every address of the relay, as it always was. WITH
+# THEM: a home the principal added (clavarium-relay add-home), on the ports it
+# was given, held on the relay's 127.0.0.1 only -- its router alone reaches
+# them, and the relay lets this key hold no other port.
 #
 # A CUT OF THE NETWORK is noticed in 20 to 30 seconds (a keepalive every 10 s,
 # two missed), and the tunnel is tried again 5 s later by systemd, as long as it
@@ -17,8 +23,13 @@
 # the count starts over.
 # ---------------------------------------------------------------------------
 set -u
-[ $# -eq 2 ] || { echo "usage: clavarium-tunnel RELAY PORT" >&2; exit 64; }
+[ $# -eq 2 ] || [ $# -eq 4 ] || { echo "usage: clavarium-tunnel RELAY PORT [TLS-PORT HTTP-PORT]" >&2; exit 64; }
 relay="$1"; port="$2"
+forwards=(-R '*:8443:127.0.0.1:443' -R '*:8080:127.0.0.1:80')
+if [ $# -eq 4 ]; then
+    for p in "$3" "$4"; do [[ "$p" =~ ^[0-9]{4,5}$ ]] && [ "$p" -le 65535 ] || { echo "clavarium-tunnel: not a port: $p" >&2; exit 64; }; done
+    forwards=(-R "127.0.0.1:$3:127.0.0.1:443" -R "127.0.0.1:$4:127.0.0.1:80")
+fi
 [[ "$relay" =~ ^[A-Za-z0-9.-]{1,253}$ ]] || { echo "clavarium-tunnel: not a host name: $relay" >&2; exit 64; }
 [[ "$port" =~ ^[0-9]{1,5}$ ]] || { echo "clavarium-tunnel: not a port: $port" >&2; exit 64; }
 home=/var/lib/clavarium-tunnel
@@ -30,7 +41,7 @@ trap 'rm -f "$said"' EXIT
 started=$SECONDS
 ssh -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o "IdentityFile=$home/key" -o "UserKnownHostsFile=$home/known_hosts" \
     -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=2 -o ConnectTimeout=15 \
-    -R '*:8443:127.0.0.1:443' -R '*:8080:127.0.0.1:80' -p "$port" "clavarium-tunnel@$relay" 2>"$said"
+    "${forwards[@]}" -p "$port" "clavarium-tunnel@$relay" 2>"$said"
 code=$?
 # Said to the journal once it ended -- read through a second writer (tee) it could still be on its way
 # when it was looked at (found on a CI runner): the refusal then passed for a cut.
