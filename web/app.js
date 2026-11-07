@@ -433,15 +433,16 @@
             ? KIT.TopBar({ variant: 'main', title: $('name'), actions: [...old.children].filter((n) => n.id !== 'name') })
             : KIT.TopBar({ variant: 'main', fold: $('fold'), back: { element: $('back'), label: 'Conversations' }, state: $('state'), title: $('name'), actions: [$('views')] }));
     }
-    /* A room (the device page has none): its dot, its name, under it who speaks now and who is in it; its settings
-       in the same group of views a conversation's settings sit in; its way back, "‹", as a conversation's (kit: 'main'). */
+    /* A room (the device page has none): its dot, its name, under it who speaks now (only then); on its right who is
+       in it (07-11: small stacked avatars, a click opens the list) then its settings, in the same group of views a
+       conversation's settings sit in; one line, as every bar; its way back, "‹", as a conversation's (kit: 'main'). */
     if (document.getElementById('salon')) {
         const top = $('salon').querySelector(':scope > .panel-top');
         const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; t.replaceChildren(name);
         const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true;
         const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings'));
         const strip = $('salon').querySelector('.salon-bar');
-        topBar(top, { variant: 'main', state: { id: 'salon-state' }, sub: [live, $('salon-who')], actions: [views] });
+        topBar(top, { variant: 'main', state: { id: 'salon-state' }, sub: [live], actions: [$('salon-who'), views] });
         strip?.remove();
     }
     for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon-new' ? { state: { id: 'salon-new-state' } } : {});
@@ -1068,7 +1069,7 @@
         /* Given its chat and not its terminal: the chat is the whole page, and no terminal is ever opened. */
         if (noTerminal()) { chatAlone(); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
-        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show(`Asleep. The tool is frozen as it was.${c.sizeAtWake ? ` When it wakes, its machine is restarted with its new size (${laterWords(c.sizeAtWake)}), and the tool takes up its session.` : ''}`, 'Wake it', connect); mascot('asleep'); return; }
+        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show(`${uiSaid('set-asleep-page', 'Asleep. It wakes only when you wake it.')}${c.sizeAtWake ? ` When it wakes, its machine is restarted with its new size (${laterWords(c.sizeAtWake)}), and the tool takes up its session.` : ''}`, uiSaid('set-wake-it', 'Wake it'), connect); mascot('asleep'); return; }
         if (!socket) { terminal.reset(); connect(); }
         void watchSignIn();
     }
@@ -1271,7 +1272,7 @@
         /* Under way: the step the panel shows, in its words (the tool named once). */
         const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
         /* What it is doing, when it says something: its tool is not named on every row. */
-        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? uiSaid('set-list-starting', 'starting') : uiSaid('set-list-restarting', 'restarting')) : c.phase === 'ready' ? (c.asleep ? uiSaid('set-list-asleep', 'asleep, wakes when opened') : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? uiSaid('set-list-moving', 'moving its work') : c.phase === 'restarting' ? uiSaid('set-list-restarting', 'restarting') : uiSaid('set-list-failed', 'failed'));
+        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? uiSaid('set-list-starting', 'starting') : uiSaid('set-list-restarting', 'restarting')) : c.phase === 'ready' ? (c.asleep ? uiSaid('set-list-asleep', 'asleep') : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? uiSaid('set-list-moving', 'moving its work') : c.phase === 'restarting' ? uiSaid('set-list-restarting', 'restarting') : uiSaid('set-list-failed', 'failed'));
         /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
         const plain = c.phase === 'ready' && !c.asleep && !under && !holds(c);
         const chips = [];
@@ -1288,9 +1289,15 @@
         for (const b of boxesNow()) if (b.conversation === c.name) chips.push({ text: b.name, icon: 'box', wide: true });
         /* Its last message. The agent is the usual speaker, so its name is left off (just the words); only
            the person's own last word is marked "You:", which tells you it is your move. */
-        const last = told && c.talk?.lastText ? (c.talk.lastFrom === 'person' ? uiSaid('set-list-you', 'You: {text}', { text: c.talk.lastText }) : c.talk.lastText) : '';
+        let last = told && c.talk?.lastText ? (c.talk.lastFrom === 'person' ? uiSaid('set-list-you', 'You: {text}', { text: c.talk.lastText }) : c.talk.lastText) : '';
         const state = rollup(c);
-        return { title: shownName(c), state, stateLabel: STATE_WORDS[state], avatar: { name: shownName(c) }, when: told ? whenWords(activityOf(c)) : '', last, now: plain ? '' : now, who: agentWho(c), chips };
+        /* IDLE 12 H OR MORE (07-11): « rien depuis 14 h », in grey, in place of its last words; never on one that
+           waits for you. Asleep: after « asleep ». */
+        const idle = c.phase === 'ready' && !under && !holds(c) ? KIT.idleFor(activityOf(c), { waits: needsYou(c) }) : 0;
+        let said = plain ? '' : now;
+        if (idle && c.asleep) said = `${said} \u00b7 ${KIT.idleWords(idle)}`;
+        else if (idle && !said) { said = KIT.idleWords(idle); last = ''; }
+        return { title: shownName(c), state, stateLabel: STATE_WORDS[state], avatar: { name: shownName(c) }, when: told ? whenWords(activityOf(c)) : '', last, now: said, idle: Boolean(idle && !c.asleep && said), who: agentWho(c), chips };
     }
     /* `copy`: a row of Needs you or Recent, beside its place in its group: it is not moved by hand.
        `told`: it says what was said last, and when (a copy always; the one list when there is no group). */
@@ -1336,9 +1343,18 @@
     try { roomsOnly = localStorage.getItem('clavarium-list-show') === 'rooms'; } catch { /* a private window */ }
     /* A ROOM, drawn as a conversation (kit.js ConvCard): its sign for an initial, its last words or who speaks,
        when; its point: new words waiting (the colour of what waits for you), else at work while one speaks, else fine. */
+    /* A ROOM MUTED by a tidy-up (07-11): no point, at the bottom of the rooms -- until new words come, or it is opened. */
+    const roomMuted = (r) => r.quiet === true && !(r.unread > 0) && thinkingOf(r).length === 0;
+    const roomAt = (r) => Date.parse(r.last?.at ?? r.at ?? '') || 0;
     function roomModel(r) {
         const who = thinkingOf(r);
         const sign = document.createElement('span'); sign.className = 'room-sign';
+        const muted = roomMuted(r);
+        const idle = KIT.idleFor(roomAt(r), { waits: r.unread > 0 || who.length > 0 });
+        if (muted || idle) {
+            const words = [muted ? uiSaid('set-list-asleep', 'asleep') : '', idle ? KIT.idleWords(idle) : ''].filter(Boolean).join(' \u00b7 ');
+            return { title: r.name, state: muted ? 'sleep' : 'ok', stateLabel: muted ? STATE_WORDS.sleep : 'Room', avatar: { name: r.name, glyph: sign }, last: '', when: r.last ? whenWords(Date.parse(r.last.at)) : '', now: words, idle: !muted, chips: [] };
+        }
         const state = r.unread > 0 ? 'wait' : who.length ? 'work' : 'ok';
         const chips = [];
         if (r.unread > 0) chips.push({ text: r.unread > 99 ? '99+' : String(r.unread), tone: 'count', title: `${r.unread} new` });
@@ -1356,9 +1372,14 @@
         const b = KIT.ConvCard(roomModel(r), { size: 'row', cls: 'item room-item' }); b.dataset.room = r.id;
         /* One of its AIs speaking now: said instead of its last message (a conversation at work: its dot, gold). */
         if (thinkingOf(r).length) b.dataset.live = 'true';
+        if (roomMuted(r)) b.dataset.asleep = 'true';
         if (r.last) b.dataset.when = 'true';
         if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
-        b.addEventListener('click', () => { void openSalon(r.id, true, { step: true }); });
+        b.addEventListener('click', () => {
+            /* Opened: a muted room is a room again (it has no machine to wake). */
+            if (r.quiet) { r.quiet = false; void post(`${API}/rooms/${r.id}`, { quiet: false }).catch(() => {}); }
+            void openSalon(r.id, true, { step: true });
+        });
         return b;
     }
     /* What was just unfolded comes in gently, once (the next paints show it as it is). */
@@ -1413,6 +1434,66 @@
             paint();
         });
     }
+    /* WHAT A TIDY-UP OFFERS: the conversations and rooms idle 12 h or more, neither waiting for you nor asleep
+       already, nor hidden, nor under way; the longest idle first (kit.js tidyList). */
+    const tidyNow = () => KIT.tidyList([
+        ...conversations.filter((c) => c.phase === 'ready' && !holds(c)).map((c) => ({ kind: 'conversation', id: c.name, name: shownName(c), at: activityOf(c), waits: needsYou(c), asleep: c.asleep === true, hidden: c.hidden === true })),
+        ...roomsNow().map((r) => ({ kind: 'room', id: r.id, name: r.name, at: roomAt(r), waits: r.unread > 0 || thinkingOf(r).length > 0, asleep: r.quiet === true })),
+    ]);
+    /* « Mettre en veille ? » (07-11): one question, the list all ticked (untick to keep one), one button. A
+       conversation is put to sleep (its machine too: it wakes only when you open it and touch « Wake it »);
+       a room is muted in the list. No undo: a machine asleep takes a while to come back. */
+    function openTidy() {
+        document.getElementById('tidy')?.remove();
+        const list = tidyNow(); if (!list.length) return;
+        const wrap = document.createElement('div'); wrap.className = 'lk-sheet-wrap tidy-wrap'; wrap.id = 'tidy';
+        const box = document.createElement('div'); box.className = 'lk-sheet tidy'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', 'tidy-title');
+        const top = document.createElement('div'); top.className = 'lk-sheet-top';
+        const title = document.createElement('b'); title.id = 'tidy-title'; title.className = 'lk-tx'; title.textContent = uiSaid('set-tidy-title', 'Put to sleep?');
+        const x = document.createElement('button'); x.type = 'button'; x.className = 'icon-btn'; x.textContent = '\u00d7'; x.setAttribute('aria-label', uiSaid('set-close', 'Close'));
+        top.append(title, x);
+        const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = uiSaid('set-tidy-hint', 'Nothing for 12 h or more.');
+        const rows = document.createElement('div'); rows.className = 'tidy-list';
+        const go = document.createElement('button'); go.type = 'button'; go.className = 'primary tidy-go';
+        const said = document.createElement('p'); said.className = 'hint tidy-said'; said.hidden = true;
+        const boxes = list.map((t) => {
+            const row = document.createElement('label'); row.className = 'tidy-row'; row.dataset.kind = t.kind; row.dataset.id = t.id;
+            const tick = document.createElement('input'); tick.type = 'checkbox'; tick.checked = true;
+            const name = document.createElement('span'); name.className = 'tidy-name';
+            name.append(Object.assign(document.createElement('b'), { textContent: t.name }), document.createTextNode(` \u2014 ${KIT.idleWords(t.idle)}`));
+            row.append(tick, name); rows.append(row);
+            tick.addEventListener('change', count);
+            return { t, tick };
+        });
+        function count() { const n = boxes.filter((b) => b.tick.checked).length; go.disabled = n === 0; go.textContent = uiSaid('set-tidy-go', 'Put to sleep ({n})', { n }); }
+        count();
+        const close = () => { wrap.remove(); document.removeEventListener('keydown', esc, true); };
+        const esc = (event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); shut(); } };
+        const shut = () => { if (!nav.close('tidy')) close(); };
+        x.addEventListener('click', shut);
+        wrap.addEventListener('click', (event) => { if (event.target === wrap) shut(); });
+        document.addEventListener('keydown', esc, true);
+        go.addEventListener('click', async () => {
+            const chosen = boxes.filter((b) => b.tick.checked).map((b) => b.t);
+            go.disabled = true; for (const b of boxes) b.tick.disabled = true;
+            if (chosen.some((t) => t.kind === 'conversation' && t.id === current)) disconnect();
+            const done = await Promise.allSettled(chosen.map((t) => (t.kind === 'room'
+                ? post(`${API}/rooms/${t.id}`, { quiet: true })
+                : post(`${API}/conversations/${encodeURIComponent(t.id)}/sleep`))));
+            const failed = done.map((r, i) => (r.status === 'rejected' ? `${chosen[i].name}: ${r.reason?.message ?? ''}` : '')).filter(Boolean);
+            await refresh().catch(() => {});
+            try { await loadRooms(); } catch { /* read again later */ }
+            if (chosen.some((t) => t.kind === 'conversation' && t.id === current)) enter();
+            paint();
+            if (failed.length) { said.hidden = false; said.textContent = failed.join(' \u00b7 '); count(); for (const b of boxes) b.tick.disabled = false; return; }
+            shut();
+        });
+        box.append(top, hint, rows, go, said);
+        wrap.append(box);
+        document.body.append(wrap);
+        nav.push('tidy', () => close());
+        go.focus();
+    }
     function paint() {
         if (listHeld) { paintLater = true; return; }
         /* The groups, folded as a whole or not (a search shows them all). */
@@ -1464,7 +1545,7 @@
             if (openOne && !inSight.includes(openOne)) inSight.push(openOne);
             const few = inSight.length;
             /* The rooms used in the last day, among them by when (03-11: « dans le récent, indifféremment »). */
-            const recentRooms = roomsNow().filter((r) => r.last && Date.parse(r.last.at) >= dayAgo);
+            const recentRooms = roomsNow().filter((r) => r.last && Date.parse(r.last.at) >= dayAgo && !roomMuted(r));
             const rowsOfRecent = (list) => [...list.map((c) => ({ at: activityOf(c), el: () => itemButton(c, true) })), ...recentRooms.map((r) => ({ at: Date.parse(r.last.at), el: () => roomItem(r) }))].sort((a, b) => b.at - a.at).map((x) => x.el());
             if ((recent.length || recentRooms.length) && groups.length && section(RECENT, uiSaid('set-list-recent', 'Recent'), recent)) {
                 top.append(...unfolding(RECENT, rowsOfRecent(showAllRecent ? recent : recent.filter((c) => inSight.includes(c)))));
@@ -1503,7 +1584,7 @@
         }
         if (groupsOpen && !onlyRooms) unfolding(GROUPS, [...items.children]);
         /* ROOMS (03-11): their own list, after the groups of conversations; a search finds them by name. */
-        const roomsShown = roomsNow().filter((r) => !query || r.name.toLowerCase().includes(String(query).toLowerCase()));
+        const roomsShown = roomsNow().filter((r) => !query || r.name.toLowerCase().includes(String(query).toLowerCase())).sort((a, b) => Number(roomMuted(a)) - Number(roomMuted(b)));
         if (!DEVICE && roomsShown.length) {
             const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = 'rooms';
             const open = onlyRooms || !folded.has(ROOMS); b.setAttribute('aria-expanded', String(open));
@@ -1512,6 +1593,16 @@
             b.addEventListener('click', () => { if (onlyRooms) return; if (folded.has(ROOMS)) folded.delete(ROOMS); else folded.add(ROOMS); keepFolded(); paint(); });
             items.append(b);
             if (open) items.append(...roomsShown.map((r) => roomItem(r)));
+        }
+        /* THE OPEN ONE, MARKED ONCE (07-11): at its first place in the list (À vous, Récent, then its group). */
+        for (const extra of [...top.querySelectorAll('[aria-current="true"]'), ...items.querySelectorAll('[aria-current="true"]')].slice(1)) extra.removeAttribute('aria-current');
+        /* FAIRE LE MÉNAGE (07-11): at the bottom, only when something has been idle 12 h or more. */
+        const tidy = !DEVICE && !query ? tidyNow() : [];
+        if (tidy.length) {
+            const b = document.createElement('button'); b.type = 'button'; b.id = 'tidy-open'; b.className = 'tidy-open';
+            b.textContent = uiSaid('set-tidy-open', 'Tidy up ({n})', { n: tidy.length });
+            b.addEventListener('click', () => openTidy());
+            items.append(b);
         }
         /* The folders there are, offered where one is chosen. */
         $('group-names').replaceChildren(...groupsInOrder().map((g) => { const o = document.createElement('option'); o.value = g; return o; }));
@@ -2390,7 +2481,7 @@
     /* All folded when the app is opened: what the person opens stays open while this tab lives (a reload
        included), never from one day to the next -- a page that opens half-unfolded says nothing. What asks
        for them is said on the folded chapter instead (markAttention). */
-    const OPEN_AT_FIRST = { 's-features': true };
+    const OPEN_AT_FIRST = { 's-features': true, 'room-ais': true };
     let chapters = {};
     try { chapters = JSON.parse(sessionStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
     try { localStorage.removeItem('clavarium-chapters'); } catch { /* as above */ }
@@ -5412,11 +5503,11 @@
         if (line) { line.hidden = who.length === 0; line.textContent = who.length ? speaking(who) : ''; }
     }
     let salonAsked = 0;
-    /* A room's bar: its name, its state, its members (folded). */
+    /* A room's bar: its name, its state, its members (up to 3 avatars; a click shows the list under the bar). */
     function salonHead(r) {
         $('salon-name').textContent = r.name;
         salonLive(thinkingOf(r));
-        $('salon-who').replaceChildren(memberChips(r.members), el('span', 'hint', `${countOf(r.members)} \u25BE`));
+        KIT.MemberStack(r.members, { max: 3, button: $('salon-who'), label: countOf(r.members) });
         $('salon-who').setAttribute('aria-expanded', 'false'); $('salon-members').hidden = true;
         const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? uiSaid('set-room-people', 'People') : k === 'ai' ? uiSaid('set-room-ais-of', 'AIs') : uiSaid('set-room-boxes-of', 'Boxes')), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', uiSaid('set-room-host-mark', 'host'))); return x; })); return row; }).filter(Boolean);
         $('salon-members').replaceChildren(...rows);
@@ -5503,37 +5594,92 @@
     }
     $('salon-close').addEventListener('click', () => leavePlace());
     $('salon-who').addEventListener('click', () => { const open = $('salon-members').hidden; $('salon-members').hidden = !open; $('salon-who').setAttribute('aria-expanded', String(open)); });
-    /* A NEW ROOM, or a room set up again (03-11): the one that welcomes in a box of its own at the top; below, every
-       conversation on one row -- its name, the name its assistant has in its chat, its tool -- with a switch (in the
-       room or not) and « Welcomes »; a search; a row dragged into the box above welcomes too. Boxes: the same rows,
-       with a switch only. `editing`: the room, or null for a new one. */
+    /* A NEW ROOM, or a room's settings (07-11, charte-reglages: as every settings page): folding chapters -- General
+       (its name), Its AIs (every conversation on a row, a switch: in the room or not; the one that welcomes wears
+       « Welcomes », a tap on another of the room moves it), Their assets, Chat & voice (its boxes), Advanced (remove).
+       A room's settings save each change at once (roomPatch), « ✓ Saved » in the bar; a new room keeps its choices
+       here until « Create ». `salonEditing`: the room, or null for a new one. */
     let salonIn = new Set(); let salonHost = ''; let salonBoxes = new Set(); let salonEditing = null; let salonBoxList = [];
-    /* Every conversation as a member: the kit's card, its size `member`, its gestures (Welcomes, in the room) at its end. */
+    /* What a room has, read again from it (after each change saved: what the server kept). */
+    const salonTake = (r) => {
+        salonIn = new Set(r ? r.members.filter((m) => m.kind === 'ai').map((m) => m.ref) : []);
+        salonHost = r?.members.find((m) => m.kind === 'ai' && m.host)?.ref ?? '';
+        salonBoxes = new Set(r ? r.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
+    };
+    let salonSavedTimer;
+    /* ONE CHANGE, SAVED AT ONCE (a room's settings): its POST, then the room as the server keeps it; « ✓ Saved » a
+       moment, as Settings say it; refused, said under the bar and drawn back as it was. */
+    async function salonSave(change) {
+        const r = salonEditing; if (!r) return;
+        const patch = KIT.roomPatch(r, change);
+        if (!patch) { salonTake(r); paintSalonMembers(); return; }
+        $('salon-new-error').hidden = true;
+        try {
+            const now = await post(`${API}/rooms/${r.id}`, patch);
+            if (salonEditing !== r) return;
+            salonEditing = now && Array.isArray(now.members) ? now : r;
+            const said = $('salon-new-status'); said.textContent = `✓ ${uiSaid('set-room-saved', 'Saved')}`;
+            clearTimeout(salonSavedTimer); salonSavedTimer = setTimeout(() => { said.textContent = ''; }, 2500);
+            if ('name' in patch) { $('salon-new-title').textContent = uiSaid('set-room-settings-of', '{name} · Settings', { name: salonEditing.name }); }
+            void loadRooms().then(() => paint());
+            if ('add' in patch || 'remove' in patch) void paintSalonAssets();
+        } catch (error) { if (salonEditing !== r) return; $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
+        salonTake(salonEditing); paintSalonMembers();
+        if ('name' in change) $('salon-new-name').value = salonEditing.name;
+    }
+    /* Every conversation as a member: the kit's card, its size `member`, its switch at its end; the one that welcomes,
+       its pill « Welcomes » (the only place it is said). */
     function paintSalonMembers() {
-        const hostC = conversations.find((c) => c.name === salonHost);
-        const box = $('salon-new-host'); box.replaceChildren();
-        if (hostC) box.append(KIT.ConvCard({ ...convModel(hostC), now: uiSaid('set-room-host-what', 'answers, or hands the message on') }, { size: 'member', cls: 'salon-host-what' }));
-        else box.append(el('small', 'hint', uiSaid('set-room-host-pick', 'Pick one below: « Welcomes »')));
+        const editing = salonEditing;
         const q = $('salon-new-search').value.trim().toLowerCase();
         const rows = conversations.filter((c) => !q || `${shownName(c)} ${c.chatName ?? ''}`.toLowerCase().includes(q)).sort((a, b) => Number(salonIn.has(b.name)) - Number(salonIn.has(a.name)));
+        const makeHost = (c) => { if (c.name === salonHost || !salonIn.has(c.name)) return; if (editing) { void salonSave({ host: c.name }); return; } salonHost = c.name; paintSalonMembers(); };
         $('salon-new-ais').replaceChildren(...rows.map((c) => {
-            const welcome = el('button', 'salon-welcome-btn', uiSaid('set-room-welcomes', 'Welcomes')); welcome.type = 'button'; welcome.setAttribute('aria-pressed', String(c.name === salonHost)); welcome.setAttribute('aria-label', `${shownName(c)} welcomes the room`);
-            welcome.addEventListener('click', () => { salonIn.add(c.name); salonHost = c.name; paintSalonMembers(); });
-            const sw = KIT.Switch({ on: salonIn.has(c.name), label: `${shownName(c)} in the room`, onChange: (on) => { if (!on) { salonIn.delete(c.name); if (salonHost === c.name) salonHost = [...salonIn][0] ?? ''; } else { salonIn.add(c.name); if (!salonHost) salonHost = c.name; } paintSalonMembers(); } });
-            const row = KIT.ConvCard(convModel(c), { size: 'member', cls: 'salon-member-row', actions: [welcome, sw] });
-            row.setAttribute('role', 'listitem'); row.draggable = true; row.dataset.name = c.name;
+            const isIn = salonIn.has(c.name); const isHost = c.name === salonHost;
+            const actions = [];
+            if (isHost) { const pill = el('span', 'salon-welcome-pill', uiSaid('set-room-welcomes', 'Welcomes')); pill.setAttribute('aria-label', `${shownName(c)} welcomes the room`); actions.push(pill); }
+            actions.push(KIT.Switch({ on: isIn, label: `${shownName(c)} in the room`, onChange: (on) => {
+                if (editing) { void salonSave({ ai: c.name, on }); return; }
+                if (!on) { salonIn.delete(c.name); if (salonHost === c.name) salonHost = [...salonIn][0] ?? ''; } else { salonIn.add(c.name); if (!salonHost) salonHost = c.name; }
+                paintSalonMembers();
+            } }));
+            const row = KIT.ConvCard(convModel(c), { size: 'member', cls: 'salon-member-row', actions });
+            row.setAttribute('role', 'listitem'); row.dataset.name = c.name;
+            if (isHost) row.dataset.host = 'true';
+            /* Another AI of the room: a tap (Enter) on its row, and it welcomes. */
+            if (isIn && !isHost) {
+                row.tabIndex = 0; row.dataset.pick = 'true'; row.title = uiSaid('set-room-host-how', 'Tap another AI of the room to move it');
+                row.addEventListener('click', (e) => { if (!e.target.closest?.('button')) makeHost(c); });
+                row.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === row) { e.preventDefault(); makeHost(c); } });
+            }
             return row;
         }));
-        $('salon-new-count').textContent = `\u00b7 ${uiSaid('set-room-in', '{n} in the room', { n: salonIn.size })}`;
+        const hostC = conversations.find((c) => c.name === salonHost);
+        $('salon-new-count').textContent = [uiSaid('set-room-of', '{n} of {t}', { n: salonIn.size, t: conversations.length }), hostC ? shownName(hostC) : ''].filter(Boolean).join(' · ');
+        $('salon-sum-general').textContent = editing?.name ?? '';
+        const nb = salonBoxes.size;
+        $('salon-sum-voice').textContent = nb ? uiSaid(nb > 1 ? 'set-room-n-boxes' : 'set-room-n-box', nb > 1 ? '{n} boxes' : '1 box', { n: nb }) : uiSaid('set-none', 'None');
         $('salon-new-boxes').replaceChildren(...salonBoxList.map((b) => {
             const row = el('div', 'salon-member-row'); row.setAttribute('role', 'listitem');
             const what = el('span', 'salon-member-what'); what.append(el('b', '', b.name), el('small', '', b.place || uiSaid('set-na-k-box', 'Voice box')));
-            const sw = KIT.Switch({ on: salonBoxes.has(b.id), label: `${b.name} in the room`, onChange: (on) => { if (on) salonBoxes.add(b.id); else salonBoxes.delete(b.id); paintSalonMembers(); } });
+            const sw = KIT.Switch({ on: salonBoxes.has(b.id), label: `${b.name} in the room`, onChange: (on) => {
+                if (editing) { void salonSave({ box: b.id, on }); return; }
+                if (on) salonBoxes.add(b.id); else salonBoxes.delete(b.id); paintSalonMembers();
+            } });
             row.append(what, sw);
             return row;
         }));
     }
     $('salon-new-search').addEventListener('input', paintSalonMembers);
+    /* Its name: saved at Enter, or on leaving the field (a room's settings); Escape gives it back. */
+    $('salon-new-name').addEventListener('keydown', (e) => {
+        if (!salonEditing) return;
+        if (e.key === 'Enter') { e.preventDefault(); $('salon-new-name').blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); $('salon-new-name').value = salonEditing.name; $('salon-new-name').blur(); }
+    });
+    $('salon-new-name').addEventListener('change', () => { if (salonEditing) void salonSave({ name: $('salon-new-name').value }); });
+    /* « + … » on a chapter's title: its gesture, never the chapter folded by it -- opened instead. */
+    for (const id of ['salon-assets-all', 'salon-new-box-add']) $(id).addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); const ch = $(id).closest('details'); if (ch) ch.open = true; }, true);
     /* EACH AI'S ASSETS (06-11), in a room's settings: what each of its AIs has, as its own conversation has it --
        there is no room asset. « + Give… » opens that conversation's own give; « Give to all its AIs… » gives one
        asset at one right to each (POST /rooms/<id>/give): ordinary rights of each conversation, taken back one by one. */
@@ -5551,6 +5697,8 @@
         /* What its own Assets tab lists, row for row (06-11 showed a part: no calendar, contacts, binder or access). */
         const assetsOf = (name) => givenItems(name, { all, secrets: keys, boxes, tether, lists }).map((a) => ({ key: a.key, kind: a.kind, name: a.name, live: a.live, right: a.right }))
             .sort((a, b) => ASSET_KINDS.findIndex((k) => k[0] === a.kind) - ASSET_KINDS.findIndex((k) => k[0] === b.kind));
+        /* Folded, its chapter says how many each has (« Kitchen helper 9 · Homework 1 »). */
+        $('salon-sum-assets').textContent = ais.map((m) => `${shownName(conversations.find((x) => x.name === m.ref)) || m.name} ${assetsOf(m.ref).length}`).join(' \u00b7 ');
         $('salon-assets').replaceChildren(...ais.map((m) => {
             const c = conversations.find((x) => x.name === m.ref);
             const give = el('button', 'salon-give-btn', uiSaid('set-room-give', '+ Give\u2026')); give.type = 'button';
@@ -5597,7 +5745,7 @@
     }
     $('salon-assets-all').addEventListener('click', () => { salonGive = salonGive ? null : { asset: '', level: '', said: [] }; void paintSalonAssets(); });
     /* A ROOM'S "+ Voice box": the New asset box, its kind a voice box, speaking in this room; once it answers, it is
-       among the room's boxes, switched on (kept with Save). */
+       among the room's boxes, switched on (saved at once). */
     function paintSalonBoxNew() {
         const holder = $('salon-box-newasset');
         if (holder.contains($('box-add'))) $('assets-forms').append($('box-add'));
@@ -5614,71 +5762,56 @@
             void getJson('/boxes', null).then((list) => {
                 if (!Array.isArray(list)) return;
                 salonBoxList = list; boxesKnown = list;
-                if (list.some((b) => b.id === boxFlow?.made?.id)) salonBoxes.add(boxFlow.made.id);
-                paintSalonMembers();
+                if (list.some((b) => b.id === boxFlow?.made?.id)) void salonSave({ box: boxFlow.made.id, on: true });
+                else paintSalonMembers();
             });
         } });
         paintSalonBoxNew();
         focusFirst($('salon-box-newasset'));
     });
-    let salonDragged = '';
-    $('salon-new-ais').addEventListener('dragstart', (e) => { salonDragged = e.target.closest?.('.salon-member-row')?.dataset.name ?? ''; });
-    $('salon-new-host').addEventListener('dragover', (e) => { e.preventDefault(); $('salon-new-host').classList.add('over'); });
-    $('salon-new-host').addEventListener('dragleave', () => $('salon-new-host').classList.remove('over'));
-    $('salon-new-host').addEventListener('drop', (e) => { e.preventDefault(); $('salon-new-host').classList.remove('over'); if (salonDragged) { salonIn.add(salonDragged); salonHost = salonDragged; paintSalonMembers(); } });
     async function openSalonNew(push = true, editing = null) {
         if (DEVICE) return;
         salonEditing = editing;
         enterPlace('salon-new', push);
-        $('salon-new-title').textContent = editing ? editing.name : uiSaid('set-room-new', 'New room');
+        /* « <name> · Settings », as a conversation's; a room to be made: « New room ». */
+        $('salon-new-title').textContent = editing ? uiSaid('set-room-settings-of', '{name} · Settings', { name: editing.name }) : uiSaid('set-room-new', 'New room');
         /* Its settings say its state as the room's bar does; a room to be made has none yet. */
         const dot = $('salon-new-state'); if (dot) { dot.hidden = !editing; dot.dataset.state = thinkingOf(editing).length ? 'work' : 'ok'; }
-        $('salon-new-create').textContent = editing ? uiSaid('set-room-save', 'Save') : uiSaid('set-room-create', 'Create');
-        $('salon-new-remove-card').hidden = $('salon-new-advanced-head').hidden = !editing;
-        $('salon-new-remove').hidden = false; $('salon-new-remove-card').querySelector('.confirm')?.remove();
+        /* Saved at once: no button at its end; a new room, « Create » (nothing to save before it is there). */
+        $('salon-new-actions').hidden = Boolean(editing);
+        $('salon-new-status').textContent = ''; clearTimeout(salonSavedTimer);
+        $('salon-new-remove-card').hidden = !editing; salonRemoveAsk?.close(); salonRemoveAsk = null;
         $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? ''; $('salon-new-search').value = '';
-        salonIn = new Set(editing ? editing.members.filter((m) => m.kind === 'ai').map((m) => m.ref) : []);
-        salonHost = editing?.members.find((m) => m.host)?.ref ?? '';
-        salonBoxes = new Set(editing ? editing.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
+        salonTake(editing);
+        /* A new room: its name and its AIs open, the rest as the person left it. */
+        if (!editing) for (const id of ['salon-ch-general', 'salon-ch-ais']) $(id).open = true;
         try { const x = await fetch(`${API}/boxes`); salonBoxList = x.ok ? await x.json() : []; } catch { salonBoxList = []; }
         if (Array.isArray(salonBoxList)) boxesKnown = salonBoxList; else salonBoxList = [];
         /* A room that is there already adds a voice box of its own: "+ Voice box". */
-        $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0 && !editing;
+        $('salon-new-boxes-card').hidden = salonBoxList.length === 0 && !editing;
         $('salon-new-box-add').hidden = !editing; closeSalonBoxNew();
         paintSalonMembers();
         salonGive = null; void paintSalonAssets();
-        $('salon-new-name').focus();
+        if (!editing) $('salon-new-name').focus();
     }
     $('salon-settings').addEventListener('click', async () => { await loadRooms(); const r = rooms.find((x) => x.id === salonId); if (r) await openSalonNew(true, r); });
-    $('salon-new-remove').addEventListener('click', () => {
+    /* Remove the room: confirmed in place (what goes, what stays), as every settings page does. */
+    let salonRemoveAsk = null;
+    const salonRemove = $('salon-new-remove');
+    salonRemove.addEventListener('click', () => {
         const r = salonEditing; if (!r) return;
-        const keep = el('button', '', uiSaid('set-room-keep', 'Keep')); keep.type = 'button';
-        const sure = el('button', 'danger', uiSaid('set-room-remove-yes', 'Remove {name}', { name: r.name })); sure.type = 'button';
-        const ask = el('span', 'callout bad confirm'); ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
-        keep.addEventListener('click', () => { ask.remove(); $('salon-new-remove').hidden = false; });
-        sure.addEventListener('click', async () => { try { await post(`${API}/rooms/${r.id}/remove`, {}); salonEditing = null; await loadRooms(); paint(); openDeck(false); } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; } });
-        $('salon-new-remove').hidden = true; $('salon-new-remove').after(ask); sure.focus();
+        salonRemoveAsk = KIT.InlineConfirm(salonRemove, { question: uiSaid('set-room-remove-what', 'The thread goes · AIs and boxes stay'), yes: uiSaid('set-room-remove-yes', 'Remove {name}', { name: r.name }), keep: uiSaid('set-room-keep', 'Keep'),
+            onYes: async () => { try { await post(`${API}/rooms/${r.id}/remove`, {}); salonEditing = null; await loadRooms(); paint(); openDeck(false); } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; } } });
     });
     /* Back from a room's settings: to the room; from a new one: where it was opened from. */
     const salonNewBack = () => { const r = salonEditing; salonEditing = null; if (r) void openSalon(r.id, false); else leavePlace(); };
     $('salon-new-close').addEventListener('click', salonNewBack);
-    $('salon-new-cancel').addEventListener('click', salonNewBack);
+    /* A NEW ROOM: made at « Create », with what was chosen above (its settings, once made, save at once). */
     $('salon-new-create').addEventListener('click', async () => {
+        if (salonEditing) return;
         const picked = [salonHost, ...[...salonIn].filter((c) => c !== salonHost)].filter(Boolean);
-        const boxes = [...salonBoxes];
         try {
-            /* Set up again: what is switched on now -- members added, those switched off taken out, the one that welcomes. */
-            if (salonEditing) {
-                const r = salonEditing;
-                const ais = r.members.filter((m) => m.kind === 'ai'); const had = r.members.filter((m) => m.kind === 'box');
-                const add = { conversations: picked.filter((c) => !ais.some((m) => m.ref === c)), boxes: boxes.filter((b) => !had.some((m) => m.ref === b)) };
-                const remove = [...ais.filter((m) => !salonIn.has(m.ref)), ...had.filter((m) => !salonBoxes.has(m.ref))].map((m) => m.id);
-                let now = await post(`${API}/rooms/${r.id}`, { name: $('salon-new-name').value, add, remove });
-                const host = now.members.find((m) => m.kind === 'ai' && m.ref === salonHost);
-                if (host && !host.host) now = await post(`${API}/rooms/${r.id}`, { host: host.id });
-                salonEditing = null; await openSalon(r.id, false); return;
-            }
-            const made = await post(`${API}/rooms`, { name: $('salon-new-name').value, conversations: picked, boxes, host: salonHost });
+            const made = await post(`${API}/rooms`, { name: $('salon-new-name').value, conversations: picked, boxes: [...salonBoxes], host: salonHost });
             await openSalon(made.id, false);
         } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
     });

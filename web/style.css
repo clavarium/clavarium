@@ -2009,12 +2009,13 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 :is(#newconv, #salon-new) .set-row > .set-control > :is(input, select) { width: 18rem; }
 #newconv .set-what > .err { font-size: .75rem; color: var(--danger); }
 /* A card of rows, as an open chapter without its fold. */
-.nc-card, #newconv details.chapter { flex-shrink: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); }
-.nc-card > *, #newconv details.chapter > .chapter-body > * { margin: 0; padding: 12px 16px; }
-.nc-card > * + *, #newconv details.chapter > .chapter-body > * + * { border-top: 1px solid var(--line); }
+/* A room's settings (07-11): the chapters of a new conversation's, of Settings. */
+.nc-card, :is(#newconv, #salon-new) details.chapter { flex-shrink: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); }
+.nc-card > *, :is(#newconv, #salon-new) details.chapter > .chapter-body > * { margin: 0; padding: 12px 16px; }
+.nc-card > * + *, :is(#newconv, #salon-new) details.chapter > .chapter-body > :where(:not([hidden])) ~ :where(:not([hidden])) { border-top: 1px solid var(--line); }
 .nc-card > .sub-head { display: block; padding-bottom: 0; }
 .nc-card > .sub-head + * { border-top: 0; }
-#newconv details.chapter > .chapter-body { gap: 0; padding: 0; background: var(--bar); border-radius: 0 0 10px 10px; }
+:is(#newconv, #salon-new) details.chapter > .chapter-body { gap: 0; padding: 0; background: var(--bar); border-radius: 0 0 10px 10px; }
 /* A choice of a few, each a card: its name and one short line. */
 .pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .pick.two { grid-template-columns: 1fr 1fr; }
@@ -2342,7 +2343,6 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .salon-chip-box::before { content: ""; width: 9px; height: 9px; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 5 6 9H3v6h3l5 4z'/%3E%3Cpath d='M15.5 8.5a5 5 0 0 1 0 7'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 5 6 9H3v6h3l5 4z'/%3E%3Cpath d='M15.5 8.5a5 5 0 0 1 0 7'/%3E%3C/svg%3E") center / contain no-repeat; }
 #salon { display: flex; flex-direction: column; min-height: 0; }
 #salon[hidden] { display: none; }
-.salon-who { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; padding: 4px 14px; min-height: 44px; }
 .salon-members { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 10px; border-bottom: 1px solid var(--line); }
 .salon-members-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .salon-members-row > .hint { width: 4.5rem; }
@@ -2353,8 +2353,6 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .salon-thinking { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 14px 8px; font-size: .75rem; color: var(--ink2); order: 2; }
 #salon-new { display: flex; flex-direction: column; }
 #salon-new[hidden] { display: none; }
-#salon-new .nc-card > .hint { display: block; padding-top: 0; border-top: 0; }
-#salon-new .pick .salon-welcome { color: var(--brass-ink); }
 
 /* THE PLACES OF THE WHOLE (03-11): settings, access, assets, the deck, rooms, a new conversation are not a
    conversation's -- in a part of the page of their own, over the conversation (which stays as it was, its
@@ -2363,34 +2361,39 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 #places[hidden] { display: none; }
 @media (max-width: 700px) { #places { grid-column: 1; grid-row: 1; } }
 #app:has(> #list[hidden]) #places { grid-column: 1 / -1; }
-.salon-bar { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 0; }
-.salon-bar .salon-who { flex: 1; }
-#salon-new-remove-card .confirm { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 
 /* A ROOM'S MEMBERS (03-11): the one that welcomes in a box of its own; every conversation on a row, its switch. */
-.salon-host-box { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 12px; border: 1px solid var(--brass); border-radius: 10px; background: color-mix(in srgb, var(--brass) 10%, var(--panel)); transition: background .15s; }
-.salon-host-box.over { background: color-mix(in srgb, var(--brass) 22%, var(--panel)); }
 .salon-member-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .salon-member-what b { font-weight: 600; font-size: .8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .salon-member-what small { color: var(--ink2); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.salon-members-tools input { width: 100%; }
+/* In a chapter, its rows are the chapter's (07-11): no box in a box. */
+#salon-new .chapter-body > .salon-member-list { border: 0; border-radius: 0; background: transparent; max-height: none; }
+#salon-new .chapter-body .salon-member-row { padding: 8px 16px; }
+#salon-new .chapter-body > .salon-members-tools { padding-top: 10px; padding-bottom: 10px; }
+details.chapter > summary > .chapter-add { flex: none; align-self: center; min-height: 32px; padding: 4px 12px; font-size: .8125rem; }
+details.chapter > summary > .chapter-add[hidden] { display: none; }
+@media (max-width: 560px) {
+  details.chapter > summary > .chapter-add { padding: 4px 8px; font-size: .75rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+  details.chapter > summary:has(> .chapter-add:not([hidden])) > .chapter-about { display: none; }
+}
+.salon-saved { flex: none; font-size: .8125rem; color: var(--ok, var(--ink2)); white-space: nowrap; }
+.salon-saved:empty { display: none; }
+#salon-new-actions[hidden] { display: none; }
 .salon-member-list { display: flex; flex-direction: column; max-height: 22rem; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 0 !important; }
 .salon-member-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; min-height: 48px; border-top: 1px solid var(--line); }
 .salon-member-row:first-child { border-top: 0; }
 .salon-member-row[draggable="true"] { cursor: grab; }
-button.salon-welcome-btn { border-radius: 999px; padding: 4px 10px; font-size: .75rem; min-height: 32px; background: transparent; color: var(--ink2); }
-button.salon-welcome-btn[aria-pressed="true"] { color: var(--brass-ink); border-color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent); }
-.nc-card > .salon-host-box, .nc-card > .salon-member-list { margin: 4px 16px 12px; }
-.nc-card > .salon-host-box { padding: 8px 12px; }
-.nc-card > .salon-members-tools { padding-bottom: 4px; }
-.nc-card > .salon-host-box + *, .nc-card > .salon-member-list + * { border-top: 0; }
+.salon-welcome-pill { flex: none; border: 1px solid var(--brass); border-radius: 999px; padding: 3px 10px; font-size: .75rem; font-weight: 600; color: var(--brass-ink); background: color-mix(in srgb, var(--brass) 14%, transparent); white-space: nowrap; }
+.salon-member-row[data-pick="true"] { cursor: pointer; }
+.salon-member-row[data-pick="true"]:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.salon-member-row[data-pick="true"]:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
 /* Each AI's assets in a room's settings (06-11): its member card, its assets as chips below; give to all its AIs. */
 .salon-assets-list { max-height: none; }
 .salon-asset-ai { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; border-top: 1px solid var(--line); }
 .salon-asset-ai:first-child { border-top: 0; }
 .salon-asset-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px; }
 button.salon-give-btn { border-radius: 999px; padding: 4px 10px; font-size: .75rem; min-height: 32px; background: transparent; color: var(--ink2); white-space: nowrap; }
-.nc-card > .salon-give { margin: 4px 16px 12px; padding: 10px 12px; border: 1px solid var(--brass); border-radius: 10px; background: color-mix(in srgb, var(--brass) 6%, var(--panel)); display: flex; flex-direction: column; gap: 8px; }
+#salon-new .chapter-body > .salon-give { margin: 4px 16px 12px; padding: 10px 12px; border: 1px solid var(--brass); border-radius: 10px; background: color-mix(in srgb, var(--brass) 6%, var(--panel)); display: flex; flex-direction: column; gap: 8px; }
 .salon-give-assets { display: flex; flex-wrap: wrap; gap: 6px; max-height: 12rem; overflow-y: auto; }
 .salon-give-said { display: flex; flex-direction: column; gap: 2px; }
 .salon-give .action-row { padding: 0; border: 0; }
@@ -2431,14 +2434,19 @@ html[data-door="device"] header.topbar { height: auto; }
 .sheet.as-place > header.topbar { margin: 0; }
 :is(#newconv, #salon-new) > header.topbar { margin: 0 -20px 4px; }
 @media (max-width: 700px) { #newconv > header.topbar { margin: 0 -16px 4px; } }
-/* A room: its name, who speaks now and who is in it on the line under it (a button that opens the list). */
+/* A room: its name, who speaks now on the line under it (only then); who is in it on the right, before its gear
+   (07-11): up to 3 small stacked avatars, a button that opens the list under the bar. */
+header.topbar .kit-stack { display: inline-flex; align-items: center; flex: none; min-height: 34px; padding: 0 4px; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+header.topbar .kit-stack:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+header.topbar .kit-stack:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+.kit-stack > .kit-av { --kc-av: 24px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bar); }
+.kit-stack > .kit-av + .kit-av { margin-left: -7px; }
+.kit-stack > .kit-av[data-kind="box"] { background: var(--panel); color: var(--ink2); box-shadow: 0 0 0 2px var(--bar), inset 0 0 0 1px var(--line); }
+.kit-stack-box { width: 12px; height: 12px; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 5 6 9H3v6h3l5 4z'/%3E%3Cpath d='M15.5 8.5a5 5 0 0 1 0 7'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 5 6 9H3v6h3l5 4z'/%3E%3Cpath d='M15.5 8.5a5 5 0 0 1 0 7'/%3E%3C/svg%3E") center / contain no-repeat; }
+.kit-stack > .kit-stack-more { background: var(--panel); color: var(--ink2); box-shadow: 0 0 0 2px var(--bar), inset 0 0 0 1px var(--line); font-size: .6875rem; }
 #salon-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .salon-live { font-size: .75rem; font-weight: 400; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .salon-live[hidden] { display: none; }
-header.topbar .topbar-sub .salon-who { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--ink2); font: inherit; cursor: pointer; }
-header.topbar .topbar-sub .salon-who:hover { color: var(--ink); }
-header.topbar .topbar-sub .salon-chip { width: 15px; height: 15px; margin-left: -4px; border-width: 1px; font-size: .5625rem; }
-header.topbar .topbar-sub .salon-chip:first-child { margin-left: 0; }
 /* A room's row in the list (03-11): a conversation's row, with a small sign of a room before its name (Lucide « users »). */
 .room-sign { display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; background: var(--ink2);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E") center / contain no-repeat;
@@ -2698,9 +2706,6 @@ header.topbar .topbar-sub .salon-chip:first-child { margin-left: 0; }
 /* The search atop a settings page (05-11). */
 :is(header.topbar, .panel-top) .settings-search { margin-left: auto; width: min(240px, 42vw); min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: .875rem; }
 .set-row.search-out { display: none; }
-/* A room's settings: the same group names as every settings page (05-11). */
-#salon-new .room-group { margin: 6px 4px -6px; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
-#salon-new .room-group[hidden] { display: none; }
 
 /* ======================================================================================================
    KIT (05-11, web/kit.js): the pieces every screen shares, one style each. A screen places them; it
@@ -2784,7 +2789,6 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-conv-member { --kc-ring: var(--panel); align-items: center; padding: 8px 12px; }
 .kit-conv-member .kit-conv-head > b { font-size: .8125rem; }
 .kit-conv-member .kit-conv-main > small { font-size: .75rem; }
-.salon-host-box > .kit-conv-member { flex: 1; padding: 0; --kc-ring: color-mix(in srgb, var(--brass) 10%, var(--panel)); }
 @media (max-width: 520px) { .kit-conv-card { --kc-av: 30px; column-gap: 8px; padding: 10px; } }
 
 /* THE ROW, compact (05-11, designers' review): a smaller initial, a bigger ringed point, the marks as small
@@ -2897,3 +2901,22 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-rights-pick > button > .kit-rights-same { display: block; font-size: .6875rem; font-weight: 500; opacity: .8; }
 .kit-asdelete { display: inline; }
 .as-files-menu #files.embedded > .panel-top { display: none; }
+/* IDLE 12 H OR MORE (07-11): « rien depuis 14 h », in grey, never bold. */
+.item small.kit-conv-idle { color: var(--ink2); opacity: .8; }
+/* FAIRE LE MÉNAGE (07-11): a clear button at the bottom of the list, only when something is idle. */
+.tidy-open { display: block; width: calc(100% - 1.5rem); margin: .75rem .75rem .25rem; padding: .55rem .75rem; background: transparent; border: 1px dashed var(--line); border-radius: 10px; color: var(--ink2); font-size: .8125rem; font-weight: 600; text-align: center; }
+.tidy-open:hover { color: var(--ink); border-color: var(--ink2); }
+/* « Mettre en veille ? »: the app's pop-up (a sheet from the bottom on a phone, centred on a wider screen). */
+.tidy-list { display: flex; flex-direction: column; gap: 2px; max-height: 50dvh; overflow-y: auto; }
+.tidy-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
+.tidy-row:hover { background: var(--bar); }
+.tidy-row input { width: 18px; height: 18px; accent-color: var(--brass); flex: none; }
+.tidy-name { color: var(--ink2); font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tidy-name b { color: var(--ink); font-weight: 600; }
+.tidy-go { min-height: 44px; }
+.tidy-said { color: var(--danger); }
+@media (min-width: 700px) {
+  .tidy-wrap { align-items: center; justify-content: center; }
+  .tidy-wrap .lk-sheet { width: min(440px, 92vw); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .tidy-wrap .lk-sheet::before { display: none; }
+}

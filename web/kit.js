@@ -7,6 +7,8 @@
  *   Switch         yes / no (role=switch, aria-checked)
  *   Segmented      one of a few (pressed buttons, aria-pressed)
  *   InlineConfirm  confirm in place of the button: Keep, then the action
+ *   MemberStack    who is in a room: up to 3 small stacked avatars, "+n" (its bar's right); roomPatch, one
+ *                  change of a room's settings as it is saved at once
  *   ConvCard       ONE CONVERSATION, three sizes: `row` (the list, Recent), `card` (the home deck),
  *                  `member` (a room's members, and the one that welcomes it). Same dot, name, line
  *                  of what it does now, chips; each place adds its own gestures (`actions`).
@@ -106,6 +108,25 @@
         return g;
     }
 
+    /* IDLE (07-11, the tidy-up): nothing for 12 h or more. Never one that waits for you, never one asleep.
+       `idleFor` is how long (0: not idle); `idleWords` says it: « rien depuis 14 h », « … 2 j », « … 3 sem. ». */
+    const IDLE_MS = 12 * 3600_000;
+    const idleFor = (at, { now = Date.now(), waits = false, asleep = false } = {}) => {
+        const t = typeof at === 'number' ? at : Date.parse(at ?? '');
+        if (waits || asleep || !Number.isFinite(t) || t <= 0) return 0;
+        return now - t >= IDLE_MS ? now - t : 0;
+    };
+    const idleWords = (ms) => {
+        const h = Math.floor(ms / 3600_000); const d = Math.floor(h / 24);
+        const [key, en, n] = h < 48 ? ['set-idle-h', 'idle for {n} h', h] : d < 14 ? ['set-idle-d', 'idle for {n} d', d] : d < 60 ? ['set-idle-w', 'idle for {n} wk', Math.floor(d / 7)] : ['set-idle-mo', 'idle for {n} mo', Math.floor(d / 30)];
+        return say(key, en).replace('{n}', String(n));
+    };
+    /* WHAT A TIDY-UP OFFERS: of `items` ({ at, waits, asleep, hidden, ... }), those idle 12 h or more, the
+       longest idle first, each with its `idle` (ms). Hidden ones are left alone. */
+    const tidyList = (items, now = Date.now()) => items.filter((x) => x && !x.hidden)
+        .map((x) => ({ ...x, idle: idleFor(x.at, { now, waits: x.waits, asleep: x.asleep }) }))
+        .filter((x) => x.idle > 0).sort((a, b) => b.idle - a.idle);
+
     /* Confirm in place of `button`: the question, Keep (focused), then the action. Escape keeps.
        Returns { close }. `onYes()` may be async; the action stays pressed till it is done. */
     function InlineConfirm(button, { question = '', yes = 'Remove', keep, danger = true, onYes = () => {} } = {}) {
@@ -152,7 +173,7 @@
         const lines = [];
         if (size === 'row') {
             const marks = Chips((m.chips ?? []).filter((c) => c && !c.wide && c.tone !== 'count'));
-            const sub = [m.last ? node('small', 'last', m.last) : null, m.now ? node('small', 'kit-conv-now', m.now) : null].filter(Boolean);
+            const sub = [m.last ? node('small', 'last', m.last) : null, m.now ? node('small', `kit-conv-now${m.idle ? ' kit-conv-idle' : ''}`, m.now) : null].filter(Boolean);
             if (marks && sub.length) { const line = node('span', 'kit-conv-sub'); line.append(sub[0], marks); lines.push(line, ...sub.slice(1)); }
             else if (marks) lines.push(marks);
             else lines.push(...sub);
@@ -534,6 +555,57 @@
         return box;
     }
 
+    /* WHO IS IN A ROOM, AT A GLANCE (07-11): its members as up to `max` small stacked avatars, on its bar's right --
+       the one that welcomes first, then its other AIs, its people, its boxes. More than `max`: `max - 1` of them and
+       "+n" (never more than `max` circles). `members` as the server lists them [{ name, kind, host? }]. */
+    const STACK_ORDER = { ai: 1, person: 2, box: 3 };
+    function memberStackModel(members = [], { max = 3 } = {}) {
+        const all = (members ?? []).filter((m) => m && m.name).map((m, i) => ({ m, i }))
+            .sort((a, b) => (Number(Boolean(b.m.host)) - Number(Boolean(a.m.host))) || ((STACK_ORDER[a.m.kind] ?? 4) - (STACK_ORDER[b.m.kind] ?? 4)) || a.i - b.i)
+            .map((x) => x.m);
+        const most = Math.max(1, Math.floor(max) || 1);
+        const shown = all.length > most ? all.slice(0, most - 1) : all;
+        return { shown: shown.map((m) => ({ name: m.name, kind: m.kind ?? 'ai', ...(m.host ? { host: true } : {}) })), more: all.length - shown.length, names: all.map((m) => m.name) };
+    }
+    /* The stack, drawn in `button` (the page's own, its id and listeners kept) or a new one; `onOpen` on a click.
+       `label`: what a click opens (« Members »), said with the names. */
+    function MemberStack(members = [], { max = 3, label = '', button = null, onOpen = null } = {}) {
+        const model = memberStackModel(members, { max });
+        const b = button ?? node('button'); b.type = 'button';
+        addClass(b, 'kit-stack');
+        b.replaceChildren(...model.shown.map((m) => {
+            const a = Avatar({ name: m.name, glyph: m.kind === 'box' ? node('span', 'kit-stack-box') : null });
+            a.dataset.kind = m.kind;
+            return a;
+        }));
+        if (model.more) { const more = node('span', 'kit-av kit-stack-more', `+${model.more}`); more.setAttribute('aria-hidden', 'true'); b.append(more); }
+        const names = model.names.join(', ');
+        b.title = names; b.setAttribute('aria-label', label ? `${label}: ${names}` : names);
+        if (onOpen) b.addEventListener('click', () => onOpen());
+        return b;
+    }
+
+    /* ONE CHANGE OF A ROOM, SAVED AT ONCE (07-11: its settings as every settings page, no Save): what POST
+       /rooms/<id> is given for it, or null when it changes nothing. `room` as the server lists it; `change` one of
+         { name }            its new name (trimmed; empty: nothing -- the field shows the name again)
+         { ai, on }          a conversation (its name) put in the room or taken out
+         { box, on }         a voice box (its id) put in or taken out
+         { host }            a conversation of the room (its name) that welcomes it from now on */
+    function roomPatch(room, change = {}) {
+        const members = room?.members ?? [];
+        const of = (kind, ref) => members.find((m) => m.kind === kind && m.ref === ref);
+        if ('name' in change) { const name = String(change.name ?? '').trim(); return name && name !== room?.name ? { name } : null; }
+        for (const kind of ['ai', 'box']) {
+            if (!(kind in change)) continue;
+            const ref = String(change[kind] ?? ''); if (!ref) return null;
+            const m = of(kind, ref);
+            if (change.on) return m ? null : { add: kind === 'ai' ? { conversations: [ref] } : { boxes: [ref] } };
+            return m ? { remove: [m.id] } : null;
+        }
+        if ('host' in change) { const m = of('ai', String(change.host ?? '')); return m && !m.host ? { host: m.id } : null; }
+        return null;
+    }
+
     /* ONE ASSET. `a`, what the page knows of it, said once:
          key, kind   'folder:reports', its kind (ASSET_ICONS)   name    its name
          live        a live link (a connexion): its rights are a connexion's
@@ -803,10 +875,10 @@
 
     window.clavariumKit = {
         collectModel,
-        AssetIcon, AssetCard, Holders, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, RIGHT_SAME,
+        AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, RIGHT_SAME,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
-        STATES, STATE_WORDS, stateOf, hueOf, initialOf,
+        STATES, STATE_WORDS, stateOf, hueOf, initialOf, IDLE_MS, idleFor, idleWords, tidyList,
         setWords(fn) { if (typeof fn === 'function') words = fn; },
         StatusDot, Avatar, Chips, Switch, Segmented, InlineConfirm, ConvCard, StepFlow, SecretPicker, NewAsset, TopBar,
     };
