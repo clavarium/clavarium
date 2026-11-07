@@ -23,7 +23,7 @@ function place() {
     const root = mkdtempSync(join(tmpdir(), 'clavarium-online-'));
     const P = {
         access: join(root, 'access'), tunnel: join(root, 'tunnel'), relayConf: join(root, 'etc', 'relay.conf'),
-        updateConf: join(root, 'etc', 'update.conf'), unit: join(root, 'clavarium.service'), tunnelUnit: join(root, 'clavarium-tunnel.service'), code: join(root, 'code'), caddy: join(root, 'caddy'), passwords: join(root, 'passwords'),
+        updateConf: join(root, 'etc', 'update.conf'), unit: join(root, 'clavarium.service'), tunnelUnit: join(root, 'clavarium-tunnel.service'), relayDone: join(root, 'relay-version'), code: join(root, 'code'), caddy: join(root, 'caddy'), passwords: join(root, 'passwords'),
     };
     mkdirSync(join(P.code, 'current', 'app', 'deploy'), { recursive: true });
     copyFileSync(RELAY_SH, join(P.code, 'current', 'app', 'deploy', 'relay.sh'));

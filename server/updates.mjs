@@ -67,7 +67,7 @@ function timerLastRun() {
 }
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.replace(/^REFUSED: /, '').slice(0, 300) ?? '';
 
-const RELAY_STATES = ['none', 'no-key', 'current', 'brought', 'refused', 'failed'];
+const RELAY_STATES = ['none', 'no-key', 'current', 'brought', 'refused', 'failed', 'held'];
 
 export class Updates {
     #host; #state; #conf; #version; #store; #alerts; #timer; #lastLook; #lastLookCache = { at: 0, value: null }; #clock; #noticeCache = { at: -Infinity, value: '' };

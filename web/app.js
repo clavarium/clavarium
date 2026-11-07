@@ -7306,6 +7306,8 @@
             refused: () => ['Relay not kept up to date: it refuses this server\'s key', 'Once: sudo clavarium key on this server, then relay.sh again on the relay, with --key and --keeper-key.', true],
             'no-key': () => ['Relay not kept up to date: no maintenance key', 'sudo clavarium online --relay HOST sets one up.', true],
             failed: (r) => [`Relay update failed: ${r.why ?? 'unknown'} · tried again later`, '', true],
+            /* 07-11: a new generation of the relay (several homes) waits for the owner, never brought by itself. */
+            held: (r) => [`Relay ${r.version} ready, not installed`, 'When you want it: sudo clavarium relay update-relay', false],
         };
         const relayBox = $('updates-relay');
         relayBox.hidden = !relay || !RELAY_SAID[relay.state];

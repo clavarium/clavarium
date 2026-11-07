@@ -59,6 +59,7 @@ export const PATHS = {
     access: '/var/lib/clavarium-relay-access',
     tunnel: '/var/lib/clavarium-tunnel',
     tunnelUnit: TUNNEL_UNIT,
+    relayDone: '/var/lib/clavarium/update/relay-version',
     relayConf: '/etc/clavarium/relay.conf',
     updateConf: '/etc/clavarium/update.conf',
     unit: '/etc/systemd/system/clavarium.service',
@@ -253,6 +254,11 @@ export async function keepRelayCurrent(sys, P = PATHS, { done, unit = TUNNEL_UNI
     let last = '';
     try { last = readFileSync(done, 'utf8').trim(); } catch { /* never brought */ }
     if (last === version) return { state: 'current', version };
+    /* A new GENERATION of the relay program (0.1 -> 0.2: one relay for several homes, 07-11) is never brought
+       by the updater: the owner brings it once, `sudo clavarium relay update-relay`, when they want it.
+       Fixes within a generation still come by themselves. */
+    const gen = (v) => String(v).split('.').slice(0, 2).join('.');
+    if (gen(version) !== gen(last || '0.1.0')) return { state: 'held', version, why: `the relay program ${version} is a new generation: bring it with sudo clavarium relay update-relay` };
     const r = await keeper(sys, P, conf, ['update-relay', version]);
     if (r.code !== 0) {
         /* sys.run says { code, out, err } (realSys). */
@@ -789,6 +795,8 @@ export async function relayCommand(args, sys, P = PATHS) {
             if (!/^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/.test(version ?? '')) throw new Bad('relay update-relay [X.Y.Z]');
             const r = await keeper(sys, P, conf, ['update-relay', version], { stream: true });
             if (r.code !== 0) throw new Failed(`the relay did not update (exit ${r.code})`);
+            /* Said to the updater (keepRelayCurrent): this generation is the owner's choice now, its fixes come by themselves. */
+            try { const done = P.relayDone ?? '/var/lib/clavarium/update/relay-version'; writeFileSync(`${done}.new`, `${version}\n`); renameSync(`${done}.new`, done); } catch { /* the updater asks again: no harm */ }
             return;
         }
         default: throw new Bad('usage: sudo clavarium relay status | repair | update-os [--reboot] | update-relay [X.Y.Z] | forget-setup-key | homes | invite NAME | add-home NAME --key KEY | remove-home NAME');

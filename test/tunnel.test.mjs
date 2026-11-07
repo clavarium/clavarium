@@ -136,4 +136,14 @@ test('after an update, the relay is brought to the version this release names, o
     sys.run = async () => ({ code: 255, out: '', err: `${at('clavarium-keeper')}: Permission denied (publickey).` });
     assert.equal((await keepRelayCurrent(sys, P, { done })).state, 'refused');
     assert.equal(readFileSync(done, 'utf8').trim(), '0.1.1', 'tried again at the next turn');
+    /* 07-11: a new generation (0.2, one relay for several homes) is never brought by the updater: held, nothing asked. */
+    writeFileSync(join(P.code, 'current', 'app', 'deploy', 'relay.sh'), 'RELAY_VERSION="0.2.0"\n');
+    const held = []; sys.run = async (argv) => { held.push(argv); return { code: 0 }; };
+    assert.equal((await keepRelayCurrent(sys, P, { done })).state, 'held');
+    assert.equal(held.length, 0, 'nothing asked of the relay');
+    assert.equal(readFileSync(done, 'utf8').trim(), '0.1.1', 'still the generation it had');
+    /* Brought once by hand, its fixes come by themselves again. */
+    writeFileSync(done, '0.2.0\n');
+    writeFileSync(join(P.code, 'current', 'app', 'deploy', 'relay.sh'), 'RELAY_VERSION="0.2.1"\n');
+    assert.deepEqual(await keepRelayCurrent(sys, P, { done }), { state: 'brought', version: '0.2.1' });
 });
