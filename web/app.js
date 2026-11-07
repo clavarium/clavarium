@@ -2328,7 +2328,7 @@
         const box = document.createElement('details'); box.className = 'auto-send'; box.dataset.repository = name;
         box.open = autoOpen.has(`${conversation}/${name}`);
         box.addEventListener('toggle', () => { if (box.open) autoOpen.add(`${conversation}/${name}`); else autoOpen.delete(`${conversation}/${name}`); });
-        const summary = document.createElement('summary'); summary.textContent = 'Automatic sending';
+        const summary = document.createElement('summary'); summary.textContent = uiSaid('set-auto-title', 'Automatic sending');
         const state = document.createElement('small'); state.className = 'hint auto-state'; summary.append(' ', state);
         const form = document.createElement('form'); form.autocomplete = 'off';
         const field = (text, input) => { const label = document.createElement('label'); label.textContent = text; label.append(input); return label; };
@@ -2345,23 +2345,23 @@
         const unknown = document.createElement('p'); unknown.className = 'hint auto-unknown'; unknown.hidden = true;
         unknown.textContent = 'The remote\'s default branch is not known yet (it is learnt at a refresh): until it is, nothing is sent by itself unless you confirm each branch or pattern of the list.';
         const shared = document.createElement('p'); shared.className = 'hint auto-shared'; shared.hidden = true;
-        const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger auto-sure'; sure.textContent = 'Confirm and save'; sure.hidden = true;
-        const save = document.createElement('button'); save.type = 'submit'; save.className = 'primary'; save.textContent = 'Save';
+        const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger auto-sure'; sure.textContent = uiSaid('set-auto-confirm', 'Confirm and save'); sure.hidden = true;
+        const save = document.createElement('button'); save.type = 'submit'; save.className = 'primary'; save.textContent = uiSaid('set-auto-save', 'Save');
         const said = document.createElement('span'); said.className = 'hint auto-said'; said.setAttribute('role', 'status');
         const actions = document.createElement('div'); actions.className = 'row'; actions.append(save, sure, said);
         /* Closed until the settings there are have arrived: a list typed
            before would be overwritten by them. */
         const fields = document.createElement('fieldset'); fields.disabled = true;
         form.append(fields);
-        fields.append(field('Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.', branches), hint,
-            field('Quiet delay, in seconds', quiet), field('Sendings an hour, at most (0: no cap)', perHour),
-            check('It may create a branch the remote does not have', create), check('Only after the checks passed in its machine', checks), unknown, shared, asking, actions);
+        fields.append(field(uiSaid('set-auto-branches', 'Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.'), branches), hint,
+            field(uiSaid('set-auto-quiet', 'Quiet delay, in seconds'), quiet), field(uiSaid('set-auto-hour', 'Sendings an hour, at most (0: no cap)'), perHour),
+            check(uiSaid('set-auto-create', 'It may create a branch the remote does not have'), create), check(uiSaid('set-auto-checks', 'Only after the checks passed in its machine'), checks), unknown, shared, asking, actions);
         box.append(summary, form);
         const fill = (about) => {
             const s = about.settings;
             branches.value = s.branches.join('\n'); quiet.value = String(s.quietSeconds); perHour.value = String(s.perHour);
             create.checked = s.create; checks.checked = s.checks;
-            state.textContent = s.branches.length ? `on: ${s.branches.join(', ')}` : 'off';
+            state.textContent = s.branches.length ? uiSaid('set-auto-on', 'on: {list}', { list: s.branches.join(', ') }) : uiSaid('set-auto-off', 'off');
             unknown.hidden = Boolean(about.defaultBranch);
             const others = about.sharedWith ?? [];
             shared.hidden = others.length === 0;
@@ -2376,7 +2376,7 @@
             const body = { branches: branches.value, quietSeconds: quiet.value === '' ? '' : Number(quiet.value), perHour: perHour.value === '' ? '' : Number(perHour.value), create: create.checked, checks: checks.checked, ...flags };
             const r = await fetch(where, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
             const j = await r.json().catch(() => ({}));
-            if (r.ok) { for (const k of Object.keys(flags)) delete flags[k]; fill(j); said.textContent = 'Saved.'; return; }
+            if (r.ok) { for (const k of Object.keys(flags)) delete flags[k]; fill(j); said.textContent = uiSaid('set-auto-saved', 'Saved.'); return; }
             /* Nothing was saved: the owner reads what it would allow, then confirms or changes the list. */
             if (j.kind === 'confirm-wide' || j.kind === 'confirm-shared') { asking.textContent = j.error; asking.hidden = false; sure.hidden = false; sure.dataset.kind = j.kind; return; }
             said.textContent = j.error || 'The request failed.';
