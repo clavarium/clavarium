@@ -882,6 +882,19 @@
             <p id="mcp-error" class="error" role="alert" hidden></p>
           </form>
           </div>
+          <div id="browser-box" class="as-form" data-kind="browser"><h3 data-said="set-br-head">Pair a browser</h3>
+          <ol class="hint br-steps"><li data-said="set-br-step-install">Install the Tether extension.</li><li data-said="set-br-step-address">In its popup, set the address below.</li><li data-said="set-br-step-code">Type here the code it shows.</li></ol>
+          <form id="browser-new" autocomplete="off">
+            <label for="browser-address" data-said="set-br-address">Address for the extension</label>
+            <div class="row"><input id="browser-address" readonly spellcheck="false"><button type="button" id="browser-copy" data-said="set-br-copy">Copy</button></div>
+            <label for="browser-name" data-said="set-br-name">Name</label>
+            <input id="browser-name" maxlength="80" spellcheck="false" placeholder="Laptop · Firefox">
+            <label for="browser-code" data-said="set-br-code">Code</label>
+            <input id="browser-code" inputmode="numeric" autocomplete="off" maxlength="32" placeholder="123456" required>
+            <div class="row"><button type="submit" id="browser-pair" class="primary" data-said="set-br-pair">Pair</button></div>
+            <p id="browser-error" class="error" role="alert" hidden></p>
+          </form>
+          </div>
           <div id="list-box" class="as-form" data-kind="list"><h3 id="listnew-head">New binder</h3>
         <form id="list-new" autocomplete="off">
           <label for="listnew-template">Template</label>

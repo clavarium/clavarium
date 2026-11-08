@@ -360,7 +360,9 @@ export async function handleApi(request, response, conversations, headers, resou
                 const r = await tethers.act('state', { agent: query.get('agent') ?? undefined }, '');
                 const data = r.data ?? {};
                 const approvals = Array.isArray(data.approvals) ? data.approvals.map((q) => { try { return { ...q, view: demandeView(q) }; } catch { return q; } }) : data.approvals;
-                return send(200, { given: tethers.given(), changes: tethers.changes(), ...data, ...(approvals ? { approvals } : {}) }), true;
+                /* Each paired browser: connected or not, and the tabs its person granted (browsers.mjs). Never a token. */
+                const browsersNow = tethers.browsers ? { browsers: tethers.browsers.all(), browsersWaiting: tethers.browsers.waiting() } : {};
+                return send(200, { given: tethers.given(), changes: tethers.changes(), ...data, ...(approvals ? { approvals } : {}), ...browsersNow }), true;
             }
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
@@ -623,10 +625,17 @@ export async function handleApi(request, response, conversations, headers, resou
             const done = await { add: mcpAdd, import: mcpImport, refresh: mcpRefresh, rights: mcpRights, seen: mcpSeen }[mcpOp[1]](ctx, body ?? {});
             return send(mcpOp[1] === 'add' || mcpOp[1] === 'import' ? 201 : 200, done), true;
         }
+        /* A browser paired through the Tether extension (browsers.mjs): the code its popup shows, and its name; or paired
+           again ({ code, target }). The token it is handed is never in the answer. */
+        /* The sites a conversation acts on without asking, at frame: { target, agent, sites: [host | *.host] }. */
+        if (pathname === '/api/tether/browser-sites' && tethers?.browsers) return send(200, await tethers.browsers.setSites(tethers, body ?? {})), true;
+        if (pathname === '/api/tether/browser-pair' && tethers?.browsers) return send(201, tethers.browsers.pair({ code: body?.code, name: body?.name, target: body?.target })), true;
         /* A server taken away: the key kept for it goes too. */
         const mcpGone = pathname === '/api/tether/remove-target' && tethers ? tethers.store().target(String(body?.target ?? '')) : null;
         const tetherOp = /^\/api\/tether\/(level|allow|unallow|decide|remove-target|stop|resume|job-done|job-file)$/.exec(pathname);
         if (tetherOp && tethers && mcpGone?.kind === 'mcp') { const r = await tethers.act('remove-target', body, ''); if (!r.ok) throw new Refusal(400, r.text); forgetKey(secrets, mcpGone); return send(200, r.data ?? { ok: true }), true; }
+        /* A browser taken away: its tokens and its socket go too. */
+        if (tetherOp && tethers && mcpGone?.kind === 'browser') { const r = await tethers.act('remove-target', body, ''); if (!r.ok) throw new Refusal(400, r.text); tethers.browsers?.forget(mcpGone.id); return send(200, r.data ?? { ok: true }), true; }
         if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
         /* A mailbox's signature (Markdown), added under what the agent sends from it. */
         if (pathname === '/api/tether/signature' && tethers) {

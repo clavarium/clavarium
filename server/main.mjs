@@ -73,6 +73,7 @@ import { Wifi } from './wifi.mjs';
 import { MeshCentral } from './meshcentral.mjs';
 import { Binders } from './binders.mjs';
 import { Tethers } from './tethers.mjs';
+import { Browsers } from './browsers.mjs';
 import { Accounts } from './accounts.mjs';
 import { ServerLogs } from './serverlogs.mjs';
 import { History, STEP_MS as HISTORY_STEP_MS } from './history.mjs';
@@ -475,7 +476,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        mailbox, a calendar, an address book -- held here with their secrets read from
        the vault by name, never in a machine: see tethers.mjs. */
     /* Voice boxes are Tether targets too (boxes.mjs): their connector reaches them through `boxes`, made below. */
-    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) }, ...(tetherConnectors ?? {}) } });
+    /* A person's own browser, paired through the Tether extension, which connects out to this server (browsers.mjs). */
+    let tethers = null;
+    const browsers = new Browsers({ dataDir, store: () => tethers?.store(), log: (line) => console.log(line) });
+    tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, browsers, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) }, ...(tetherConnectors ?? {}) } });
     const stopTethers = tethers.start();
     /* Connecting a mailbox, calendar or address book by token: the consent happens
        in the owner's browser, the refresh token is kept host-only (never in a
@@ -794,6 +798,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
+    browsers.attach(server, WebSocketServer); server.on('close', () => browsers.shutdown());
     /* The wake word's weekly threshold tuning (Sunday from 03:00, each box's own time): looked at every 10 minutes. */
     const wakeWeekly = setInterval(() => { try { boxes.wakeWeekly(); } catch (error) { console.error(`wake tuning: ${error.message}`); } }, 10 * 60_000); wakeWeekly.unref?.(); server.on('close', () => clearInterval(wakeWeekly));
     /* A collect session's clock: the stations asked, its end, the speaker told to stop (boxcollect.mjs). */

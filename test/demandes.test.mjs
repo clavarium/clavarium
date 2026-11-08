@@ -196,3 +196,52 @@ test('a read tool, its title known, not fresh: reversible, no risk; Always offer
     const w = en(demandeView({ id, verb: 'mcp.call', card: { kind: 'mcp', action: 'call', server: 'CRM', tool: 'update', class: 'write', open: true, args: [] } }));
     assert.deepEqual([w.sub, w.risk, w.irreversible], ['CRM · Writes', ['Reaches outside'], false]);
 });
+
+/* AN ACT IN A PAIRED BROWSER (browsers.mjs gives the tab, the script, the point in card.about): the tab by its title, its
+   site; a script shown whole, irreversible. Parley has words for Open only: the others carry their English, and their
+   French comes with the settings words (served with the chat screen's, talk.mjs). */
+test('a browser act: « Cliquer dans l\'onglet … », « Exécuter un script dans … » with the script; the active tab when none named', async () => {
+    const { settingsWords } = await import('../server/settingswords.mjs');
+    const frAll = (v) => requestOf(v, { words: { ...texts('fr'), ...settingsWords('fr') }, locale: 'fr-FR' });
+    const tab = { id: 7, title: 'Basket', url: 'https://shop.example.com/basket', site: 'shop.example.com' };
+    const click = demandeView({ id, verb: 'browser.click', detail: '.buy', target: { title: 'Laptop' }, why: 'you asked to buy it', card: { kind: 'browser', action: 'click', selector: '.buy', about: { tab, selector: '.buy' } } });
+    assert.equal(click.kind, 'browser');
+    let r = en(click);
+    assert.equal(r.title, 'Click in the tab « Basket »');
+    assert.equal(r.sub, 'shop.example.com · Laptop');
+    assert.deepEqual(r.facts.map((f) => [f.label, f.text]), [['Page', 'https://shop.example.com/basket'], ['Element', '.buy']]);
+    assert.equal(r.yes.label, 'Click');
+    assert.equal(r.irreversible, false);
+    assert.equal(r.why, 'you asked to buy it');
+    r = frAll(click);
+    assert.equal(r.title, 'Cliquer dans l\'onglet « Basket »');
+    assert.equal(r.yes.label, 'Cliquer');
+    const script = 'document.querySelector(".buy").click();\nreturn document.title;';
+    const ev = demandeView({ id, verb: 'browser.eval', detail: script, target: { title: 'Laptop' }, card: { kind: 'browser', action: 'eval', about: { tab, script } } });
+    for (const [lang, f, title, risk, yes] of [['en', en, 'Run a script in « Basket »', 'Has this page\'s rights: it can do anything there', 'Run'], ['fr', frAll, 'Exécuter un script dans « Basket »', 'Droits de la page : il peut tout y faire', 'Lancer']]) {
+        const x = f(ev);
+        assert.equal(x.title, title, lang);
+        assert.deepEqual(x.risk, [risk], lang);
+        assert.equal(x.code, script, 'the script shown whole');
+        assert.equal(x.irreversible, true, 'never in Accept all');
+        assert.equal(x.yes.label, yes, lang);
+        assert.equal(x.others.length, 0);
+    }
+    /* No tab named: the active one, said so; each act its own words. */
+    const said = (action, more = {}) => frAll(demandeView({ id, verb: `browser.${action}`, card: { kind: 'browser', action, ...more } })).title;
+    assert.equal(said('key', { key: 'Enter' }), 'Appuyer sur Enter dans l\'onglet actif');
+    assert.equal(said('type', { text: 'hello' }), 'Écrire dans l\'onglet actif');
+    assert.equal(said('scroll'), 'Défiler dans l\'onglet actif');
+    assert.equal(said('drag'), 'Glisser dans l\'onglet actif');
+    const drag = en(demandeView({ id, verb: 'browser.drag', card: { kind: 'browser', action: 'drag', about: { tab, from: '#a', to: '#b' } } }));
+    assert.deepEqual([drag.before, drag.after], [['#a'], ['#b']]);
+    const typed = en(demandeView({ id, verb: 'browser.type', card: { kind: 'browser', action: 'type', text: 'hello', about: { tab } } }));
+    assert.equal(typed.quote, 'hello');
+    /* Open keeps Parley's own word, with Always for its site. */
+    const open = en(demandeView({ id, verb: 'browser.open', rule: { kind: 'site', value: 'example.com' }, target: { title: 'Laptop' }, card: { kind: 'browser', action: 'open', url: 'https://example.com/a' } }));
+    assert.equal(open.title, 'Open https://example.com/a');
+    assert.equal(open.others.length, 1);
+    /* Every word of these cards is said in French. */
+    const fr2 = { ...texts('fr'), ...settingsWords('fr') };
+    for (const v of [click, ev]) for (const k of keysOf(v)) assert.ok(Object.hasOwn(fr2, k), `fr: ${k}`);
+});
