@@ -14,7 +14,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { keeper } from 'clavarium-tether/host';
 import { handleApi } from '../server/api.mjs';
 import { Tethers } from '../server/tethers.mjs';
-import { Browsers, BROWSER_PATH, WRONG_MAX, LOBBY_PER_ADDRESS, LOBBY_MESSAGE_MAX, addressOf } from '../server/browsers.mjs';
+import { Browsers, BROWSER_PATH, WRONG_MAX, LOBBY_PER_ADDRESS, LOBBY_MESSAGE_MAX, OFFER_MS, addressOf } from '../server/browsers.mjs';
 import { demandeView } from '../server/demandes.mjs';
 
 const AGENT = { id: 'conversation:alpha', kind: 'agent', name: 'alpha' };
@@ -249,4 +249,63 @@ test('the real endpoint: a WebSocket at /c/api/browser, paired, a call answered;
     const failed = await new Promise((res) => { other.on('error', () => res(true)); other.on('open', () => res(false)); setTimeout(() => res(true), 1500).unref(); });
     other.terminate();
     assert.equal(failed, true);
+});
+
+/* PAIRED BY A CONFIGURATION (Tether 0.1.0-next.59): the person copies one line from the page into the extension. */
+test('a configuration: one line made in the page, its key swapped once for the token; the key and the token in no file, log or other answer', async (t) => {
+    const b = bench(t);
+    const made = await b.call('POST', '/api/tether/browser-offer', { name: 'Desk · Chrome' });
+    assert.equal(made.status, 201);
+    const { offer, key } = made.body;
+    assert.ok(key.length >= 40 && /^[0-9a-f]{12}$/.test(offer));
+    assert.deepEqual((await b.call('POST', '/api/tether/browser-offer-state', { offer })).body, { state: 'waiting' });
+    assert.ok(!b.written().includes(key), 'the key is kept nowhere in clear');
+    const e = extension(b.browsers);
+    e.ext.send({ t: 'hello' }); e.ext.send({ t: 'claim', key }); await tick();
+    assert.ok(e.said.includes('paired') && e.token, 'swapped for the token');
+    const state = await b.call('POST', '/api/tether/browser-offer-state', { offer });
+    assert.deepEqual(state.body, { state: 'claimed', target: { id: 'browser-desk-chrome', title: 'Desk · Chrome' } });
+    assert.equal(b.browsers.status('browser-desk-chrome').connected, true);
+    const all = (await b.call('GET', '/api/tether')).text;
+    for (const text of [state.text, all, b.logs.join('\n'), b.written()]) { assert.ok(!text.includes(e.token)); assert.ok(!text.includes(key)); }
+    /* Started again: its token, no key, no code. */
+    const token = e.token; e.close(); await tick();
+    const back = extension(b.browsers, { token }); back.start(); await tick();
+    assert.ok(back.said.includes('welcome'));
+    assert.equal(b.browsers.status('browser-desk-chrome').connected, true);
+    /* Paired again from its panel: a configuration for the same asset; the old token goes. */
+    const again = await b.call('POST', '/api/tether/browser-offer', { target: 'browser-desk-chrome' });
+    const e2 = extension(b.browsers, { address: 'client-h.example' });
+    e2.ext.send({ t: 'claim', key: again.body.key }); await tick();
+    assert.ok(e2.token && e2.token !== token);
+    assert.equal(b.tethers.store().targets().filter((x) => x.kind === 'browser').length, 1, 'the same asset');
+    const old = extension(b.browsers, { token, address: 'client-i.example' }); old.start(); await tick();
+    assert.ok(old.said.includes('pair-needed'), 'the old token no longer opens it');
+});
+
+test('a configuration\'s key: spent, wrong or expired is refused and counted per address; too many and the address waits', async (t) => {
+    let now = Date.parse('2026-11-08T10:00:00Z');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-browsers-'));
+    const b = bench(t, { dir });
+    const clock = new Browsers({ dataDir: join(dir, 'clock'), store: () => b.tethers.store(), now: () => now });
+    t.after(() => clock.shutdown());
+    const { key } = clock.offer({ name: 'A' });
+    const first = extension(clock, { address: 'client-a.example' });
+    first.ext.send({ t: 'claim', key }); await tick();
+    assert.ok(first.token);
+    const late = clock.offer({ name: 'B' });
+    now += OFFER_MS + 1000;
+    const thief = extension(clock, { address: 'client-b.example' });
+    const said = [];
+    thief.ext.onMessage((m) => said.push(m.t));
+    thief.ext.send({ t: 'claim', key }); await tick();
+    assert.deepEqual(said, ['claim-refused'], 'a key is good once');
+    thief.ext.send({ t: 'claim', key: late.key }); await tick();
+    assert.deepEqual(said, ['claim-refused', 'claim-refused'], 'an expired key is refused');
+    assert.equal(clock.refusedKeys('client-b.example'), 2);
+    for (let i = 2; i < WRONG_MAX; i++) { const x = extension(clock, { address: 'client-b.example' }); x.ext.send({ t: 'claim', key: `wrong-${i}-0123456789abcdef` }); await tick(); }
+    assert.equal(clock.refusedKeys('client-b.example'), WRONG_MAX);
+    assert.equal(extension(clock, { address: 'client-b.example' }).accepted, false, 'that address waits now');
+    assert.equal(extension(clock, { address: 'client-c.example' }).accepted, true, 'another does not');
+    assert.equal(b.tethers.store().targets().filter((x) => x.kind === 'browser').length, 1, 'only the one paired');
 });

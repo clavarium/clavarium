@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { bench, SKIP } from './bench.mjs';
 
-/* A PERSON'S BROWSER THROUGH THE TETHER EXTENSION (08-11): Assets › New › Browser shows the steps and the address the
-   extension connects to; a fake extension (a WebSocket of this test, as the real one speaks) shows its code; the code
-   typed, the browser is an asset, connected, its granted tabs listed; given to a conversation with the usual levels;
+/* A PERSON'S BROWSER THROUGH THE TETHER EXTENSION (08-11): Assets › New › Browser makes one line to copy into the
+   extension (its address, a key good once); a fake extension (a WebSocket of this test) comes with it, and the page,
+   waiting, opens the new browser, connected, its granted tabs listed; given to a conversation with the usual levels;
    Frame shows its sites; a click asked is a card in the thread, « Click in the tab … ». The token never in the page. */
-test('a browser: paired by its code, its tabs, given at a level, Frame\'s sites, a click asked as a card', { skip: SKIP }, async (t) => {
+test('a browser: paired by a configuration copied once, its tabs, given at a level, Frame\'s sites, a click asked as a card', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     await me.page.setViewportSize({ width: 1280, height: 800 });
@@ -17,24 +17,19 @@ test('a browser: paired by its code, its tabs, given at a level, Frame\'s sites,
     assert.equal((await me.api('/api/conversations/asker/talk', { on: true })).status, 200);
 
     await me.addAsset('browser');
-    await me.until('the address shown', async () => (await me.page.inputValue('#browser-address')) !== '', 10_000);
-    const address = await me.page.inputValue('#browser-address');
-    assert.equal(address, `${b.origin.replace(/^http/, 'ws')}/c/api/browser`);
-
-    /* The extension connects to that address, says hello and shows its code. */
+    /* The page makes one line; the extension (this test's WebSocket, as the real one speaks) is given it. */
+    await me.page.fill('#browser-name', 'Laptop');
+    await me.page.locator('#browser-make').click();
+    await me.until('the configuration shown', async () => (await me.page.inputValue('#browser-config')) !== '', 10_000);
+    const config = JSON.parse(await me.page.inputValue('#browser-config'));
+    assert.equal(config.url, `${b.origin.replace(/^http/, 'ws')}/c/api/browser`);
+    assert.ok(config.key.length >= 40);
     const got = [];
-    const ws = new WebSocket(address);
+    const ws = new WebSocket(config.url);
     t.after(() => ws.terminate());
     ws.on('message', (d) => { const m = JSON.parse(String(d)); got.push(m); if (m.t === 'call') ws.send(JSON.stringify({ t: 'result', id: m.id, ok: true, text: 'clicked' })); });
     await new Promise((r) => ws.on('open', r));
-    ws.send(JSON.stringify({ t: 'hello' })); ws.send(JSON.stringify({ t: 'pair', code: '864209' }));
-
-    await me.page.fill('#browser-name', 'Laptop');
-    await me.page.fill('#browser-code', '111111');
-    await me.page.locator('#browser-pair').click();
-    await me.until('a wrong code is said', async () => (await me.page.locator('#browser-error').isVisible()), 10_000);
-    await me.page.fill('#browser-code', '864209');
-    await me.page.locator('#browser-pair').click();
+    ws.send(JSON.stringify({ t: 'hello' })); ws.send(JSON.stringify({ t: 'claim', key: config.key }));
     await me.until('paired', async () => got.some((m) => m.t === 'paired'), 15_000);
     const token = got.find((m) => m.t === 'paired').token;
     ws.send(JSON.stringify({ t: 'tabs', tabs: [{ id: 7, url: 'https://shop.example.com/basket', title: 'Basket', site: 'shop.example.com' }] }));

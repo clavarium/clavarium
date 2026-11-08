@@ -5195,6 +5195,8 @@
        AI can touch), the address the extension connects to, « Pair again »; then, for each conversation at Frame, the
        sites it acts on without asking. */
     const browserAddress = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/c/api/browser`;
+    /* The one line pasted in the extension's popup: where it connects, and its key good once (Tether 0.1.0-next.59). */
+    const browserConfig = (key) => JSON.stringify({ url: browserAddress(), key });
     function browserParts(t, tether = {}) {
         const out = [];
         const now = tether.browsers?.[t.id] ?? { connected: false, tabs: [] };
@@ -5206,16 +5208,18 @@
         const body = [state];
         body.push(now.tabs.length ? list : el('p', 'hint', uiSaid('set-br-no-tabs', 'No tab granted: grant them in its popup.')));
         out.push({ title: uiSaid('set-br-tabs', 'Tabs'), body, cls: 'as-br-tabs' });
-        /* Paired again (the extension reinstalled, its pairing reset): its new code, the same asset. */
+        /* Paired again (the extension reinstalled, its pairing reset): a new configuration for the same asset. */
         const again = el('div', 'br-again');
-        const code = el('input'); code.inputMode = 'numeric'; code.autocomplete = 'off'; code.placeholder = uiSaid('set-br-code', 'Code'); code.setAttribute('aria-label', uiSaid('set-br-code', 'Code'));
+        const line = el('input'); line.readOnly = true; line.spellcheck = false; line.hidden = true; line.setAttribute('aria-label', uiSaid('set-br-config', 'Configuration (once, 10 minutes)'));
         const go = el('button', '', uiSaid('set-br-pair-again', 'Pair again')); go.type = 'button'; go.dataset.act = 'browser-pair-again';
         go.addEventListener('click', async () => {
+            if (!line.hidden) { try { await navigator.clipboard.writeText(line.value); go.textContent = uiSaid('set-br-copied', 'Copied'); } catch { line.select(); } return; }
             go.disabled = true; $(asErrId()).hidden = true;
-            try { await post(`${API}/tether/browser-pair`, { code: code.value.trim(), target: t.id }); } catch (error) { sayAsErr(error); }
-            go.disabled = false; await repaintAsset();
+            try { const made = await post(`${API}/tether/browser-offer`, { target: t.id }); line.value = browserConfig(made.key); line.hidden = false; go.textContent = uiSaid('set-br-copy', 'Copy'); }
+            catch (error) { sayAsErr(error); }
+            go.disabled = false;
         });
-        again.append(el('p', 'hint br-address', browserAddress()), code, go);
+        again.append(line, go);
         out.push({ title: uiSaid('set-br-pairing', 'Pairing'), body: [again], cls: 'as-br-pair' });
         /* Frame: the sites each conversation acts on without a card (Tether's site rules). Empty: everything asked. */
         const framed = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');
@@ -8941,14 +8945,45 @@
         btn.disabled = false;
         await paintAssets();
     });
-    /* PAIR A BROWSER (browsers.mjs): the code the Tether extension's popup shows, once; it reconnects by itself after. */
+    /* PAIR A BROWSER (browsers.mjs): one line to copy into the Tether extension's popup -- its address and a key good once,
+       for ten minutes; the page waits until the extension came with it. Or, as before, the code its popup shows. */
+    let browserWait = null;
+    const stopBrowserWait = () => { clearTimeout(browserWait); browserWait = null; };
+    async function browserClaimed(form, offer) {
+        stopBrowserWait();
+        let r;
+        try { r = await post(`${API}/tether/browser-offer-state`, { offer }); } catch { r = { state: 'waiting' }; }
+        if (r.state === 'claimed') {
+            $('browser-new').reset(); $('browser-made').hidden = true;
+            await assetMade(form, { key: `connexion:${r.target.id}`, name: r.target.title, give: (to, level) => grantTarget(r.target.id, to, targetLevel(level)) });
+            await paintAssets();
+            return;
+        }
+        if (r.state === 'expired') { $('browser-wait').textContent = uiSaid('set-br-expired', 'Expired: make a new one.'); return; }
+        if (!form.isConnected || form.hidden) return;
+        browserWait = setTimeout(() => void browserClaimed(form, offer), 2000);
+    }
     $('browser-new').addEventListener('submit', async (event) => {
         event.preventDefault();
+        $('browser-error').hidden = true;
+        const btn = $('browser-make'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/browser-offer`, { name: $('browser-name').value.trim() });
+            $('browser-config').value = browserConfig(made.key);
+            $('browser-copy').textContent = uiSaid('set-br-copy', 'Copy');
+            $('browser-wait').textContent = uiSaid('set-br-wait', 'Waiting for the extension…');
+            $('browser-made').hidden = false;
+            const box = $('browser-box');
+            void browserClaimed(box, made.offer);
+        } catch (error) { $('browser-error').textContent = error.message; $('browser-error').hidden = false; }
+        btn.disabled = false;
+    });
+    $('browser-pair').addEventListener('click', async () => {
         $('browser-error').hidden = true;
         const btn = $('browser-pair'); btn.disabled = true;
         try {
             const made = await post(`${API}/tether/browser-pair`, { name: $('browser-name').value.trim(), code: $('browser-code').value.trim() });
-            $('browser-new').reset();
+            stopBrowserWait(); $('browser-new').reset(); $('browser-made').hidden = true;
             await assetMade($('browser-box'), { key: `connexion:${made.id}`, name: made.title, give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
         } catch (error) { $('browser-error').textContent = error.message; $('browser-error').hidden = false; }
         btn.disabled = false;
@@ -8956,8 +8991,8 @@
     });
     $('browser-address').value = browserAddress();
     $('browser-copy').addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText($('browser-address').value); $('browser-copy').textContent = uiSaid('set-br-copied', 'Copied'); }
-        catch { $('browser-address').select(); }
+        try { await navigator.clipboard.writeText($('browser-config').value); $('browser-copy').textContent = uiSaid('set-br-copied', 'Copied'); }
+        catch { $('browser-config').select(); }
     });
     $('mcp-import').addEventListener('click', async () => {
         $('mcp-error').hidden = true;

@@ -629,6 +629,10 @@ export async function handleApi(request, response, conversations, headers, resou
            again ({ code, target }). The token it is handed is never in the answer. */
         /* The sites a conversation acts on without asking, at frame: { target, agent, sites: [host | *.host] }. */
         if (pathname === '/api/tether/browser-sites' && tethers?.browsers) return send(200, await tethers.browsers.setSites(tethers, body ?? {})), true;
+        /* A configuration to paste in the extension ({ name?, target? } -> { offer, key, expires }: the key said this once,
+           kept only as its hash), and where it is ({ offer } -> waiting | claimed (its target) | expired). */
+        if (pathname === '/api/tether/browser-offer' && tethers?.browsers) return send(201, tethers.browsers.offer({ name: body?.name, target: body?.target })), true;
+        if (pathname === '/api/tether/browser-offer-state' && tethers?.browsers) return send(200, tethers.browsers.offerState(body?.offer)), true;
         if (pathname === '/api/tether/browser-pair' && tethers?.browsers) return send(201, tethers.browsers.pair({ code: body?.code, name: body?.name, target: body?.target })), true;
         /* A server taken away: the key kept for it goes too. */
         const mcpGone = pathname === '/api/tether/remove-target' && tethers ? tethers.store().target(String(body?.target ?? '')) : null;

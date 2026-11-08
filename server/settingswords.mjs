@@ -173,8 +173,10 @@ export const SETTINGS_WORDS_FR = {
     'set-rt-mcp-hint-frame': 'Votre choix pour chaque sorte d\'outil',
     /* A browser paired through the Tether extension (browsers.mjs): the form, its panel, Frame's sites. */
     'set-na-k-browser': 'Navigateur', 'set-br-head': 'Associer un navigateur',
-    'set-br-step-install': 'Installez l\'extension Tether.', 'set-br-step-address': 'Dans sa fenêtre, mettez l\'adresse ci-dessous.',
-    'set-br-step-code': 'Tapez ici le code qu\'elle affiche.', 'set-br-address': 'Adresse pour l\'extension', 'set-br-copy': 'Copier', 'set-br-copied': 'Copié',
+    'set-br-step-install': 'Installez l\'extension Tether.', 'set-br-step-make': 'Créez la configuration, puis copiez-la.',
+    'set-br-step-paste': 'Collez-la dans la fenêtre de l\'extension.', 'set-br-make': 'Créer la configuration',
+    'set-br-config': 'Configuration (une fois, 10 minutes)', 'set-br-wait': 'En attente de l\'extension…',
+    'set-br-expired': 'Expirée : créez-en une autre.', 'set-br-by-code': 'Ou avec le code qu\'elle affiche', 'set-br-address': 'Adresse pour l\'extension', 'set-br-copy': 'Copier', 'set-br-copied': 'Copié',
     'set-br-name': 'Nom', 'set-br-code': 'Code', 'set-br-pair': 'Associer', 'set-br-pair-again': 'Associer à nouveau', 'set-br-pairing': 'Association',
     'set-br-connected': 'Connecté · {n} onglet(s) donné(s)', 'set-br-offline': 'Non connecté : ouvrez ce navigateur',
     'set-br-tabs': 'Onglets', 'set-br-no-tabs': 'Aucun onglet donné : voyez sa fenêtre.',

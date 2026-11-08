@@ -7,7 +7,14 @@
  * through without the web sign-in (deploy/install.sh, skip_auth_routes), as it does for paired devices and voice boxes.
  * The extension cannot sign in; its right is the token it was handed when it was paired, and nothing else.
  *
- * PAIRING. A new extension says { t:"pair", code }: it waits here, in the lobby, its code shown in its popup. The person
+ * PAIRING BY A CONFIGURATION (Tether 0.1.0-next.59), the way a person copies once: Assets › New › Browser shows one line,
+ * {"url":"wss://…/c/api/browser","key":"…"}, pasted in the extension's popup. The key is single-use, good for ten
+ * minutes, kept here only as its SHA-256 (offer). The extension connects and says { t:"claim", key }: a key offered,
+ * not expired, makes the browser's target (or pairs it again), its socket goes to that browser's connector, which
+ * swaps the key for the token. A wrong, spent or expired key is refused ({ t:"claim-refused" }) and counted per
+ * address; too many, the address is turned away for a while.
+ *
+ * PAIRING BY A CODE, the fallback. A new extension says { t:"pair", code }: it waits here, in the lobby, its code shown in its popup. The person
  * types that code in Assets › New › Browser (pair): the socket goes to that target's own connector (one per browser,
  * Tether's `browser()`), which mints a long-lived token and hands it over. From then on the extension says
  * { t:"hello", token } each time it connects -- every start of the browser -- and is that browser again, with no code.
@@ -21,7 +28,7 @@
  * kept small; and on the person's side, wrong codes counted -- too many in a while, pairing waits. Two sockets offering
  * the same code are both refused (nobody can take a code someone else shows).
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { browser as browserConnector } from 'clavarium-tether/connectors/browser';
 import { no } from 'clavarium-tether/verbs';
 import { JsonFile } from './store.mjs';
@@ -42,6 +49,9 @@ export const CONNECTS_PER_MINUTE = 20;
 export const WRONG_MAX = 5;
 export const WRONG_WINDOW_MS = 10 * 60_000;
 const TITLE_MAX = 80;
+/* A configuration's key is good this long; this many offers wait at most. */
+export const OFFER_MS = 10 * 60_000;
+export const OFFERS_MAX = 20;
 export const SITES_MAX = 100;
 
 const hash = (token) => createHash('sha256').update(String(token)).digest('hex');
@@ -63,6 +73,8 @@ export class Browsers {
     #lobby = new Set();         /* sockets not paired yet */
     #connects = new Map();      /* address -> times of its recent sockets */
     #wrong = [];                /* times of recent wrong codes */
+    #offers = new Map();        /* offer id -> { hash, name, target, expires, claimed } */
+    #badClaims = new Map();     /* address -> times of its recent wrong keys */
     #listeners = new Set();
     #timer = null;
 
@@ -131,7 +143,8 @@ export class Browsers {
         const recent = (this.#connects.get(address) ?? []).filter((t) => now - t < 60_000);
         recent.push(now); this.#connects.set(address, recent);
         const waiting = [...this.#lobby].filter((c) => c.address === address).length;
-        if (recent.length > CONNECTS_PER_MINUTE || this.#lobby.size >= LOBBY_MAX || waiting >= LOBBY_PER_ADDRESS) { try { raw.close(); } catch { /* gone */ } return false; }
+        const bad = (this.#badClaims.get(address) ?? []).filter((t) => now - t < WRONG_WINDOW_MS).length;
+        if (recent.length > CONNECTS_PER_MINUTE || this.#lobby.size >= LOBBY_MAX || waiting >= LOBBY_PER_ADDRESS || bad >= WRONG_MAX) { try { raw.close(); } catch { /* gone */ } return false; }
         const conn = { raw, address, since: now, code: null, tabs: null, handler: null, closers: new Set(), taken: false };
         this.#lobby.add(conn);
         raw.onMessage((msg, size = 0) => {
@@ -153,6 +166,7 @@ export class Browsers {
             if (/^[0-9A-Za-z-]{4,32}$/.test(code)) { conn.code = code; this.#changed(); }
             return;
         }
+        if (msg.t === 'claim') { this.#claim(conn, msg); return; }
         if (msg.t === 'hello' && typeof msg.token === 'string' && msg.token) {
             const h = hash(msg.token);
             const all = this.#tokens.get();
@@ -172,6 +186,60 @@ export class Browsers {
         for (const m of said) conn.handler?.(m);
         if (conn.tabs) conn.handler?.(conn.tabs);
         return i;
+    }
+
+    /* A CONFIGURATION TO PASTE in the extension: { name?, target? } -> { offer, key, expires }. The key is said once,
+       here, to the signed-in person; only its hash is kept. `target`: a browser paired again. */
+    offer({ name = '', target = '' } = {}) {
+        const now = this.#now();
+        for (const [id, o] of this.#offers) if (o.expires < now && !o.claimed) this.#offers.delete(id);
+        if ([...this.#offers.values()].filter((o) => !o.claimed).length >= OFFERS_MAX) throw new Refusal(429, 'Too many configurations waiting. Wait a few minutes.');
+        if (target) { const t = this.#store().target(String(target)); if (!t || t.kind !== 'browser') throw new Refusal(404, 'No such browser.'); }
+        const key = randomBytes(32).toString('base64url');
+        const id = randomBytes(6).toString('hex');
+        this.#offers.set(id, { hash: hash(key), name: String(name ?? '').trim().slice(0, TITLE_MAX), target: String(target ?? ''), expires: now + OFFER_MS, claimed: null });
+        return { offer: id, key, expires: new Date(now + OFFER_MS).toISOString() };
+    }
+    /* Where an offer is: waiting, claimed (its target), expired. */
+    offerState(id) {
+        const o = this.#offers.get(String(id ?? ''));
+        if (!o) return { state: 'expired' };
+        if (o.claimed) { const t = this.#store().target(o.claimed); return { state: 'claimed', target: { id: o.claimed, title: t?.title ?? o.name } }; }
+        return o.expires < this.#now() ? { state: 'expired' } : { state: 'waiting' };
+    }
+    #claim(conn, msg) {
+        const now = this.#now();
+        const h = typeof msg.key === 'string' && msg.key ? hash(msg.key) : '';
+        const found = h ? [...this.#offers.entries()].find(([, o]) => o.hash === h && !o.claimed) : null;
+        if (!found || found[1].expires < now) {
+            if (found) this.#offers.delete(found[0]);
+            const list = (this.#badClaims.get(conn.address) ?? []).filter((t) => now - t < WRONG_WINDOW_MS);
+            list.push(now); this.#badClaims.set(conn.address, list);
+            this.#log(`browser: a pairing key was refused (${found ? 'expired' : 'unknown or spent'})`);
+            conn.raw.send({ t: 'claim-refused' });
+            if (list.length >= WRONG_MAX) this.#drop(conn);
+            return;
+        }
+        const o = found[1];
+        o.claimed = 'pending';
+        const store = this.#store();
+        let t = o.target ? store.target(o.target) : null;
+        if (t) this.forget(t.id, { keepTarget: true });
+        else t = this.#made(store, o.name);
+        const i = this.#of(t.id);
+        i.offer({ key: msg.key, ttl: Math.max(1000, o.expires - now) });
+        this.#hand(conn, t.id, [msg]);
+        o.claimed = t.id;
+        this.#log(`browser: ${t.id} paired`);
+        this.#changed();
+    }
+    /* A new browser's target, named (or "Browser"), its id unique. */
+    #made(store, name) {
+        const title = String(name ?? '').trim().slice(0, TITLE_MAX) || 'Browser';
+        const base = `browser-${slug(title) || 'browser'}`;
+        let id = base;
+        for (let n = 2; store.target(id); n++) id = `${base}-${n}`;
+        return store.putTarget({ id, title, kind: 'browser', connector: 'browser', config: {} });
     }
 
     /* Is a browser waiting with a code (the page says so while the person types it)? */
@@ -200,11 +268,7 @@ export class Browsers {
             /* Paired again: its old tokens go, the old socket too. */
             this.forget(t.id, { keepTarget: true });
         } else {
-            const title = String(name ?? '').trim().slice(0, TITLE_MAX) || 'Browser';
-            const base = `browser-${slug(title) || 'browser'}`;
-            let id = base;
-            for (let n = 2; store.target(id); n++) id = `${base}-${n}`;
-            t = store.putTarget({ id, title, kind: 'browser', connector: 'browser', config: {} });
+            t = this.#made(store, name);
         }
         const [conn] = offered;
         const i = this.#hand(conn, t.id, [{ t: 'pair', code: given }]);
@@ -237,6 +301,9 @@ export class Browsers {
         return { sites: (this.#store().target(t.id).grants?.[who]?.rules ?? []).filter((r) => r.kind === 'site').map((r) => r.value) };
     }
 
+    /* Wrong keys counted now for an address (the tests). */
+    refusedKeys(address) { const now = this.#now(); return (this.#badClaims.get(address) ?? []).filter((t) => now - t < WRONG_WINDOW_MS).length; }
+
     /* Wrong codes counted now (the tests; the page says only that it must wait). */
     wrongCodes() { const now = this.#now(); return this.#wrong.filter((t) => now - t < WRONG_WINDOW_MS).length; }
 
@@ -260,6 +327,8 @@ export class Browsers {
     #sweep() {
         const now = this.#now();
         for (const c of [...this.#lobby]) if (now - c.since > LOBBY_MS) this.#drop(c);
+        for (const [id, o] of this.#offers) if (o.expires < now - OFFER_MS) this.#offers.delete(id);
+        for (const [a, list] of this.#badClaims) { const keep = list.filter((t) => now - t < WRONG_WINDOW_MS); if (keep.length) this.#badClaims.set(a, keep); else this.#badClaims.delete(a); }
         for (const [a, list] of this.#connects) { const keep = list.filter((t) => now - t < 60_000); if (keep.length) this.#connects.set(a, keep); else this.#connects.delete(a); }
     }
 
