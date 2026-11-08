@@ -16,8 +16,9 @@
  * that must be decided waits, and the person decides it.
  *
  * The SSH and online-folder connectors are wired by the keeper itself (each a client that holds
- * nothing until a target asks it to connect). The screen and browser connectors, which need an engine
- * or a paired socket, are wired in a later step.
+ * nothing until a target asks it to connect). The browser connector needs a paired socket: the
+ * extension connects out to this server (browsers.mjs, `browsers`), each paired browser a target of
+ * its own. The screen connector, which needs an engine, is wired in a later step.
  */
 import { mkdirSync, lstatSync } from 'node:fs';
 import { keeper } from 'clavarium-tether/host';
@@ -110,7 +111,10 @@ export class Tethers {
     /* `resources`: Resources (workFolder). `conversations()`: the names of the conversations.
        `secrets`: the vault, read by name for a connector only (reveal). `dockets`: { on(name), post(name,
        {kind, text, data}) } (dockets.mjs): what wakes an agent told of a notice. `make`: the keeper (tests). */
-    constructor({ dataDir, resources, conversations, secrets, connectors, dockets = null, now = () => Date.now(), make = keeper }) {
+    /* `browsers`: the paired browsers (browsers.mjs), set by the constructor when it is given one; their connector is the keeper's `browser`. */
+    browsers = null;
+    constructor({ dataDir, resources, conversations, secrets, connectors, browsers = null, dockets = null, now = () => Date.now(), make = keeper }) {
+        if (browsers) { connectors = { ...(connectors ?? {}), browser: browsers.connector }; this.browsers = browsers; }
         this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets; this.#dockets = dockets;
         this.#offered = new JsonFile(`${dataDir}/tether-offered.json`, []);
         this.#noticed = new JsonFile(`${dataDir}/tether-notices-seen.json`, []);
@@ -127,6 +131,8 @@ export class Tethers {
                when it ends (ok, or its error). */
             if (what?.journal) this.#tellResult(what.journal);
         });
+        /* A browser connected, gone, or its granted tabs changed: the page reads again. */
+        browsers?.onChange(() => { this.#changes++; });
         /* A device plugged into the owner's computer: one target, always there, flashed from the
            owner's browser (Tether's device connector). The owner gives it to a conversation as any other. */
         try {

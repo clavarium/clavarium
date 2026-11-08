@@ -60,6 +60,55 @@ function mcpCard(c, v, sub) {
     v.irreversible = cls === 'destructive';
 }
 
+/* AN ACT IN A PERSON'S BROWSER (Tether's card { kind: 'browser', action, url?, selector?, text?, key? }, and what the
+ * browser connector adds in card.about: the tab by its title and address, the script, the point, the drag; browsers.mjs).
+ * Which tab, on which site, and what will be done there; a script shown whole, said to run with the page's own rights
+ * (irreversible: never in Accept all). Parley has words only for Open: the others carry their English (`t`). */
+const BROWSER_SAID = {
+    click: ['req-browser-click', 'Click in the tab {tab}', 'click'],
+    type: ['req-browser-type', 'Type in the tab {tab}', 'type'],
+    key: ['req-browser-key', 'Press {key} in the tab {tab}', 'press'],
+    scroll: ['req-browser-scroll', 'Scroll in the tab {tab}', 'scroll'],
+    drag: ['req-browser-drag', 'Drag in the tab {tab}', 'drag'],
+    eval: ['req-browser-eval', 'Run a script in {tab}', 'run'],
+};
+/* Parley says Run and Type; the others, here. */
+const YES_SAID = { click: 'Click', press: 'Press', scroll: 'Scroll', drag: 'Drag' };
+function browserCard(c, about, v, sub, where) {
+    const tab = about.tab ?? null;
+    const site = String(tab?.site || (() => { try { return new URL(tab?.url ?? '').hostname; } catch { return ''; } })());
+    const tabName = tab ? String(tab.title || site || tab.url || '').slice(0, 80) : '';
+    const it = tabName ? `« ${tabName} »` : '';
+    if (c.action === 'open') {
+        v.title = w('req-browser-open', { url: String(c.url ?? '') }); v.yes = 'open';
+        if (where) sub.push(where);
+        if (tab) v.facts.push([said('req-fact-tab', 'Tab'), tabName]);
+        return;
+    }
+    const [k, t, yes] = BROWSER_SAID[c.action] ?? ['req-browser-act', 'Act in the tab {tab}', 'accept'];
+    const key = String(c.key ?? about.key ?? '');
+    /* No tab named: the one the AI is in (the extension's last), said so. */
+    const plain = it ? t : t.replace(/(the tab )?\{tab\}/, 'the active tab');
+    v.title = said(it ? k : `${k}-active`, plain.replace('{key}', key).replace('{tab}', it), it || c.action === 'key' ? { ...(it ? { tab: it } : {}), ...(c.action === 'key' ? { key } : {}) } : undefined);
+    v.yes = yes;
+    if (yes in YES_SAID) v.yesSaid = said(`req-yes-${yes}`, YES_SAID[yes]);
+    if (site) sub.push(site);
+    if (where) sub.push(where);
+    if (tab?.url) v.facts.push([said('req-fact-page', 'Page'), String(tab.url)]);
+    const selector = String(c.selector ?? about.selector ?? '');
+    if (selector) v.facts.push([said('req-fact-element', 'Element'), selector]);
+    if (c.action === 'click' && !selector && about.x !== undefined) v.facts.push([said('req-fact-point', 'Point'), `${about.x}, ${about.y ?? 0}`]);
+    if (c.action === 'scroll') v.facts.push([said('req-fact-by', 'By'), `${about.dx ?? 0}, ${about.dy ?? 0}`]);
+    if (c.action === 'drag') { v.before = [String(about.from ?? '')]; v.after = [String(about.to ?? '')]; }
+    if (c.action === 'type' && c.text !== undefined) v.quote = String(c.text);
+    if (c.action === 'eval') {
+        const script = String(about.script ?? '');
+        if (script) v.code = script;
+        v.risk.push(said('req-risk-script', 'Has this page\'s rights: it can do anything there'));
+        v.irreversible = true;
+    }
+}
+
 export function demandeView(q) {
     const c = q?.card ?? {}; const about = c.about ?? {};
     const kind = KINDS.has(c.kind) ? c.kind : 'other';
@@ -179,7 +228,7 @@ export function demandeView(q) {
         else if (c.path) v.facts.push(fact('path', String(c.path)));
         v.yes = c.action === 'delete' ? 'delete' : c.action === 'move' ? 'move' : 'write';
         if (c.action === 'delete') { v.irreversible = true; v.risk.push(w('req-risk-final')); }
-    } else if (c.kind === 'browser' && c.action === 'open') { v.title = w('req-browser-open', { url: String(c.url) }); v.yes = 'open'; if (where) sub.push(where); }
+    } else if (c.kind === 'browser') browserCard(c, about, v, sub, where);
     else if (c.kind === 'mcp') mcpCard(c, v, sub);
     else { v.title = `${q?.verb ?? 'action'}${q?.detail ? ` ${q.detail}` : ''}`; if (where) sub.push(where); }
     const id = String(q?.id ?? '');
@@ -192,7 +241,7 @@ export function demandeView(q) {
         /* The technical line, in "See all" only. */
         detail: [q?.verb, q?.detail].filter(Boolean).join(' — '),
         irreversible: v.irreversible,
-        yes: { id: `allow:${id}`, label: w(`req-yes-${v.yes}`) }, no: { id: `deny:${id}`, label: w('req-no') },
+        yes: { id: `allow:${id}`, label: v.yesSaid ?? w(`req-yes-${v.yes}`) }, no: { id: `deny:${id}`, label: w('req-no') },
         /* "Always allow ...": behind "⋯", as before. */
         ...(q?.rule ? { others: [{ id: `always:${id}`, label: q.rule.value ? w('req-always', { what: String(q.rule.value) }) : w('req-always-this') }] } : {}),
         hold: HOLD_S,

@@ -882,6 +882,27 @@
             <p id="mcp-error" class="error" role="alert" hidden></p>
           </form>
           </div>
+          <div id="browser-box" class="as-form" data-kind="browser"><h3 data-said="set-br-head">Pair a browser</h3>
+          <ol class="hint br-steps"><li data-said="set-br-step-install">Install the Tether extension.</li><li data-said="set-br-step-make">Make the configuration below, then copy it.</li><li data-said="set-br-step-paste">Paste it in the extension's popup.</li></ol>
+          <form id="browser-new" autocomplete="off">
+            <label for="browser-name" data-said="set-br-name">Name</label>
+            <input id="browser-name" maxlength="80" spellcheck="false" placeholder="Laptop · Firefox">
+            <div class="row"><button type="submit" id="browser-make" class="primary" data-said="set-br-make">Make the configuration</button></div>
+            <div id="browser-made" hidden>
+              <label for="browser-config" data-said="set-br-config">Configuration (once, 10 minutes)</label>
+              <div class="row"><input id="browser-config" readonly spellcheck="false"><button type="button" id="browser-copy" data-said="set-br-copy">Copy</button></div>
+              <p class="hint" id="browser-wait" data-said="set-br-wait">Waiting for the extension…</p>
+            </div>
+            <p id="browser-error" class="error" role="alert" hidden></p>
+            <details class="more"><summary data-said="set-br-by-code">Or with the code it shows</summary>
+              <label for="browser-address" data-said="set-br-address">Address for the extension</label>
+              <input id="browser-address" readonly spellcheck="false">
+              <label for="browser-code" data-said="set-br-code">Code</label>
+              <input id="browser-code" inputmode="numeric" autocomplete="off" maxlength="32" placeholder="123456">
+              <div class="row"><button type="button" id="browser-pair" data-said="set-br-pair">Pair</button></div>
+            </details>
+          </form>
+          </div>
           <div id="list-box" class="as-form" data-kind="list"><h3 id="listnew-head">New binder</h3>
         <form id="list-new" autocomplete="off">
           <label for="listnew-template">Template</label>

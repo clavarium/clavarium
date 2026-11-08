@@ -3853,7 +3853,7 @@
         line.append(summary, el('pre', '', rest));
         return line;
     }
-    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : kind === 'mcp' ? 'link' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : kind === 'mcp' ? 'link' : kind === 'browser' ? 'globe' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
         const SVG = 'http://www.w3.org/2000/svg';
@@ -5025,7 +5025,7 @@
     const newKinds = () => [['folder', uiSaid('set-na-k-folder', 'Folder')], ['git', uiSaid('set-na-k-git', 'Git repository')], ['mailbox', uiSaid('set-na-k-mailbox', 'Mailbox')],
         ['agenda', uiSaid('set-na-k-agenda', 'Calendar')], ['contacts', uiSaid('set-na-k-contacts', 'Contacts')], ['secret', uiSaid('set-na-k-secret', 'Secret')], ['list', uiSaid('set-na-k-list', LISTS_WORD.one)],
         /* Step 4: a voice box (paired with a code) and a device (the share sheet, its code) are two kinds of it too. */
-        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')], ['mcp', uiSaid('set-na-k-mcp', 'MCP server')]]
+        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')], ['mcp', uiSaid('set-na-k-mcp', 'MCP server')], ['browser', uiSaid('set-na-k-browser', 'Browser')]]
         .map(([kind, label]) => ({ kind, label, icon: kindIcon(kind) }));
     /* A voice box's steps after its kind (the flow: "A NEW VOICE BOX", with the boxes), and the one under way. */
     const BOX_STEPS = ['where', 'plug', 'pair'];
@@ -5056,6 +5056,7 @@
                 const form = $(`${addForm(kind)}-box`); form.hidden = false;
                 if (kind === 'git') { fillKeyChoice(); showVia(); }
                 if (kind === 'list') void fillTemplates();
+                if (kind === 'browser') $('browser-address').value = browserAddress();
                 return form;
             },
         });
@@ -5190,6 +5191,63 @@
         }
         return out;
     }
+    /* A BROWSER PAIRED THROUGH THE TETHER EXTENSION (browsers.mjs): connected or not, the tabs its person granted (all an
+       AI can touch), the address the extension connects to, « Pair again »; then, for each conversation at Frame, the
+       sites it acts on without asking. */
+    const browserAddress = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/c/api/browser`;
+    /* The one line pasted in the extension's popup: where it connects, and its key good once (Tether 0.1.0-next.59). */
+    const browserConfig = (key) => JSON.stringify({ url: browserAddress(), key });
+    function browserParts(t, tether = {}) {
+        const out = [];
+        const now = tether.browsers?.[t.id] ?? { connected: false, tabs: [] };
+        const state = el('p', now.connected ? 'hint br-on' : 'hint br-off', now.connected
+            ? uiSaid('set-br-connected', 'Connected · {n} tab(s) granted', { n: now.tabs.length }) : uiSaid('set-br-offline', 'Not connected: open that browser'));
+        state.dataset.act = 'browser-state';
+        const list = el('ul', 'br-tabs');
+        for (const x of now.tabs) { const li = el('li', '', x.title || x.url || String(x.id)); li.title = x.url ?? ''; list.append(li); }
+        const body = [state];
+        body.push(now.tabs.length ? list : el('p', 'hint', uiSaid('set-br-no-tabs', 'No tab granted: grant them in its popup.')));
+        out.push({ title: uiSaid('set-br-tabs', 'Tabs'), body, cls: 'as-br-tabs' });
+        /* Paired again (the extension reinstalled, its pairing reset): a new configuration for the same asset. */
+        const again = el('div', 'br-again');
+        const line = el('input'); line.readOnly = true; line.spellcheck = false; line.hidden = true; line.setAttribute('aria-label', uiSaid('set-br-config', 'Configuration (once, 10 minutes)'));
+        const go = el('button', '', uiSaid('set-br-pair-again', 'Pair again')); go.type = 'button'; go.dataset.act = 'browser-pair-again';
+        go.addEventListener('click', async () => {
+            if (!line.hidden) { try { await navigator.clipboard.writeText(line.value); go.textContent = uiSaid('set-br-copied', 'Copied'); } catch { line.select(); } return; }
+            go.disabled = true; $(asErrId()).hidden = true;
+            try { const made = await post(`${API}/tether/browser-offer`, { target: t.id }); line.value = browserConfig(made.key); line.hidden = false; go.textContent = uiSaid('set-br-copy', 'Copy'); }
+            catch (error) { sayAsErr(error); }
+            go.disabled = false;
+        });
+        again.append(line, go);
+        out.push({ title: uiSaid('set-br-pairing', 'Pairing'), body: [again], cls: 'as-br-pair' });
+        /* Frame: the sites each conversation acts on without a card (Tether's site rules). Empty: everything asked. */
+        const framed = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');
+        if (framed.length) {
+            const rows = framed.map(([id, g]) => {
+                const name = id.slice('conversation:'.length);
+                const box = el('div', 'br-sites'); box.dataset.conversation = name;
+                const who = conversations.find((c) => c.name === name);
+                const lab = el('label', '', uiSaid('set-br-sites', 'Allowed sites (one per line, *.example.com)'));
+                const ta = el('textarea'); ta.rows = 3; ta.spellcheck = false; ta.autocapitalize = 'off'; ta.placeholder = 'shop.example.com\n*.example.org';
+                ta.value = (g.rules ?? []).filter((r) => r.kind === 'site').map((r) => r.value).join('\n');
+                const id2 = `br-sites-${t.id}-${name}`.replace(/[^a-zA-Z0-9-]/g, '-'); ta.id = id2; lab.htmlFor = id2;
+                const save = el('button', '', uiSaid('set-br-save', 'Save')); save.type = 'button'; save.dataset.act = 'browser-sites';
+                const said = el('small', 'hint');
+                save.addEventListener('click', async () => {
+                    save.disabled = true; $(asErrId()).hidden = true;
+                    try { const r = await post(`${API}/tether/browser-sites`, { target: t.id, agent: id, sites: ta.value.split('\n') }); ta.value = (r.sites ?? []).join('\n'); said.textContent = uiSaid('set-br-saved', 'Saved.'); }
+                    catch (error) { sayAsErr(error); }
+                    save.disabled = false;
+                });
+                const row = el('div', 'row'); row.append(save, said);
+                box.append(el('b', '', (who && shownName(who)) || name), lab, ta, el('p', 'hint', uiSaid('set-br-sites-hint', 'Other sites: asked each time.')), row);
+                return box;
+            });
+            out.push({ title: uiSaid('set-br-frame', 'Frame: sites'), body: rows, cls: 'as-br-frame' });
+        }
+        return out;
+    }
     /* `detail`: where it is drawn. `from`: the conversation it is seen from ('' : the menu). `back`: the way back (a phone).
        `tether`, `groups`: as the page read them. `gits`: the conversation's repositories (To send, beside). */
     async function assetPanel(detail, chosen, { from = '', back, tether = {}, groups = [], gits = [], stale = () => false } = {}) {
@@ -5276,6 +5334,7 @@
                 parts.push(box);
             }
             if (t.kind === 'mcp') parts.push(...mcpParts(t));
+            if (t.kind === 'browser') parts.push(...browserParts(t, tether));
             if (chosen.siblings?.length) {
                 const a = el('p', 'as-assoc hint');
                 a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's sign-in (kept on the server); rights are given separately.`));
@@ -8885,6 +8944,55 @@
         $('mcp-key').value = '';
         btn.disabled = false;
         await paintAssets();
+    });
+    /* PAIR A BROWSER (browsers.mjs): one line to copy into the Tether extension's popup -- its address and a key good once,
+       for ten minutes; the page waits until the extension came with it. Or, as before, the code its popup shows. */
+    let browserWait = null;
+    const stopBrowserWait = () => { clearTimeout(browserWait); browserWait = null; };
+    async function browserClaimed(form, offer) {
+        stopBrowserWait();
+        let r;
+        try { r = await post(`${API}/tether/browser-offer-state`, { offer }); } catch { r = { state: 'waiting' }; }
+        if (r.state === 'claimed') {
+            $('browser-new').reset(); $('browser-made').hidden = true;
+            await assetMade(form, { key: `connexion:${r.target.id}`, name: r.target.title, give: (to, level) => grantTarget(r.target.id, to, targetLevel(level)) });
+            await paintAssets();
+            return;
+        }
+        if (r.state === 'expired') { $('browser-wait').textContent = uiSaid('set-br-expired', 'Expired: make a new one.'); return; }
+        if (!form.isConnected || form.hidden) return;
+        browserWait = setTimeout(() => void browserClaimed(form, offer), 2000);
+    }
+    $('browser-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('browser-error').hidden = true;
+        const btn = $('browser-make'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/browser-offer`, { name: $('browser-name').value.trim() });
+            $('browser-config').value = browserConfig(made.key);
+            $('browser-copy').textContent = uiSaid('set-br-copy', 'Copy');
+            $('browser-wait').textContent = uiSaid('set-br-wait', 'Waiting for the extension…');
+            $('browser-made').hidden = false;
+            const box = $('browser-box');
+            void browserClaimed(box, made.offer);
+        } catch (error) { $('browser-error').textContent = error.message; $('browser-error').hidden = false; }
+        btn.disabled = false;
+    });
+    $('browser-pair').addEventListener('click', async () => {
+        $('browser-error').hidden = true;
+        const btn = $('browser-pair'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/browser-pair`, { name: $('browser-name').value.trim(), code: $('browser-code').value.trim() });
+            stopBrowserWait(); $('browser-new').reset(); $('browser-made').hidden = true;
+            await assetMade($('browser-box'), { key: `connexion:${made.id}`, name: made.title, give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
+        } catch (error) { $('browser-error').textContent = error.message; $('browser-error').hidden = false; }
+        btn.disabled = false;
+        await paintAssets();
+    });
+    $('browser-address').value = browserAddress();
+    $('browser-copy').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText($('browser-config').value); $('browser-copy').textContent = uiSaid('set-br-copied', 'Copied'); }
+        catch { $('browser-config').select(); }
     });
     $('mcp-import').addEventListener('click', async () => {
         $('mcp-error').hidden = true;
