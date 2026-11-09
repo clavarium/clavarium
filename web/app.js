@@ -181,7 +181,7 @@
         $('notice-cancel').onclick = cancel ?? null;
         $('notice-health').hidden = true; $('notice-restart').hidden = true;
         notice.hidden = false;
-        $('notice-spin').hidden = true; $('notice-steps').hidden = true;
+        $('notice-spin').hidden = true; $('notice-steps').hidden = true; $('notice-mlive').hidden = true;
         $('notice-head').hidden = true; delete notice.dataset.progress; delete notice.dataset.loading;
         mascot(null);
     };
@@ -234,7 +234,91 @@
     const usualFor = (kind, s) => {
         if (kind === 'build') return 'A new machine takes a few minutes. Nothing to do meanwhile: its terminal comes by itself.';
         if (kind === 'wake') return `${s < 180 ? 'A start usually takes a minute or two.' : 'This takes much longer than a start usually does.'} Its work, its files and its chat are kept.`;
-        return `${s < 180 ? 'A restart usually takes one to two minutes.' : 'This is taking longer than usual: the machine may be slow to stop or to start. It goes on by itself.'} Its files and its chat are kept.`;
+        return `${s < 180 ? 'A restart usually takes one to two minutes.' : 'Longer than usual: its step is above, with what you can do.'} Its files and its chat are kept.`;
+    };
+    /* ---------- ITS MACHINE'S ACTION, STEP BY STEP (09-11) ----------
+       The escalation in one line (server/conversations.mjs, machineAction; the host program's vm halt):
+       polite stop, forced stop, soft kill (SIGTERM), hard kill (SIGKILL), checked. Done ticked, the
+       one under way pulsing with its time and its bound, those to come dimmed; right under it, "Force
+       now" once the step passes its bound (it moves on to the next), and "Force stop" (it takes the
+       place of the action). Drawn the same in its settings and over its terminal. */
+    const MSTEPS = {
+        polite: [() => uiSaid('set-mstep-polite', 'Polite'), 60], force: [() => uiSaid('set-mstep-force', 'Forced'), 30],
+        term: [() => uiSaid('set-mstep-term', 'Soft kill'), 5], kill: [() => uiSaid('set-mstep-kill', 'Hard kill'), 5],
+        check: [() => uiSaid('set-mstep-check', 'Checked'), 10], start: [() => uiSaid('set-mstep-start', 'Start'), 180],
+        suspend: [() => uiSaid('set-mstep-suspend', 'Sleep'), 120], resleep: [() => uiSaid('set-mstep-resleep', 'Wake and sleep'), 300],
+        stop: [() => uiSaid('set-mstep-stop', 'Clean stop'), 120],
+    };
+    const MNEXT = new Set(['polite', 'force', 'term']);
+    const mstepSaid = (id) => (MSTEPS[id] ? MSTEPS[id][0]() : id);
+    const MMARK = { ok: '\u2713', run: '\u25CF', todo: '\u25CB', skip: '\u2013', fail: '\u2715', timeout: '\u2715', cut: '\u2715' };
+    /* The step under way, its seconds so far and its bound; null when none runs. */
+    /* A step's bound, in seconds (a test may shorten them all: window.clavariumTimes.mstep). */
+    const mlimit = (id) => window.clavariumTimes?.mstep ?? MSTEPS[id]?.[1] ?? 60;
+    const mstepRunning = (a) => {
+        const x = a?.steps?.find((y) => y.state === 'run');
+        if (!x) return null;
+        const s = Math.max(0, Math.floor((Date.now() - (Date.parse(x.since ?? '') || Date.now())) / 1000));
+        return { id: x.id, s, limit: mlimit(x.id), past: s >= mlimit(x.id) };
+    };
+    /* In one line, for over its terminal: the step under way and its time, and what can be done past its bound. */
+    const mstepLine = (a) => {
+        const now = mstepRunning(a);
+        if (!now) return '';
+        const done = (a.steps ?? []).filter((x) => x.state === 'ok').map((x) => mstepSaid(x.id));
+        return `${mstepSaid(now.id)} \u00b7 ${clockOf(now.s)} / ${clockOf(now.limit)}${done.length ? ` \u2014 ${uiSaid('set-mstep-done', 'Done: {steps}', { steps: done.join(', ') })}` : ''}${now.past && MNEXT.has(now.id) && !DEVICE ? ` \u2014 ${uiSaid('set-mpast', 'Past its time: Force now moves on')}` : ''}`;
+    };
+    function paintMlive(el, c) {
+        const a = c?.machine;
+        el.hidden = !a;
+        if (!a) { el.replaceChildren(); el.dataset.key = ''; return; }
+        const key = `${c.name}|${a.kind}|${(a.steps ?? []).map((x) => `${x.id}:${x.state}`).join(',')}`;
+        if (el.dataset.key !== key) {
+            el.dataset.key = key;
+            const ol = document.createElement('ol'); ol.className = 'mstep'; ol.setAttribute('aria-live', 'polite');
+            (a.steps ?? []).forEach((x, i) => {
+                if (i) { const arr = document.createElement('li'); arr.className = 'arr'; arr.textContent = '\u2192'; arr.setAttribute('aria-hidden', 'true'); ol.append(arr); }
+                const li = document.createElement('li'); li.dataset.state = x.state; li.dataset.step = x.id;
+                const mark = document.createElement('span'); mark.className = 'mark'; mark.setAttribute('aria-hidden', 'true'); mark.textContent = MMARK[x.state] ?? '';
+                const label = document.createElement('span'); label.textContent = mstepSaid(x.id);
+                li.append(mark, label, document.createElement('small'));
+                ol.append(li);
+            });
+            const row = document.createElement('div'); row.className = 'row';
+            const now = document.createElement('button'); now.type = 'button'; now.className = 'primary m-force-now'; now.textContent = uiSaid('set-m-force-now', 'Force now');
+            now.title = uiSaid('set-m-force-now-why', 'Ends this step, starts the next');
+            now.addEventListener('click', () => void machineAct('force-now'));
+            const force = document.createElement('button'); force.type = 'button'; force.className = 'danger m-force-stop'; force.textContent = uiSaid('set-m-force', 'Force stop');
+            force.addEventListener('click', () => askMachine('force'));
+            row.append(now, force);
+            el.replaceChildren(ol, row);
+        }
+        /* Each second: the time of each step, and whether "Force now" applies yet. */
+        const running = mstepRunning(a);
+        for (const li of el.querySelectorAll('li[data-step]')) {
+            const x = (a.steps ?? []).find((y) => y.id === li.dataset.step);
+            li.querySelector('small').textContent = x?.state === 'run' && running ? `${clockOf(running.s)} / ${clockOf(running.limit)}` : x?.s !== undefined ? `${x.s} s` : x?.state === 'todo' ? `${mlimit(x.id)} s` : '';
+        }
+        el.querySelector('.m-force-now').hidden = DEVICE || !running || !running.past || !MNEXT.has(running.id);
+        el.querySelector('.m-force-stop').hidden = DEVICE || a.kind === 'force';
+        el.querySelector('.row').hidden = el.querySelector('.m-force-now').hidden && el.querySelector('.m-force-stop').hidden;
+    }
+    /* The report of its last action, in one line: how it ended, its steps and their seconds, the memory freed, what to do. */
+    const MREPORT = {
+        start: () => [uiSaid('set-mk-start', 'Started'), uiSaid('set-mk-start-no', 'Not started')],
+        stop: () => [uiSaid('set-mk-stop', 'Stopped'), uiSaid('set-mk-stop-no', 'Not stopped')],
+        restart: () => [uiSaid('set-mk-restart', 'Restarted'), uiSaid('set-mk-restart-no', 'Not restarted')],
+        resize: () => [uiSaid('set-mk-resize', 'Resized'), uiSaid('set-mk-resize-no', 'Not resized')],
+        sleep: () => [uiSaid('set-mk-sleep', 'Asleep'), uiSaid('set-mk-sleep-no', 'Did not go to sleep')],
+        force: () => [uiSaid('set-mk-force', 'Forced off'), uiSaid('set-mk-force-no', 'Not forced off')],
+    };
+    const MADVICE = { force: () => uiSaid('set-madv-force', 'Try Force stop'), manager: () => uiSaid('set-madv-manager', 'The VM manager may need a restart'), again: () => uiSaid('set-madv-again', 'Try again in a moment'), look: () => uiSaid('set-madv-look', 'Look at its state') };
+    const mreportWords = (r) => {
+        if (!r) return '';
+        const [yes, no] = (MREPORT[r.kind] ?? MREPORT.stop)();
+        const steps = (r.steps ?? []).filter((x) => x.result !== 'skip').map((x) => `${MMARK[x.result] ?? ''}\u00a0${mstepSaid(x.id)} ${x.s ?? 0} s`).join(' ');
+        const freed = r.ok && r.freedGb ? uiSaid('set-mrep-freed', '{gb} GB freed', { gb: Number(r.freedGb).toFixed(1) }) : '';
+        return [`${r.ok ? yes : no} \u00b7 ${r.s ?? 0} s`, steps, freed, r.preempted ? uiSaid('set-mrep-replaced', 'Replaced by Force stop') : r.advice ? MADVICE[r.advice]?.() : ''].filter(Boolean).join(' \u00b7 ');
     };
     /* `source()`: the latest word of the server (its list, or the terminal opening). */
     const panel = { source: () => undefined, of: '', key: '', timer: 0, open: false };
@@ -280,7 +364,11 @@
         mascot(at >= p.steps.length - 1 ? 'waking' : 'trying');
         $('notice-steps').hidden = !panel.open; $('notice-spin').hidden = true;
         $('notice-count').textContent = `${at + 1} / ${p.steps.length} \u00b7 ${clockOf(s)}`;
-        $('notice-text').textContent = `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`;
+        /* Its machine stopping under it (a restart, a resize): which step, what is done, what can be done now. */
+        const owner = conversations.find((x) => x.name === panel.of.split('/')[0]);
+        paintMlive($('notice-mlive'), owner);
+        const mline = mstepLine(owner?.machine);
+        $('notice-text').textContent = mline || `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`;
         return true;
     };
     /* Shown, or brought up to date when it is shown already (its wheel keeps turning). */
@@ -1000,6 +1088,8 @@
        (seen on the live site: the "Start" button vanished before it could be
        pressed). */
     let welcoming = false;
+    const MLIVE_SAY = { stop: 'stopping', force: 'forcing off', sleep: 'going to sleep', start: 'starting' };
+    const MLIVE_TITLE = { stop: () => uiSaid('set-mt-stop', 'Stopping its machine'), force: () => uiSaid('set-mt-force', 'Forcing its machine off'), sleep: () => uiSaid('set-mt-sleep', 'Going to sleep'), start: () => uiSaid('set-mt-start', 'Starting its machine') };
     /* What can be done to the conversation shown, from what is known of it now. */
     function paintActions() {
         const c = conversations.find((x) => x.name === current);
@@ -1009,14 +1099,60 @@
         $('files-open').hidden = $('share').hidden = !usable;
         /* Given its chat alone: the files of the chat open from the chat; Files holds only what was given to the device itself. */
         if (noTerminal()) $('files-open').hidden = deviceShared.length === 0;
-        $('sleep').hidden = !usable || c.asleep === true;
-        $('restart').hidden = DEVICE || !usable;
+        paintMachineActs(c);
         /* At hand, on top of its settings: wake when asleep, else restart, sleep, its terminal. */
         $('quick-wake').hidden = !c || c.asleep !== true;
         $('hand-terminal').hidden = !usable || noTerminal();
         $('panel-actions').hidden = DEVICE || !c;
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
+    }
+    /* ITS MACHINE'S FIVE BUTTONS, never hidden: greyed when they do not apply, with why in their title. */
+    function paintMachineActs(c) {
+        const busy = Boolean(c?.machine) || !c || c.phase !== 'ready' || holds(c);
+        const asleep = c?.asleep === true;
+        const stopped = c?.stopped === true || (!asleep && c?.health?.state === 'Stopped');
+        const why = {
+            busy: !c || c.phase === 'ready' || c.phase === 'restarting' ? uiSaid('set-mwhy-busy', 'Another action is running') : uiSaid('set-mwhy-notready', 'Not ready yet'),
+            runs: uiSaid('set-mwhy-runs', 'It runs already'), stopped: uiSaid('set-mwhy-stopped', 'Already stopped'), asleep: uiSaid('set-mwhy-asleep', 'Asleep already'),
+        };
+        const set = (id, on, title, own = '') => { const b = $(id); b.hidden = false; b.disabled = !on; b.title = on ? own : title; };
+        set('m-start', !busy && (asleep || stopped), busy ? why.busy : why.runs, uiSaid('set-mwhat-start', 'Starts its machine and its tool'));
+        set('m-stop', !busy && !stopped, busy ? why.busy : why.stopped, uiSaid('set-mwhat-stop', 'Stops it cleanly, by force if it hangs'));
+        set('restart', !busy, why.busy, uiSaid('set-mwhat-restart', 'Stops it, then starts it again'));
+        set('sleep', !busy && !asleep && !stopped, busy ? why.busy : asleep ? why.asleep : why.stopped, 'Freezes the tool as it is; it wakes when you open the conversation');
+        const forceable = c && ['ready', 'restarting'].includes(c.phase) && c.machine?.kind !== 'force' && (Boolean(c.machine) || (!stopped && !asleep));
+        set('m-force', Boolean(forceable), c?.machine?.kind === 'force' ? why.busy : stopped ? why.stopped : asleep ? uiSaid('set-mwhy-nothing', 'Asleep: nothing runs') : why.busy, uiSaid('set-mwhat-force', 'Cuts it off, like a power cut'));
+        paintMlive($('m-live'), c);
+        const r = c?.machineReport;
+        $('m-report').hidden = Boolean(c?.machine) || !r;
+        $('m-report').textContent = mreportWords(r);
+        $('m-report').dataset.ok = String(r?.ok === true);
+    }
+    /* ASKED IN THE PAGE, in one line: what is lost. Start and Sleep lose nothing: not asked. */
+    const MCONFIRM = {
+        stop: () => [uiSaid('set-mconf-stop', 'Stop it? What the tool does now is interrupted.'), uiSaid('set-m-stop', 'Stop')],
+        restart: () => [uiSaid('set-mconf-restart', 'Restart it? The tool restarts; its files stay.'), uiSaid('set-m-restart', 'Restart')],
+        force: () => [uiSaid('set-mconf-force', 'Like a power cut: nothing is saved.'), uiSaid('set-m-force', 'Force stop')],
+    };
+    function askMachine(kind) {
+        const [line, yes] = MCONFIRM[kind]();
+        $('m-confirm-text').textContent = line;
+        $('m-confirm-yes').textContent = yes;
+        $('m-confirm-yes').className = kind === 'force' ? 'danger' : 'primary';
+        $('m-confirm-yes').onclick = () => { $('m-confirm').hidden = true; if (kind === 'restart') void restartMachine(true); else void machineAct(kind); };
+        $('m-confirm').hidden = false;
+        $('m-confirm-yes').focus();
+    }
+    /* One action on its machine; its steps come with the list (refreshed faster meanwhile). */
+    async function machineAct(kind) {
+        const name = current;
+        if (!name) return;
+        $('panel-error').hidden = true;
+        if (kind === 'stop' || kind === 'force') disconnect();
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { action: kind }); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        await refresh();
     }
     /* `keepSheets`: the same conversation, looked at again (its state changed):
        a sheet the owner has open is not shut under their fingers. */
@@ -1056,14 +1192,32 @@
                 const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
                 const clock = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
                 const now = conversations.find((x) => x.name === c.name);
-                const usual = s < 180 ? 'A restart usually takes one to two minutes.' : 'This is taking longer than usual: the machine may be slow to stop or to start. It goes on by itself.';
-                $('notice-text').textContent = `${now?.step ?? c.step ?? 'Restarting its machine'}... ${clock} so far. ${usual} The tool starts again by itself; its files and its chat are kept.`;
+                /* Its step, what is done and what can be done now (the steps and the buttons under it): never a vague wait. */
+                const mline = mstepLine(now?.machine);
+                paintMlive($('notice-mlive'), now);
+                $('notice-text').textContent = mline ? `${mline}. ${clock} so far.` : `${now?.step ?? c.step ?? 'Restarting its machine'}... ${clock} so far. The tool starts again by itself; its files and its chat are kept.`;
             };
             show(''); tell(); $('notice-spin').hidden = false;
             clearInterval(restartTicking);
             restartTicking = setInterval(() => { const now = conversations.find((x) => x.name === c.name); if (current !== c.name || now?.phase !== 'restarting' || notice.hidden) { clearInterval(restartTicking); return; } tell(); }, 1000);
             return;
         }
+        /* ITS MACHINE BEING STOPPED, FORCED OFF, PUT TO SLEEP OR STARTED by its owner: the steps over its terminal. */
+        if (c && c.machine && c.phase === 'ready') {
+            disconnect(); say(MLIVE_SAY[c.machine.kind] ?? 'busy', 'connecting');
+            show(''); $('notice-spin').hidden = false;
+            const tell = () => {
+                const now = conversations.find((x) => x.name === c.name);
+                if (current !== c.name || !now?.machine || notice.hidden) { clearInterval(restartTicking); return; }
+                paintMlive($('notice-mlive'), now);
+                $('notice-text').textContent = mstepLine(now.machine) || MLIVE_TITLE[now.machine.kind]?.() || '';
+            };
+            tell();
+            clearInterval(restartTicking); restartTicking = setInterval(tell, 1000);
+            return;
+        }
+        /* STOPPED BY ITS OWNER: it stays stopped until somebody starts it. */
+        if (c && c.stopped === true && !socket && c.phase === 'ready') { say('stopped', 'waiting'); show(uiSaid('set-stopped-page', 'Stopped. It starts when you start it.'), uiSaid('set-m-start', 'Start'), connect); return; }
         if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
         /* Given its chat and not its terminal: the chat is the whole page, and no terminal is ever opened. */
@@ -1773,7 +1927,7 @@
     async function refresh() {
         clearTimeout(pollTimer);
         try {
-            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}` : '');
+            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}/${Boolean(x.machine)}/${x.stopped === true}` : '');
             const before = mark(conversations.find((x) => x.name === current));
             if (DEVICE) {
                 const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
@@ -1818,7 +1972,7 @@
         /* The panel is open: what the answerer did meanwhile is said there. */
         if (!DEVICE && panelShown) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
         /* A start told step by step is asked about more often: its tool appears soon after its last step. */
-        if (home) pollTimer = setTimeout(refresh, conversations.some(holds) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
+        if (home) pollTimer = setTimeout(refresh, conversations.some(holds) || conversations.some((c) => c.machine) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
     }
 
     /* ---------- A NEW CONVERSATION: a page of its own, as Settings ----------
@@ -2627,7 +2781,7 @@
         try { await post(`${API}/conversations/${encodeURIComponent(name)}/restart`, {}); healthDismissed = ''; await refresh(); enter(); }
         catch (error) { show(error.message, 'Back', enter); }
     }
-    $('restart').addEventListener('click', () => { void restartMachine(false); });
+    $('restart').addEventListener('click', () => askMachine('restart'));
     $('health-restart').addEventListener('click', () => { void restartMachine(false); });
     $('health-check').addEventListener('click', async () => {
         $('health-check').disabled = true; $('health-check').textContent = 'Looking...';
@@ -2773,6 +2927,8 @@
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
+        /* A stop that hangs: forced by itself (the default), or asked first. */
+        for (const b of $('m-escalate').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.stopEscalate !== false)));
         /* Whether its tool asks before acting -- for a tool that can be given every right in its machine. */
         $('rights-box').hidden = DEVICE || !here?.rights;
         for (const b of $('ask-first').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.askFirst === true)));
@@ -11492,10 +11648,21 @@
         disconnect();
         say('going to sleep', 'connecting');
         show('Going to sleep...'); mascot('asleep');
-        try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); await refresh(); enter(); }
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { action: 'sleep' }); await refresh(); enter(); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
     }
     $('sleep').addEventListener('click', () => void sleepMachine());
+    $('m-start').addEventListener('click', () => void machineAct('start'));
+    $('m-stop').addEventListener('click', () => askMachine('stop'));
+    $('m-force').addEventListener('click', () => askMachine('force'));
+    $('m-confirm-no').addEventListener('click', () => { $('m-confirm').hidden = true; });
+    for (const b of $('m-escalate').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/machine`, { escalate: b.dataset.on === 'true' }); await refresh(); paintMachine(conversations.find((x) => x.name === current)); }
+            catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        });
+    }
     /* The quick actions at the top of the panel do the same as the Machine chapter's. */
     $('hand-terminal').addEventListener('click', () => { leavePanel(); seeTerminal(); });
     $('quick-wake').addEventListener('click', () => { leavePanel(); seeTerminal(); });

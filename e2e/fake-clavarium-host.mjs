@@ -344,6 +344,32 @@ if (area === 'vm') {
         setSize(vm, { [key]: Number(value) });
         process.exit(0);
     }
+    /* THE WAY DOWN (vm halt [from [until]], vm hardstop), its steps said as the host program says them.
+       "stuck": the polite stop times out, the forced one works (as vm kill). "hang-stop": the polite
+       stop hangs until this program is ended (the server moving on: "Force now"). */
+    if (verb === 'halt' || verb === 'hardstop') {
+        const vm = argv[0];
+        if (!stateOf(vm)) fail(`instance "${vm}" does not exist`);
+        const order = ['polite', 'force', 'term', 'kill'];
+        const from = verb === 'hardstop' ? 'term' : argv[1] ?? 'polite';
+        const until = verb === 'hardstop' ? 'kill' : argv[2] ?? 'kill';
+        const say = (line) => process.stdout.write(`${line}\n`);
+        const down = () => { killTmux(vm); setState(vm, 'Stopped'); rmSync(join(home(vm), 'stuck'), { force: true }); };
+        const steps = order.slice(order.indexOf(from), order.indexOf(until) + 1);
+        const check = () => { say('step check start'); say(`step check ${stateOf(vm) === 'Stopped' ? 'ok' : 'fail'} 0s freed 1.0G`); process.exit(stateOf(vm) === 'Stopped' ? 0 : 1); };
+        (async () => {
+            for (const step of steps) {
+                if (stateOf(vm) === 'Stopped') { say(`step ${step} skip 0s gone`); break; }
+                say(`step ${step} start`);
+                if (step === 'polite' && existsSync(join(home(vm), 'hang-stop'))) { await new Promise(() => { setInterval(() => {}, 60_000); }); }
+                if (step === 'polite') { setState(vm, 'Stopping'); await new Promise((r) => { setTimeout(r, Number(process.env.FAKE_VM_STOP_SECONDS ?? '0') * 1000); }); }
+                if (step === 'polite' && existsSync(join(home(vm), 'stuck'))) { await new Promise((r) => { setTimeout(r, 1000); }); say('step polite timeout 1s'); continue; }
+                if (step === 'force' || step === 'kill' || step === 'term') appendFileSync(join(home(vm), 'killed'), 'x');
+                down(); say(`step ${step} ok 0s`);
+            }
+            check();
+        })();
+    } else
     /* A clean stop that hangs, when a test says so: the force is then needed. */
     if (verb === 'stop' && existsSync(join(home(argv[0]), 'stuck'))) { spawnSync('sleep', ['2']); fail('stop failed: timed out'); }
     if (verb === 'kill') {
@@ -481,7 +507,7 @@ if (area === 'vm') {
             child.on('error', () => process.exit(127));
             child.on('exit', (code) => process.exit(code ?? 1));
         }
-    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork', 'untools', 'size', 'set', 'kill'].includes(verb)) {
+    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork', 'untools', 'size', 'set', 'kill', 'halt', 'hardstop'].includes(verb)) {
         fail(`unknown verb: ${verb}`, 64);
     }
 }

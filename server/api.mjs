@@ -8,6 +8,11 @@
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
  *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?, cpus?}: stopped, set, started again (202);
  *                                                asleep: checked and kept for its wake, as `sizeAtWake` (200)
+ *   POST /api/conversations/<name>/machine       {action: start|stop|restart|sleep|force|force-now}: done on its machine,
+ *                                                one at a time (force takes the place of any other; force-now: the next
+ *                                                step of the one running) -> its state (202), as below
+ *   POST /api/conversations/<name>/machine       {escalate: true|false}: a stop that hangs goes on to its qemu by itself (default) or asks
+ *   GET  /api/conversations/<name>/machine       {action: {kind, since, until, steps: [{id, state, since, s}]} | null, report, limits, escalate}
  *   POST /api/conversations/<name>/machine/cancel    the size kept for its wake, given up
  *   GET  /api/conversations/<name>/health        what was last seen of its machine
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
@@ -472,6 +477,9 @@ export async function handleApi(request, response, conversations, headers, resou
                 const items = settings.configured ? await signin.recent(conversation).catch((e) => ({ failure: e.message })) : [];
                 return send(200, { ...settings, items: Array.isArray(items) ? items : [], failure: items.failure ?? null }), true;
             }
+            /* Its machine: the action running, step by step, and the last report (conversations.mjs, machineState). */
+            const machineOf = /^\/api\/conversations\/([^/]+)\/machine$/.exec(pathname);
+            if (machineOf) return send(200, conversations.machineState(decodeURIComponent(machineOf[1]))), true;
             const paired = /^\/api\/conversations\/([^/]+)\/devices$/.exec(pathname);
             if (paired && sharing) return send(200, sharing.devices.of(decodeURIComponent(paired[1]))), true;
             const sending = /^\/api\/conversations\/([^/]+)\/git\/([a-z0-9-]{1,32})\/auto$/.exec(pathname);
@@ -910,6 +918,9 @@ export async function handleApi(request, response, conversations, headers, resou
                 await health.check(conversation, { asked: true }); return send(200, health.of(conversation)), true;
             }
             if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
+            /* One action on its machine, or the owner's choice for its way down (conversations.mjs, machineAction). */
+            if (typeof body?.action === 'string') return send(202, await conversations.machineAction(conversation, body.action)), true;
+            if (typeof body?.escalate === 'boolean') return send(200, conversations.setStopEscalate(conversation, body.escalate)), true;
             const resized = await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus });
             /* Asleep, nothing was started: the choice is only kept, for its wake. */
             return send(resized.phase === 'restarting' ? 202 : 200, resized), true;

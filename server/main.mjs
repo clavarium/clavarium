@@ -550,6 +550,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);
+    /* What an owner did to a machine (start, stop, sleep, force, restart): in the journal, and a line in its chat. */
+    all.machineSaid = (name, text, ok, chat) => {
+        events.add({ kind: 'machine', text: `Machine of ${name}: ${text}`, conversation: name });
+        if (chat) try { talk.event(name, ok ? { kind: 'machine-ok', text, topic: 'Machine' } : { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine', brief: 'Machine action failed' }); } catch { /* its chat is off */ }
+    };
     /* A Tether call waiting for the owner is said in its conversation's thread, with Accept / Refuse. */
     tethers.announce = (name, event) => { try { return talk.event(name, event); } catch { return null; } };
     /* A device given a conversation that talks through the app talks there too. */

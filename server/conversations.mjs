@@ -9,7 +9,7 @@
 import { isConversationName, identifierFrom, titleProblem, groupProblem } from './names.mjs';
 import { JsonFile } from './store.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
-import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
+import { WORK, VM_USER, SHARING_STEP, stepLine } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { availableParallelism } from 'node:os';
@@ -54,6 +54,20 @@ export const ANSWER_PROBE = Object.freeze(['test', '-d', '/']);
    that is starting): the page tries again without being asked. */
 /* The name a chat gives its tool, at most. */
 export const CHAT_NAME_MAX = 40;
+/* WHAT AN OWNER DOES TO A MACHINE (machineAction, 09-11): start it, stop it, restart it, put it to
+   sleep, or force it off as a power cut would. One at a time per machine; Force stop takes the place
+   of any other. */
+export const MACHINE_KINDS = Object.freeze(['start', 'stop', 'restart', 'sleep', 'force']);
+/* How long each step is given (seconds), as the host program bounds it: past it, the page offers
+   "Force now", which moves on to the next step. */
+export const STEP_LIMITS = Object.freeze({ polite: 60, force: 30, term: 5, kill: 5, check: 10, start: 180, suspend: 120, resleep: 300, stop: 120 });
+/* The way down, in order (the host program's `vm halt`), and the step "Force now" moves on to. */
+const DOWN = ['polite', 'force', 'term', 'kill', 'check'];
+const NEXT = Object.freeze({ polite: 'force', force: 'term', term: 'kill' });
+/* Each step in words, for the journal and the chat (the page has its own, web/app.js). */
+const STEP_WORDS = Object.freeze({ polite: 'polite stop', force: 'forced stop', term: 'SIGTERM', kill: 'SIGKILL', check: 'check', start: 'start', suspend: 'sleep', resleep: 'wake and sleep again', stop: 'clean stop' });
+const KIND_WORDS = Object.freeze({ start: ['Started', 'Not started'], stop: ['Stopped', 'Not stopped'], restart: ['Restarted', 'Not restarted'], sleep: ['Asleep', 'Not asleep'], force: ['Stopped by force', 'Not stopped by force'], resize: ['Resized', 'Not resized'] });
+
 export class Refusal extends Error {
     constructor(status, message, { retry = false } = {}) { super(message); this.status = status; if (retry) this.retry = true; }
 }
@@ -72,6 +86,13 @@ const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean
 
 export class Conversations {
     #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #uid; #gid;
+    /* THE ONE ACTION RUNNING ON EACH MACHINE (machineAction), by name: a start, a stop, a restart, a
+       sleep, a resize, a force stop. A second one is refused while it runs; Force stop ends it and
+       takes its place. */
+    #acts = new Map();
+    /* Set by the server: an action's outcome, in words -- written in the journal (events.mjs), and
+       said in its chat when `chat` (a restart says it already, through `renewed`). */
+    machineSaid = () => {};
     /* Set by the server: prepares the VM before the tool is attached, and
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
@@ -124,6 +145,8 @@ export class Conversations {
             if (c.phase === 'moving') store.patch(c.name, { phase: 'ready', step: undefined, moved: 'The server restarted while the work folder was being moved. The files are safe, in the machine: look at /work, /work.before-move and /work.moving.' });
             if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
             if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restartingSince: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
+            /* An action cut short: said as such, never left running on the page. */
+            if (store.get(c.name)?.machine) store.patch(c.name, { machine: undefined, machineReport: { kind: c.machine.kind, ok: false, cut: true, at: new Date().toISOString(), steps: (c.machine.steps ?? []).filter((x) => x.state !== 'todo').map(({ id, state, s }) => ({ id, result: state === 'run' ? 'cut' : state, ...(s !== undefined ? { s } : {}) })), advice: 'look', said: 'The server restarted during this action: look at its state.' } });
             /* Nothing of a start is going on any more: a page must not wait for it. */
             if (store.get(c.name)?.progress) store.patch(c.name, { progress: undefined });
         }
@@ -414,9 +437,13 @@ export class Conversations {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : c.phase === 'moving' ? 'This conversation is moving its work folder.' : 'This conversation could not be built.');
+        /* Being stopped, put to sleep or forced off: not woken under it; the page tries again after. */
+        const acting = this.#acts.get(name);
+        if (acting && ['stop', 'force', 'sleep', 'start'].includes(acting.kind)) throw new Refusal(409, 'Its machine is being changed: wait for the end of it.', { retry: true });
         this.#cancelStop(name);
-        /* Opening is the explicit gesture that ends a sleep. */
+        /* Opening is the explicit gesture that ends a sleep, or a stop its owner asked for. */
         if (c.asleep) this.#store.patch(name, { asleep: false });
+        if (c.stopped) this.#store.patch(name, { stopped: undefined });
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
         /* Another screen is applying the size kept for its wake: this one opens once it is over. */
         await this.#resizing.get(name)?.catch(() => {});
@@ -810,7 +837,9 @@ export class Conversations {
         const c = this.#busyCheck(name);
         const want = c.sizeAtWake;
         const had = { memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB };
-        const release = this.#claim(name, 'restarting', 'Looking at the machine');
+        const act = this.#take(name, 'restart');
+        const claimed = this.#claim(name, 'restarting', 'Looking at the machine');
+        const release = () => { claimed(); this.#give(name, act); };
         let state;
         try {
             state = await this.#vms.state(name);
@@ -824,12 +853,14 @@ export class Conversations {
         this.#store.patch(name, { phase: 'restarting', restartingSince: since, step: 'Stopping the machine', restarted: undefined, sizeAtWake: undefined });
         const tool = this.#tools.find((t) => t.id === c.tool);
         this.#begin(name, 'restart', [...(state === 'Stopped' ? [] : ['stopping']), ...(want ? ['setting'] : []), 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
-        this.restarted = this.#cycle(name, c, want ? this.#setter(name, c, want) : async () => undefined, true).then(async (failure) => {
+        this.#plan(name, act, [...this.#downSteps(name), 'start']);
+        this.restarted = this.#cycle(name, c, want ? this.#setter(name, c, want) : async () => undefined, true, act).then(async (failure) => {
+            this.#report(name, act, { ok: !failure, why: failure, chat: false });
             if (!want) return this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.', Boolean(failure));
             await this.reconcile(name);
             const said = sizeSaid(this.#store.get(name), had);
             return this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `Restarted: it now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
-        });
+        }).finally(() => this.#give(name, act));
         return this.#store.get(name);
     }
 
@@ -844,7 +875,9 @@ export class Conversations {
         const tool = this.#tools.find((t) => t.id === c.tool);
         const { memory, disk, cpus } = this.#sizeAsked(c, tool, asked);
         if (c.asleep === true) return this.#later(name, c, { memoryMb: memory, cpus, diskGb: disk });
-        const release = this.#claim(name, 'restarting', 'Looking at the machine');
+        const act = this.#take(name, 'resize');
+        const claimed = this.#claim(name, 'restarting', 'Looking at the machine');
+        const release = () => { claimed(); this.#give(name, act); };
         let state;
         try {
             state = await this.#vms.state(name);
@@ -858,11 +891,14 @@ export class Conversations {
         /* Started again only when it ran: then the page is told each step to its tool. */
         if (state === 'Running') this.#begin(name, 'resize', ['stopping', 'setting', 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
         const set = this.#setter(name, c, { memoryMb: memory, cpus, diskGb: disk });
-        this.resized = this.#cycle(name, c, set, state === 'Running').then(async (failure) => {
+        if (state === 'Running') this.#plan(name, act, [...this.#downSteps(name), 'start']);
+        this.resized = this.#cycle(name, c, set, state === 'Running', act).then(async (failure) => {
+            if (state === 'Running') this.#report(name, act, { ok: !failure, why: failure, chat: false });
+            else this.#store.patch(name, { machine: undefined });
             await this.reconcile(name);
             const said = sizeSaid(this.#store.get(name), { memoryMb: memory, cpus, diskGb: disk });
             await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
-        });
+        }).finally(() => this.#give(name, act));
         return this.#store.get(name);
     }
 
@@ -970,13 +1006,19 @@ export class Conversations {
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'restarting' ? 'Its machine is being restarted already.' : c.phase === 'moving' ? 'It is moving its work folder.' : 'This conversation is not ready.');
         if (this.#resizing.has(name)) throw new Refusal(409, 'Its machine is being given its new size as it wakes.', { retry: true });
+        if (this.#acts.has(name)) throw new Refusal(409, 'Its machine is busy with another action: wait, or force it off.', { retry: true });
         return c;
     }
 
     /* Stops the machine (cleanly, then by force), runs `between` on the
        stopped machine, and starts it again when `restart`. Returns what
        went wrong, in words, or undefined. */
-    async #cycle(name, c, between, restart) {
+    /* `act`: the action it runs for (restart, resize); one of its own when none is given (a size
+       applied at a wake), taken and given back here. The stop is the way down (#down): its steps
+       told to the page, "Force now" taken, Force stop taking its place. */
+    async #cycle(name, c, between, restart, given = null) {
+        const act = given ?? this.#take(name, 'resize');
+        if (!given) this.#plan(name, act, [...this.#downSteps(name), ...(restart ? ['start'] : [])]);
         const step = (text) => { if (this.#store.get(name)) this.#store.patch(name, { step: text }); };
         try {
             await this.#calm(name, step);
@@ -984,21 +1026,21 @@ export class Conversations {
             let state = await this.#vms.state(name);
             if (state !== 'Stopped') {
                 step('Stopping the machine');
-                /* A machine asleep cannot be stopped cleanly: it is not running. */
-                const clean = state === 'Suspended' ? { code: 1 } : await this.#watched(name, 'stop', this.#vms.stop(name, STOP_MS));
-                state = await this.#vms.state(name);
-                if (clean.code !== 0 || state !== 'Stopped') {
-                    step('Stopping the machine by force');
-                    await this.#watched(name, 'stop', this.#vms.kill(name));
-                    state = await this.#vms.state(name);
-                }
+                const down = await this.#down(name, act);
+                if (down.preempted) return 'it was stopped by force instead.';
+                state = await this.#vms.state(name).catch(() => undefined);
                 if (state !== 'Stopped') return `the machine did not stop (${state ? `it is ${state}` : 'its state could not be read'}).`;
-            }
+            } else this.#skipDown(name, act);
             const failed = await between();
             if (!restart) return failed;
             step('Starting the machine');
             this.#reach(name, 'starting');
-            const started = await this.#watched(name, 'start', this.#vms.start(name));
+            if (act.preempted) return 'it was stopped by force instead.';
+            this.#stepAt(name, act, 'start', 'start');
+            act.ctl = new AbortController();
+            const started = await this.#watched(name, 'start', this.#vms.start(name, { signal: act.ctl.signal }));
+            if (started.aborted) return 'it was stopped by force instead.';
+            this.#stepAt(name, act, 'start', started.code === 0 ? 'ok' : 'fail');
             /* The VM manager may fail its start for its own mounts while the machine runs: those are mounted again here. */
             if (started.code !== 0 && (await this.#vms.state(name).catch(() => undefined)) !== 'Running') return `${failed ? `${failed} And ` : ''}the machine did not start (${firstLine(started.stderr) || firstLine(started.stdout) || `exit ${started.code}`}).`;
             /* Whatever was put in its memory is gone: the next opening prepares it again, its folders first. */
@@ -1007,6 +1049,7 @@ export class Conversations {
             this.#reach(name, 'answering');
             return failed;
         } catch { return 'it stopped on an unexpected error.'; }
+        finally { if (!given) { this.#store.patch(name, { machine: undefined }); this.#give(name, act); } }
     }
 
     /* Before its machine is stopped: its folders being mounted again are
@@ -1025,7 +1068,7 @@ export class Conversations {
     async #settle(name, said, chat, failed = false) {
         if (!this.#store.get(name)) return;
         const running = (await this.#vms.state(name).catch(() => undefined)) === 'Running';
-        this.#store.patch(name, { phase: 'ready', step: undefined, restartingSince: undefined, asleep: false, restarted: said });
+        this.#store.patch(name, { phase: 'ready', step: undefined, restartingSince: undefined, asleep: false, stopped: undefined, restarted: said });
         /* Its steps go on to the tool only when it runs; a failure ends them, said in `restarted`. */
         if (!running || failed) this.#end(name);
         /* The tool is started again in its terminal, as after any start. */
@@ -1062,7 +1105,8 @@ export class Conversations {
         this.#cancelStop(name);
         const timer = setTimeout(() => {
             this.#timers.delete(name);
-            if (!this.#watching.has(name)) { this.drop(name); void this.#vms.stop(name); }
+            /* Not under an action of its owner's (a restart, a sleep): that one decides. */
+            if (!this.#watching.has(name) && !this.#acts.has(name)) { this.drop(name); void this.#vms.stop(name); }
         }, this.#stopDelayMs);
         timer.unref?.();
         this.#timers.set(name, timer);
@@ -1240,7 +1284,8 @@ export class Conversations {
     resizing(name) { return this.#resizing.has(name); }
 
     /* The conversations whose machine should be running: built, not asleep. */
-    awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true).map((c) => c.name); }
+    /* (Stopped by its owner: not running either, until somebody starts it.) */
+    awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true && c.stopped !== true).map((c) => c.name); }
     /* Put to sleep, and nothing else: not one being built (02-11: a reset machine was taken for a sleeper and
        suspended mid-build), not a failed one. */
     asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true).map((c) => c.name); }
@@ -1248,15 +1293,228 @@ export class Conversations {
     /* Whether the machine of a conversation runs right now. */
     async running(name) { return (await this.#vms.state(name)) === 'Running'; }
 
+    /* PUT TO SLEEP, through the one lock of its machine: refused while another action runs on it.
+       Resolves once asleep; throws, in words, when it could not be. */
     async sleep(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
-        this.#cancelStop(name);
-        this.drop(name);
-        const r = await this.#vms.suspend(name);
-        if (r.code !== 0) throw new Refusal(502, `The machine did not go to sleep: ${firstLine(r.stderr)}`);
-        /* Remembered: a sleep that was asked for holds until somebody wakes
-           it on purpose. A page that merely reloads must not wake it. */
-        this.#store.patch(name, { asleep: true });
+        if (this.#acts.has(name)) throw new Refusal(409, 'Its machine is busy with another action: wait, or force it off.', { retry: true });
+        const act = this.#take(name, 'sleep');
+        const report = await this.#perform(name, act);
+        if (!report.ok) throw new Refusal(502, `The machine did not go to sleep: ${report.why ?? 'it did not answer.'}`);
+    }
+
+    /* ---------- ONE ACTION AT A TIME ON A MACHINE (09-11) ---------- */
+    /* Taken at once, before anything is awaited, so that a second action asked meanwhile sees it. */
+    #take(name, kind) {
+        let finish;
+        const act = { kind, since: new Date().toISOString(), steps: [], ctl: null, next: null, current: null, preempted: false, until: kind !== 'force' && this.#store.get(name)?.stopEscalate === false ? 'force' : 'kill' };
+        act.done = new Promise((r) => { finish = r; });
+        act.finish = finish;
+        this.#acts.set(name, act);
+        return act;
+    }
+    #give(name, act) { if (this.#acts.get(name) === act) this.#acts.delete(name); act.finish(); }
+    /* The steps the page shows, in order: done, running, to come (`todo`). */
+    #plan(name, act, ids) {
+        act.steps = ids.map((id) => ({ id, state: 'todo' }));
+        this.#show(name, act);
+    }
+    #show(name, act) {
+        if (!this.#store.get(name)) return;
+        this.#store.patch(name, { machine: { kind: act.kind, since: act.since, until: act.until, steps: act.steps.map((x) => ({ ...x })) } });
+    }
+    /* The way down's steps, as this machine's owner chose: to its own qemu, or the VM manager's ways only. */
+    #downSteps(name) { return this.#store.get(name)?.stopEscalate === false ? ['polite', 'force', 'check'] : [...DOWN]; }
+    /* A step reached (`start`) or ended (ok|fail|timeout|skip|cut), with its seconds. */
+    #stepAt(name, act, id, result, { s, more, freedGb } = {}) {
+        let at = act.steps.find((x) => x.id === id);
+        if (!at) { at = { id, state: 'todo' }; const check = act.steps.findIndex((x) => x.id === 'check' || x.id === 'start'); act.steps.splice(check < 0 || id === 'start' ? act.steps.length : check, 0, at); }
+        if (result === 'start') { at.state = 'run'; at.since = new Date().toISOString(); act.current = id; }
+        else {
+            at.state = result;
+            at.s = s ?? (at.since ? Math.round((Date.now() - Date.parse(at.since)) / 1000) : 0);
+            if (more) at.more = more;
+            if (freedGb !== undefined) at.freedGb = freedGb;
+            if (act.current === id) act.current = null;
+            /* Nothing left to stop: the steps before the check are not needed. */
+            if (result === 'skip' && more === 'gone') for (const x of act.steps) if (x.state === 'todo' && x.id !== 'check' && x.id !== 'start') x.state = 'skip';
+        }
+        this.#show(name, act);
+    }
+    /* Nothing to stop: the way down is skipped whole. */
+    #skipDown(name, act) { for (const x of act.steps) if (DOWN.includes(x.id)) x.state = 'skip'; this.#show(name, act); }
+    /* A line of the host program's output. */
+    #seen(name, act, line) {
+        const step = stepLine(line);
+        if (!step) return;
+        if (step.result === 'start') this.#reach(name, 'stopping');
+        this.#stepAt(name, act, step.id, step.result, step);
+    }
+
+    /* THE WAY DOWN (the host program's `vm halt`, or `vm hardstop` for Force stop): a polite stop, a
+       stop by force, SIGTERM then SIGKILL to its own qemu, then the check -- each step said as it
+       goes. "Force now" ends the step running and starts the next (#forceNow); Force stop ends it
+       all (`preempted`). Resolves with { ok, freedGb, more } or { preempted }. */
+    async #down(name, act, { hard = false } = {}) {
+        let from = hard ? 'term' : 'polite';
+        let first = true;
+        for (;;) {
+            /* Force stop asked before this step began: it does not begin. */
+            if (act.preempted) return { ok: false, preempted: true };
+            act.ctl = new AbortController(); act.next = null;
+            const options = { signal: act.ctl.signal, onLine: (line) => this.#seen(name, act, line) };
+            const r = hard && first ? await this.#vms.hardstop(name, options) : await this.#vms.halt(name, { from, until: act.until, ...options });
+            first = false;
+            if (r.aborted && act.next && !act.preempted) {
+                if (act.current) this.#stepAt(name, act, act.current, 'skip', { more: 'moved on' });
+                from = act.next;
+                continue;
+            }
+            if (r.aborted) return { ok: false, preempted: true };
+            /* A step still said running when the program ended (it was cut): ended so. */
+            if (act.current) this.#stepAt(name, act, act.current, 'fail', { more: 'cut' });
+            const check = act.steps.find((x) => x.id === 'check');
+            return { ok: r.code === 0, freedGb: check?.freedGb, more: check?.more ?? (r.code === 0 ? '' : firstLine(r.stderr)) };
+        }
+    }
+
+    /* WHAT AN OWNER ASKS OF A MACHINE (`kind`, MACHINE_KINDS; 'force-now' moves the running action
+       to its next step). Answers at once with what the page reads (machineState); the action goes
+       on, its steps on the record (`machine`), its report kept after it (`machineReport`), said in
+       the journal and in its chat. `this.acted`: its end, for whoever waits for it. */
+    async machineAction(name, kind) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (kind === 'force-now') return this.#forceNow(name);
+        if (!MACHINE_KINDS.includes(kind)) throw new Refusal(400, 'Not an action of a machine.');
+        if (kind === 'restart') { await this.restart(name); this.acted = this.restarted; return this.machineState(name); }
+        const running = this.#acts.get(name);
+        if (kind !== 'force') this.#busyCheck(name);
+        else {
+            if (c.phase === 'building' || c.phase === 'moving') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : 'It is moving its work folder.');
+            if (running) { running.preempted = true; running.ctl?.abort(); await running.done; }
+        }
+        if (kind === 'start' && (c.asleep !== true && (await this.#vms.state(name).catch(() => undefined)) === 'Running')) throw new Refusal(409, 'Its machine runs already.');
+        if (kind === 'start') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
+        if (this.#acts.has(name)) throw new Refusal(409, 'Its machine is busy with another action: wait, or force it off.', { retry: true });
+        const act = this.#take(name, kind);
+        this.acted = this.#perform(name, act);
+        return this.machineState(name);
+    }
+
+    /* "FORCE NOW": the step running is ended and the next one started (polite -> forced -> SIGTERM ->
+       SIGKILL). Past the VM manager's own ways, for an owner who chose them alone, it is the owner's
+       choice now: the way goes on to its qemu. */
+    #forceNow(name) {
+        const act = this.#acts.get(name);
+        const now = act?.steps.find((x) => x.state === 'run');
+        if (!act || !now || !NEXT[now.id] || !act.ctl) throw new Refusal(409, 'Nothing to move on from just now.');
+        if (now.id === 'force' && act.until === 'force') {
+            act.until = 'kill';
+            const check = act.steps.findIndex((x) => x.id === 'check');
+            act.steps.splice(check, 0, { id: 'term', state: 'todo' }, { id: 'kill', state: 'todo' });
+        }
+        act.next = NEXT[now.id]; act.current = now.id;
+        this.#show(name, act);
+        act.ctl.abort();
+        return this.machineState(name);
+    }
+
+    /* What the page reads: the action running (its steps, each with its state and since when), the
+       last report, each step's bound, and the owner's choice for the way down. */
+    machineState(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        return { action: c.machine ?? null, report: c.machineReport ?? null, limits: STEP_LIMITS, escalate: c.stopEscalate !== false };
+    }
+
+    /* THE WAY DOWN, AS ITS OWNER CHOSE (a default, changed per conversation): on (the default), a stop
+       that hangs goes on to its own qemu by itself; off, it stops after the VM manager's own ways, and
+       the page offers to go further. */
+    setStopEscalate(name, on) {
+        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        this.#store.patch(name, { stopEscalate: on === false ? false : undefined });
+        return this.machineState(name);
+    }
+
+    /* AN ACTION, RUN TO ITS END: start, stop, sleep, force (a restart and a resize run #cycle). Gives
+       its machine back, writes its report, resolves with it. */
+    async #perform(name, act) {
+        const c = this.#store.get(name);
+        const kind = act.kind;
+        let result = { ok: false };
+        try {
+            this.#cancelStop(name);
+            if (kind === 'start') {
+                const before = await this.#vms.state(name).catch(() => undefined);
+                this.#plan(name, act, ['start']);
+                this.#stepAt(name, act, 'start', 'start');
+                act.ctl = new AbortController();
+                if (act.preempted) act.ctl.abort();
+                const r = act.preempted ? { code: 143, aborted: true } : await this.#vms.start(name, { signal: act.ctl.signal });
+                if (r.aborted) result = { ok: false, preempted: true };
+                else {
+                    const now = await this.#vms.state(name).catch(() => undefined);
+                    this.#stepAt(name, act, 'start', now === 'Running' ? 'ok' : 'fail');
+                    result = now === 'Running' ? { ok: true } : { ok: false, more: firstLine(r.stderr) || firstLine(r.stdout) || `it is ${now ?? 'in a state that could not be read'}` };
+                    if (now === 'Running') {
+                        /* From a stop, whatever was in its memory is gone: the next opening prepares it again, its folders
+                           first. From sleep, it is as it was. */
+                        if (before !== 'Suspended') { this.#fresh.add(name); this.#mountAgain.add(name); }
+                        this.#store.patch(name, { asleep: false, stopped: undefined });
+                    }
+                }
+            } else if (kind === 'sleep') {
+                this.#plan(name, act, ['suspend']);
+                this.drop(name);
+                act.ctl = new AbortController();
+                const r = await this.#vms.suspend(name, { signal: act.ctl.signal, onLine: (line) => this.#seen(name, act, line) });
+                if (r.aborted) result = { ok: false, preempted: true };
+                else {
+                    if (act.current) this.#stepAt(name, act, act.current, r.code === 0 ? 'ok' : 'fail');
+                    if (!act.steps.some((x) => x.state !== 'todo')) this.#stepAt(name, act, 'suspend', r.code === 0 ? 'ok' : 'fail');
+                    result = r.code === 0 ? { ok: true } : { ok: false, more: firstLine(r.stderr) || `exit ${r.code}` };
+                    /* Remembered: a sleep that was asked for holds until somebody wakes
+                       it on purpose. A page that merely reloads must not wake it. */
+                    if (r.code === 0) this.#store.patch(name, { asleep: true, stopped: undefined });
+                }
+            } else {
+                /* stop, force: the way down, all of it or from its own qemu. */
+                this.#plan(name, act, kind === 'force' ? ['term', 'kill', 'check'] : this.#downSteps(name));
+                await this.#calm(name, () => {});
+                this.drop(name);
+                result = await this.#down(name, act, { hard: kind === 'force' });
+                /* Stopped: no longer asleep (its saved state is gone); it stays stopped until somebody starts it. */
+                if (result.ok) this.#store.patch(name, { asleep: false, stopped: true });
+            }
+        } catch (error) { result = { ok: false, more: error instanceof Refusal ? error.message : 'an unexpected error' }; }
+        let report;
+        try { report = this.#report(name, act, { ...result, why: result.preempted ? 'Force stop took its place.' : undefined, chat: true }); }
+        finally { this.#give(name, act); }
+        /* Started: its tool starts in its terminal, as after any start (once the machine is given back). */
+        if (kind === 'start' && result.ok) try { this.ready(name); } catch { /* the next opening starts it */ }
+        return report;
+    }
+
+    /* THE REPORT OF AN ACTION, kept on the conversation (`machineReport`), the steps it took with
+       their seconds, the memory freed, and what to do when it failed (`advice`: force | manager |
+       again | look); said in the journal, and in its chat when `chat`. */
+    #report(name, act, { ok, freedGb, more, why, chat = true, preempted = false }) {
+        const steps = act.steps.filter((x) => x.state !== 'todo').map(({ id, state, s }) => ({ id, result: state, ...(s !== undefined ? { s } : {}) }));
+        const check = act.steps.find((x) => x.id === 'check');
+        const freed = freedGb ?? check?.freedGb;
+        const left = /qemu-left/.test(more ?? check?.more ?? '');
+        const mute = /mute/.test(more ?? check?.more ?? '');
+        const advice = ok || preempted ? undefined : left ? (act.until === 'force' ? 'force' : 'manager') : mute ? 'manager' : act.kind === 'sleep' ? 'force' : act.kind === 'force' || act.kind === 'stop' ? 'manager' : 'again';
+        const seconds = Math.max(0, Math.round((Date.now() - Date.parse(act.since)) / 1000));
+        const [yes, no] = KIND_WORDS[act.kind] ?? ['Done', 'Not done'];
+        const listed = steps.filter((x) => x.result !== 'skip').map((x) => `${STEP_WORDS[x.id] ?? x.id} ${x.result === 'ok' ? '' : `${x.result} `}${x.s ?? 0} s`).join(', ');
+        const advised = { force: ' Use Force stop.', manager: ' The VM manager may need a restart: that is your call.', again: ' Try again in a moment.', look: ' Look at its state.' }[advice] ?? '';
+        const said = `${ok ? yes : no} in ${seconds} s${listed ? ` (${listed})` : ''}${ok && freed ? `, ${freed.toFixed(1)} GB freed` : ''}.${!ok && why ? ` ${why}` : ''}${!ok && !why && more ? ` ${more}.` : ''}${advised}`;
+        const report = { kind: act.kind, ok: Boolean(ok), at: new Date().toISOString(), s: seconds, steps, ...(freed !== undefined ? { freedGb: freed } : {}), ...(advice ? { advice } : {}), ...(preempted ? { preempted: true } : {}), said };
+        if (this.#store.get(name)) this.#store.patch(name, { machine: undefined, machineReport: report });
+        try { this.machineSaid(name, said, Boolean(ok), chat); } catch { /* told, nothing more */ }
+        return { ...report, ...(why ? { why } : more ? { why: more } : {}) };
     }
 
     /* Online or offline: remembered here, enforced by network.mjs. */

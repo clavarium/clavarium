@@ -296,3 +296,46 @@ test('Needs you for a machine that needs a hand, not for programs once stopped f
     await me.until('memory short now: back in Needs you', async () => (await needsRows()).includes('short'));
     assert.deepEqual(me.errors, []);
 });
+
+test('its machine from its settings: five buttons always there; Stop asked in one line, its steps live, "Force now" past a bound, Force stop, a report at the end', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('lever', 'Shell', { chat: false });
+    await me.page.locator('#folders').click();
+    const FIVE = ['m-start', 'm-stop', 'restart', 'sleep', 'm-force'];
+    const allThere = async () => { for (const id of FIVE) assert.equal(await me.page.locator(`#${id}`).isVisible(), true, id); };
+    await allThere();
+    /* What does not apply is greyed, with why. */
+    assert.equal(await me.page.locator('#m-start').isDisabled(), true);
+    assert.equal(await me.page.locator('#m-start').getAttribute('title'), 'It runs already');
+    /* A polite stop that hangs; each step given two seconds here. */
+    writeFileSync(join(vmHome(b, 'lever'), 'hang-stop'), '');
+    await me.page.evaluate(() => { window.clavariumTimes = { ...(window.clavariumTimes ?? {}), mstep: 2 }; });
+    await me.page.locator('#m-stop').click();
+    assert.match(await me.page.locator('#m-confirm-text').innerText(), /interrupted/);
+    await me.page.locator('#m-confirm-yes').click();
+    await me.until('its steps, live', async () => (await me.page.locator('#m-live li[data-step="polite"]').getAttribute('data-state').catch(() => '')) === 'run');
+    assert.deepEqual(await me.page.locator('#m-live li[data-step]').evaluateAll((l) => l.map((x) => x.dataset.step)), ['polite', 'force', 'term', 'kill', 'check']);
+    await allThere();
+    await me.until('"Force now" once past its bound', async () => me.page.locator('#m-live .m-force-now').isVisible());
+    await me.page.locator('#m-live .m-force-now').click();
+    await me.until('stopped, with its report', async () => /^Stopped/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
+    assert.match(await me.page.locator('#m-report').innerText(), /Forced/);
+    assert.equal(stateOf(b, 'lever'), 'Stopped');
+    const c = (await me.api('/api/conversations')).body.find((x) => x.name === 'lever');
+    assert.equal(c.stopped, true); assert.equal(c.machineReport.ok, true);
+    assert.equal(c.machineReport.steps.find((x) => x.id === 'polite').result, 'skip', 'moved on by its owner');
+    /* Stopped: Start applies now, Stop does not. */
+    assert.equal(await me.page.locator('#m-start').isDisabled(), false);
+    assert.equal(await me.page.locator('#m-stop').isDisabled(), true);
+    rmSync(join(vmHome(b, 'lever'), 'hang-stop'));
+    await me.page.locator('#m-start').click();
+    await me.until('started', async () => /^Started/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
+    /* Force stop: asked in one line, as a power cut. */
+    await me.page.locator('#m-force').click();
+    assert.match(await me.page.locator('#m-confirm-text').innerText(), /power cut/);
+    await me.page.locator('#m-confirm-yes').click();
+    await me.until('forced off', async () => /^Forced off/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
+    assert.equal(stateOf(b, 'lever'), 'Stopped');
+    assert.deepEqual(me.errors, []);
+});
