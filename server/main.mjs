@@ -81,6 +81,8 @@ import { Events } from './events.mjs';
 import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
+import { Watchdog } from './watchdog.mjs';
+import { MachineList } from './machinelist.mjs';
 import { WakeLearn } from './wakelearn.mjs';
 import { BoxCollect } from './boxcollect.mjs';
 import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH, FIRMWARE_PATH as BOX_FIRMWARE_PATH } from './boxes.mjs';
@@ -186,7 +188,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, features, apikeys, relayJoin } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -261,7 +263,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* Settings, Access, API keys: made and revoked by an administrator only (past the gate). */
         if (apikeys && pathname.startsWith('/api/apikeys') && await handleApiKeys(request, response, apikeys.keys, originOk, HEADERS, events)) return;
         if (boxes && pathname.startsWith('/api/boxes') && await handleBoxes(request, response, boxes, originOk, HEADERS, (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }))) return;
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms, machineList)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -520,7 +522,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
-    let boxes; let rooms;
+    let boxes; let rooms; let machineList;
     const talk = new Talk({ spoke: (name, text, to, how) => { void boxes?.agentSaid(name, text, to, how); }, inRoom: (name, entry, kind) => rooms?.answered(name, entry, kind), store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
@@ -607,10 +609,22 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs);
        not where its owner turned on its own reaction (above): one way of telling it, not two. */
     const healthDocket = new HealthDocket({ store: new Store(`${dataDir}/health-docket.json`), dockets, reacting: (name) => reacting.settings(name).on });
-    health.forgotten = (name) => healthDocket.forget(name);
+    health.forgotten = (name) => { healthDocket.forget(name); watchdog.forget(name); };
     /* A machine's problems worth keeping in What happened: said once, until they went away. */
     const problemsSaid = new Map();
+    /* ITS WATCHDOG (watchdog.mjs): mute or full for as long as its owner set, forced off then started, once;
+       its AI told in its chat, its owner alerted with the report. */
+    const watchdog = new Watchdog({ conversations: all, store: new Store(`${dataDir}/watchdog.json`),
+        act: async (name) => {
+            events.add({ kind: 'machine', text: `Machine of ${name}: mute or full for too long, forced off and started by its watchdog`, conversation: name });
+            const forced = await all.machineAction(name, 'force', { wait: true });
+            if (!forced?.ok) return forced;
+            return all.machineAction(name, 'start', { wait: true });
+        },
+        tell: (name, text, started) => all.renewed(name, text, started),
+        alert: (payload) => { events.add({ kind: 'machine', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
     health.judged = (name, record) => {
+        void watchdog.judged(name, record).catch(() => {});
         talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
         /* A folder that came loose and was put back: said once, in its chat (the look that put it back). */
         for (const path of record?.remounted ?? []) { try { talk.event(name, { kind: 'machine-ok', text: `Le dossier ${path} s'était détaché de la machine : il a été remonté.`, topic: 'Machine', brief: 'Shared folder' }); } catch { /* its chat is off */ } }
@@ -641,8 +655,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }),
         /* Under the reserve: the machine that takes the most put to sleep, the owner told, and its chat. */
         sleep: (name) => { events.add({ kind: 'machine', text: `Machine of ${name} put to sleep: this server was short of room`, conversation: name }); return all.sleep(name); },
-        /* Frozen, so not put to sleep: forced off instead (capacity.mjs, frozenWay), through the one lock of its machine. */
-        force: async (name) => { events.add({ kind: 'machine', text: `Machine of ${name} forced off: this server was short of room and it was frozen`, conversation: name }); await all.machineAction(name, 'force'); return (await all.acted)?.ok === true; }, alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload); },
+        /* Memory short, forced off (capacity.mjs, pressureWay: the default), or frozen and so not put to sleep: through the one lock of its machine. */
+        force: async (name) => { events.add({ kind: 'machine', text: `Machine of ${name} forced off: this server was short of memory`, conversation: name }); return (await all.machineAction(name, 'force', { wait: true }))?.ok === true; }, alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload); },
         /* A machine asleep but still holding its RAM (a suspend that did not free it): its memory reclaimed, only that machine touched. */
         reclaim: (name) => { events.add({ kind: 'machine', text: `Machine of ${name}: memory reclaimed (it was asleep but still held RAM)`, conversation: name }); return vms.reclaim(name).then((r) => (r.stdout || '').trim()); },
         say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
@@ -657,6 +671,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine', brief: 'Out of memory', actions: ['memory', 'restart', 'terminal'] }); } catch { /* its chat may be off */ }
     };
     const stopWatch = capacity.start();
+    /* Settings, Machines: each machine, the VM manager, this server's choices (machinelist.mjs). */
+    machineList = new MachineList({ conversations: all, vms, capacity, vmWatch });
     /* The curves of the resources (history.mjs): one look a minute, from what the server knows already. */
     const history = new History({ file: `${dataDir}/history.json` });
     const historyLook = () => capacity.room().then((room) => history.sample(room, all.list().filter((c) => c.phase === 'ready').map((c) => ({ name: c.name, vm: `clv-${c.name}`, cores: c.cpus ?? 1, memoryMb: c.memoryMb, health: health.of(c.name) })))).catch(() => {});
@@ -801,7 +817,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         answerer: answererConfig(env)?.models.length ?? 0, updates: updates.about(), team: team ? team.list().length : null,
         screen: await quick(screenNow(), 1500, null), catalogue: await quick(catalogue.providers().catch(() => []), 1500, []),
     }) });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, features, apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);

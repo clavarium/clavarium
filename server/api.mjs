@@ -12,7 +12,8 @@
  *                                                one at a time (force takes the place of any other; force-now: the next
  *                                                step of the one running) -> its state (202), as below
  *   POST /api/conversations/<name>/machine       {escalate: true|false}: a stop that hangs goes on to its qemu by itself (default) or asks
- *   GET  /api/conversations/<name>/machine       {action: {kind, since, until, steps: [{id, state, since, s}]} | null, report, limits, escalate}
+ *   POST /api/conversations/<name>/machine       {watchdog: {on?, delayMin?}}: mute or full that long, its machine is forced off and started, once
+ *   GET  /api/conversations/<name>/machine       {action: {kind, since, until, steps: [{id, state, since, s}]} | null, report, limits, escalate, watchdog}
  *   POST /api/conversations/<name>/machine/cancel    the size kept for its wake, given up
  *   GET  /api/conversations/<name>/health        what was last seen of its machine
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
@@ -123,7 +124,11 @@
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/history/all?span=1h|24h|7d    Settings, Usage: the server and every machine (asleep too) on one time axis,
  *                                           in GB and cores: {t, capacity, server, itself, machines: [{name, alloc, asleep, ...}]}
- *   POST /api/server/frozen                 {way: force|alert}: a machine to put to sleep for room that is frozen: forced off (default) or only said
+ *   POST /api/server/pressure               {way: force|sleep|alert}: memory short, the machine that takes the most forced off (default), put to sleep, or only said
+ *   GET  /api/server/machines               {machines: [{name, state, rssMb, sizeMb, since, action}], manager: {ok, downSince, mode, asked, last, reviving}, pressure}
+ *   POST /api/server/machines/<name>/force  its machine forced off, as from its conversation (202)
+ *   POST /api/server/vm-manager             {mode: night|always|ask}: when it hangs, restarted by itself at night (default), always, or never
+ *   POST /api/server/vm-manager/restart     {confirm: true}: restarted now; every machine is suspended and resumed
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart   POST /api/server/reboot (the whole server)
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
@@ -196,7 +201,7 @@ function readBody(request, max = BODY_MAX) {
 /* This run of the server: a page's count of binder changes is of one run, and starts again with the next. */
 const BOOT = Math.random().toString(36).slice(2, 10);
 
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms, machineList) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -430,6 +435,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
             if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
+            /* Settings, Machines: each machine, the VM manager, this server's two choices (machinelist.mjs). */
+            if (pathname === '/api/server/machines' && machineList) return send(200, await machineList.list()), true;
             if (pathname === '/api/server/brief' && capacity) return send(200, { ...(await capacity.brief()), machines: platform?.machines ?? true }), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             if (pathname === '/api/flows' && setup) return send(200, setup.graph()), true;
@@ -591,8 +598,16 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/updates/settings' && updates) return send(200, await updates.settings({ mode: body.mode, channel: body.channel, window: body.window })), true;
         if (pathname === '/api/updates/apply' && updates) return send(202, await updates.apply(body.version)), true;
         if (pathname === '/api/updates/back' && updates) return send(202, await updates.back(body.version)), true;
-        /* A machine to put to sleep for room that is frozen: forced off (default) or only said. */
-        if (pathname === '/api/server/frozen' && capacity) { capacity.setFrozenWay(body.way); return send(200, await capacity.about()), true; }
+        /* Memory short: the machine that takes the most forced off (default), put to sleep, or only said. */
+        if (pathname === '/api/server/pressure' && capacity) { capacity.setPressureWay(body.way); return send(200, await capacity.about()), true; }
+        /* Settings, Machines: Force stop from the list; the VM manager restarted (confirmed: every machine is resumed); what is done when it hangs. */
+        const forcedOf = /^\/api\/server\/machines\/([^/]+)\/force$/.exec(pathname);
+        if (forcedOf && machineList) return send(202, await machineList.force(decodeURIComponent(forcedOf[1]))), true;
+        if (pathname === '/api/server/vm-manager/restart' && machineList) {
+            if (body?.confirm !== true) throw new Refusal(400, 'Restarting the machine manager resumes every machine: confirm it.');
+            return send(200, await machineList.revive()), true;
+        }
+        if (pathname === '/api/server/vm-manager' && machineList) return send(200, await machineList.setManagerMode(body?.mode)), true;
         if (pathname === '/api/server/reserve' && capacity) { capacity.setReserve({ diskMb: body.diskMb, diskPercent: body.diskPercent, memoryMb: body.memoryMb, memoryPercent: body.memoryPercent }); return send(200, await capacity.about()), true; }
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
@@ -924,6 +939,8 @@ export async function handleApi(request, response, conversations, headers, resou
             /* One action on its machine, or the owner's choice for its way down (conversations.mjs, machineAction). */
             if (typeof body?.action === 'string') return send(202, await conversations.machineAction(conversation, body.action)), true;
             if (typeof body?.escalate === 'boolean') return send(200, conversations.setStopEscalate(conversation, body.escalate)), true;
+            /* Its watchdog (watchdog.mjs): on or off, and how long it waits. */
+            if (body?.watchdog && typeof body.watchdog === 'object') return send(200, conversations.setWatchdog(conversation, { on: typeof body.watchdog.on === 'boolean' ? body.watchdog.on : undefined, delayMin: body.watchdog.delayMin })), true;
             const resized = await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus });
             /* Asleep, nothing was started: the choice is only kept, for its wake. */
             return send(resized.phase === 'restarting' ? 202 : 200, resized), true;

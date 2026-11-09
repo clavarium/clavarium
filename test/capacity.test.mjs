@@ -26,8 +26,8 @@ function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 204
 }
 
 test('only lines of the expected shape are read: numbers, our machines, known places', () => {
-    const room = readRoom(['place machines 7 100 40', 'place elsewhere 7 1 1', 'place data x 1 1', 'memory 8192 4096', 'memory -1 2', 'machine clv-a 512', 'machine evil 1', 'machine clv-a 9', 'machine clvshelf-20261014-120000 300', 'cpu 1000 400 4', 'cpu x 1 1', 'machinecpu clv-a 120', 'machinecpu evil 5', 'junk'].join('\n'));
-    assert.deepEqual(room, { places: [{ what: 'machines', device: 7, sizeMb: 100, freeMb: 40 }], memory: { totalMb: 8192, availableMb: 4096 }, machines: [{ vm: 'clv-a', rssMb: 512 }, { vm: 'clvshelf-20261014-120000', rssMb: 300 }], cpu: { ticks: 1000, idle: 400, cores: 4 }, machineCpu: { 'clv-a': 120 } });
+    const room = readRoom(['place machines 7 100 40', 'place elsewhere 7 1 1', 'place data x 1 1', 'memory 8192 4096', 'memory -1 2', 'machine clv-a 512', 'machine evil 1', 'machine clv-a 9', 'machine clvshelf-20261014-120000 300', 'cpu 1000 400 4', 'cpu x 1 1', 'machinecpu clv-a 120', 'machinecpu evil 5', 'machineage clv-a 3600', 'machineage evil 5', 'machineage clv-a x', 'junk'].join('\n'));
+    assert.deepEqual(room, { places: [{ what: 'machines', device: 7, sizeMb: 100, freeMb: 40 }], memory: { totalMb: 8192, availableMb: 4096 }, machines: [{ vm: 'clv-a', rssMb: 512 }, { vm: 'clvshelf-20261014-120000', rssMb: 300 }], cpu: { ticks: 1000, idle: 400, cores: 4 }, machineCpu: { 'clv-a': 120 }, machineAge: { 'clv-a': 3600 } });
     assert.deepEqual(readUsage('used data 5\nused machine clv-a 7\nused machine ../x 1\nused nonsense 3\nused images 1e9'), { data: 5, machines: { a: 7 } });
 });
 
@@ -141,9 +141,10 @@ test('what was promised is only said: more than there is is a warning, never a r
     await b.capacity.check({ kind: 'create', memoryMb: 1024 });
 });
 
-test('watched: under the reserve, the owner is told and the running machine that takes the most is put to sleep, once', async (t) => {
+test('watched, set to sleep: under the reserve, the owner is told and the running machine that takes the most is put to sleep, once', async (t) => {
     const b = bench(t, { room: 'place machines 1 102400 50000\nmemory 16384 800\nmachine clv-alpha 1024\nmachine clv-beta 3000', awake: ['alpha', 'beta'] });
-    assert.deepEqual(await b.capacity.watch(), [{ what: 'memory', slept: 'beta' }]);
+    assert.equal(b.capacity.setPressureWay('sleep'), 'sleep');
+    assert.deepEqual(await b.capacity.watch(), [{ what: 'memory', way: 'sleep', slept: 'beta' }]);
     assert.deepEqual(b.slept, ['beta']);
     assert.deepEqual(b.alerts, [{ title: 'This server is short of memory', body: '0.8 GB free, 1.0 GB kept in reserve. beta was put to sleep.', url: '/?open=settings&at=resources' }]);
     assert.equal(b.said[0][0], 'beta');
@@ -155,11 +156,11 @@ test('watched: under the reserve, the owner is told and the running machine that
     b.world.room = 'place machines 1 102400 4000\nmemory 16384 8000\nmachine clv-alpha 1024\nmachine clv-beta 3000';
     /* Disk: the one whose disk is largest (alpha, by the last measure), though beta holds more memory. */
     await b.capacity.about();
-    assert.deepEqual(await b.capacity.watch(), [{ what: 'disk', slept: 'alpha' }]);
+    assert.deepEqual(await b.capacity.watch(), [{ what: 'disk', way: 'sleep', slept: 'alpha' }]);
     assert.equal(b.alerts.length, 2);
     /* Nothing running: the owner is told all the same. */
     const n = bench(t, { room: 'place machines 1 102400 50000\nmemory 16384 500' });
-    assert.deepEqual(await n.capacity.watch(), [{ what: 'memory', slept: null }]);
+    assert.deepEqual(await n.capacity.watch(), [{ what: 'memory', way: 'force', slept: null }]);
     assert.deepEqual(n.slept, []);
     assert.equal(n.alerts.length, 1);
 });
@@ -217,19 +218,27 @@ test('reclaimSleepers never touches a machine being built: only one put to sleep
     assert.deepEqual(b.reclaimed, []);
 });
 
-test('watched: the machine that takes the most is FROZEN -- never suspended (it would hang the VM manager): forced off, or only said, as the owner chose', async (t) => {
+test('memory short, as its owner chose: forced off (the default), put to sleep (a frozen one forced off), or only said', async (t) => {
     const room = 'place machines 1 102400 50000\nmemory 16384 800\nmachine clv-alpha 1024\nmachine clv-beta 3000';
-    const b = bench(t, { room, awake: ['alpha', 'beta'], frozen: ['beta'] });
-    assert.equal(b.capacity.frozenWay(), 'force', 'the default');
-    assert.deepEqual(await b.capacity.watch(), [{ what: 'memory', slept: null, frozen: 'beta', forced: 'beta' }]);
-    assert.deepEqual(b.forced, ['beta']);
-    assert.match(b.alerts[0].body, /beta was frozen: it was forced off\.$/);
-    assert.match(b.said[0][1], /forced off, as after a power cut/);
-    /* Only said, as the owner may choose instead. */
-    const a = bench(t, { room, awake: ['alpha', 'beta'], frozen: ['beta'] });
-    assert.equal(a.capacity.setFrozenWay('alert'), 'alert');
-    assert.deepEqual(await a.capacity.watch(), [{ what: 'memory', slept: null, frozen: 'beta', forced: null }]);
-    assert.deepEqual(a.forced, []);
-    assert.match(a.alerts[0].body, /beta takes the most but is frozen: Force stop frees it\.$/);
-    assert.throws(() => a.capacity.setFrozenWay('nuke'), /forced off \(force\) or only said \(alert\)/);
+    /* The default: the one that takes the most forced off, never written to disk at the worst time. */
+    const f = bench(t, { room, awake: ['alpha', 'beta'] });
+    assert.equal(f.capacity.pressureWay(), 'force', 'the default');
+    assert.equal((await f.capacity.about()).pressure, 'force');
+    assert.deepEqual(await f.capacity.watch(), [{ what: 'memory', way: 'force', slept: null, forced: 'beta' }]);
+    assert.deepEqual([f.forced, f.slept], [['beta'], []]);
+    assert.match(f.alerts[0].body, /beta was forced off\.$/);
+    assert.match(f.said[0][1], /took the most, so it was forced off, as after a power cut/);
+    /* Sleep: a frozen machine is never suspended (it would hang the VM manager): forced off instead. */
+    const s = bench(t, { room, awake: ['alpha', 'beta'], frozen: ['beta'] });
+    s.capacity.setPressureWay('sleep');
+    assert.deepEqual(await s.capacity.watch(), [{ what: 'memory', way: 'sleep', slept: null, forced: 'beta', frozen: 'beta' }]);
+    assert.match(s.alerts[0].body, /beta was forced off \(frozen\)\.$/);
+    /* Alert only: nothing done to any machine, the owner told which takes the most. */
+    const a = bench(t, { room, awake: ['alpha', 'beta'] });
+    assert.equal(a.capacity.setPressureWay('alert'), 'alert');
+    assert.deepEqual(await a.capacity.watch(), [{ what: 'memory', way: 'alert', slept: null, held: 'beta' }]);
+    assert.deepEqual([a.forced, a.slept, a.said], [[], [], []]);
+    assert.match(a.alerts[0].body, /beta takes the most: nothing was done, as you chose\.$/);
+    assert.throws(() => a.capacity.setPressureWay('nuke'), /forced off \(force\), put to sleep \(sleep\), or only said \(alert\)/);
+    assert.equal(a.capacity.pressureWay(), 'alert', 'kept');
 });

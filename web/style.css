@@ -3012,3 +3012,10 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
   .mstep li.arr { display: none; }
   #notice .m-live { justify-items: stretch; }
 }
+
+/* ITS WATCHDOG's own minutes (a conversation's Machine chapter), and SETTINGS, MACHINES (machinelist.mjs). */
+.m-dog-min { display: inline-flex; align-items: center; gap: 6px; font-size: .875rem; color: var(--ink2); }
+.m-dog-min input { width: 5.5em; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+.list-item.machine-item > .set-what > small.status-line { font-size: .75rem; margin: 0; }
+#manager-row .status-line { margin: 2px 0 0; font-size: .75rem; }
+#machines-confirm { margin: 8px 16px; }

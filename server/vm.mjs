@@ -136,6 +136,13 @@ export class Vms {
         return [...this.prefix, 'vm', 'exec', vmName(conversation), '--', ...argv];
     }
 
+    /* Every machine's state, by VM name (a Map); throws VmUnknown when the VM manager did not answer. */
+    async states({ fresh = false } = {}) {
+        const snap = await this.#states(fresh);
+        if (!snap.states) throw new VmUnknown(snap.why);
+        return new Map(snap.states);
+    }
+
     /* "Running", "Stopped", "Suspended", ... or undefined when there is no VM. */
     /* Its state, or undefined when the VM manager lists every machine and not this one. A VM
        manager that does not answer (busy, timed out, restarting) says nothing of the machine:
