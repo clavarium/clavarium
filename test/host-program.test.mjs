@@ -2,8 +2,8 @@
    would run for what the server asks, and what it refuses whoever asks. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, lstatSync } from 'node:fs';
+import { spawnSync, spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, lstatSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,8 +25,8 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['vm', 'info', 'clv-demo'], 'multipass info clv-demo --format json'],
         [['vm', 'ping'], 'timeout 90 multipass list --format csv'],
         [['vm', 'revive'], 'timeout 170 snap restart multipass.multipassd'],
-        [['vm', 'start', 'clv-demo'], 'multipass start clv-demo'],
-        [['vm', 'suspend', 'clv-demo'], 'multipass suspend clv-demo\nif its qemu still holds the RAM: multipass start clv-demo && multipass suspend clv-demo (wake+resleep)\nif it still does: multipass stop clv-demo (free it; it wakes by a boot)'],
+        [['vm', 'start', 'clv-demo'], 'timeout 180 multipass start clv-demo'],
+        [['vm', 'suspend', 'clv-demo'], 'timeout 120 multipass suspend clv-demo\nif its qemu still holds the RAM: multipass start clv-demo && multipass suspend clv-demo (wake+resleep)\nif it still does: multipass stop clv-demo (free it; it wakes by a boot)'],
         [['vm', 'reclaim', 'clv-demo'], "if clv-demo's qemu still holds the RAM: multipass start clv-demo && multipass suspend clv-demo (wake+resleep)\nif it still does: multipass stop clv-demo (free it; it wakes by a boot)"],
         [['vm', 'delete', 'clv-demo'], 'multipass delete --purge clv-demo'],
         [['vm', 'mount', 'clv-demo', 'folder', 'reports', '998', '997'], 'multipass mount -u 998:1000 -g 997:1000 /var/lib/clavarium/resources/reports clv-demo:/resources/reports'],
@@ -56,8 +56,8 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['shelf', 'size', 'clvshelf-20261014-120000'], 'du -sm /var/snap/multipass/common/data/multipassd/vault/instances/clvshelf-20261014-120000'],
         [['shelf', 'room'], 'df /var/snap/multipass/common'],
         [['shelf', 'list'], 'multipass list --format csv (ready-made machines only)'],
-        [['vm', 'stop', 'clv-demo'], 'multipass stop clv-demo'],
-        [['vm', 'kill', 'clv-demo'], 'multipass stop --force clv-demo'],
+        [['vm', 'stop', 'clv-demo'], 'timeout 120 multipass stop clv-demo'],
+        [['vm', 'kill', 'clv-demo'], 'timeout 60 multipass stop --force clv-demo'],
         [['vm', 'set', 'clv-demo', 'memory', '2048'], 'multipass set local.clv-demo.memory=2048M'],
         [['vm', 'set', 'clv-demo', 'disk', '16'], 'multipass set local.clv-demo.disk=16G'],
         [['vm', 'size', 'clv-demo'], 'multipass get local.clv-demo.memory\nmultipass get local.clv-demo.disk\nmultipass get local.clv-demo.cpus'],
@@ -489,4 +489,190 @@ test('meshcentral status: installed, running, version, url read from the real fi
     writeFileSync(join(dir, 'meshcentral', 'last'), 'step installing 1792000000\n');
     assert.match(run('status').stdout, /step interrupted/);
     rmSync(dir, { recursive: true, force: true });
+});
+
+/* THE WAY DOWN (vm halt, vm hardstop), said first: the plan, step by step, in "say only". */
+test('vm halt and vm hardstop say their steps; a step out of order or a VM not ours is refused', () => {
+    const HALT = [
+        'before each step: if no qemu is left for clv-demo (and it is not asleep), straight to the check',
+        'step polite: timeout 60 multipass stop clv-demo',
+        'step force: timeout 30 multipass stop --force clv-demo',
+        'step term: kill -TERM <the qemu of clv-demo, proven by its disk>, waited 5s',
+        'step kill: kill -KILL <the qemu of clv-demo, proven by its disk>, waited 5s',
+        'step check: no qemu left for clv-demo, and multipass says Stopped (within 10s)',
+    ];
+    assert.deepEqual(host('vm', 'halt', 'clv-demo'), { code: 0, out: HALT.join('\n'), err: '' });
+    assert.deepEqual(host('vm', 'halt', 'clv-demo', 'polite', 'force').out, [...HALT.slice(0, 3), HALT[5]].join('\n'), 'its own ways only, for an owner who asked so');
+    assert.deepEqual(host('vm', 'halt', 'clv-demo', 'term').out, [HALT[0], ...HALT.slice(3)].join('\n'));
+    assert.deepEqual(host('vm', 'hardstop', 'clv-demo'), { code: 0, out: [HALT[0], ...HALT.slice(3)].join('\n'), err: '' }, 'nothing is asked of the VM manager');
+    for (const args of [['vm', 'halt', 'primary'], ['vm', 'hardstop', 'primary'], ['vm', 'hardstop', 'clv-'], ['vm', 'halt', 'clv-demo', 'nuke'], ['vm', 'halt', 'clv-demo', 'polite', 'term'],
+        ['vm', 'halt', 'clv-demo', 'kill', 'force'], ['vm', 'halt', 'clv-demo', 'term', 'force'], ['vm', 'halt', 'clv-demo', 'polite;id']]) assert.equal(host(...args).code, 78, args.join(' '));
+    assert.equal(host('vm', 'hardstop', 'clv-demo', 'kill').code, 64);
+    assert.equal(host('vm', 'halt', 'clv-demo', 'polite', 'kill', 'x').code, 64);
+});
+
+/* ...then run for real, as a plain account (--test): a stand-in multipass and stand-in qemus (a
+   script named qemu-system-x86_64 whose command line holds a disk of the instance), first on PATH. */
+const ROOT = process.getuid?.() === 0 ? 'run as root: --test is refused to root, by design' : false;
+let halts = 0;
+/* `frozen`: its qemu stopped by SIGSTOP. `stuck`: its qemu's parent never reaps it (a VM manager that
+   hangs): once ended, it stays a zombie. Otherwise its parent is gone and it is reaped as it ends. */
+async function haltBench(t, { polite = 'ok', force = 'ok', ignoreTerm = false, mute = false, saysRunning = false, frozen = false, stuck = false } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-halt-'));
+    const vm = `clv-hs${process.pid}x${++halts}`;
+    mkdirSync(join(dir, 'bin')); mkdirSync(join(dir, 'instances', vm), { recursive: true });
+    /* It says it is ready (its traps set) before it is frozen or signalled. */
+    writeFileSync(join(dir, 'bin', 'qemu-system-x86_64'), `#!/bin/bash\n${ignoreTerm ? "trap '' TERM\n" : ''}: > "${dir}/ready.$$"\nwhile :; do sleep 0.1; done\n`);
+    /* The VM manager: what it does with a stop is the test's; a qemu gone is seen as Stopped (unless it says Running for ever). */
+    writeFileSync(join(dir, 'bin', 'multipass'), `#!/bin/bash
+D="${dir}"; echo "$*" >> "$D/calls"
+case "$1" in
+  list) [ -e "$D/mute" ] && exec sleep 30
+        s="$(cat "$D/state")"; z="$(sed -n 's/^State:[[:space:]]*\\([A-Z]\\).*/\\1/p' "/proc/$(cat "$D/pid")/status" 2>/dev/null)"
+        if [ "$s" = Running ] && { [ -z "$z" ] || [ "$z" = Z ]; } && [ ! -e "$D/says-running" ]; then s=Stopped; fi
+        echo "Name,State,IPv4,IPv6,Release,AliasesForInstance"; echo "${vm},$s,,,,"; echo "clv-other,Running,,,," ;;
+  stop) b="$(cat "$D/$([ "$2" = --force ] && echo force || echo polite)")"
+        case "$b" in hang) exec sleep 30 ;; fail) exit 2 ;; ok) kill -KILL "$(cat "$D/pid")" 2>/dev/null; echo Stopped > "$D/state" ;; esac ;;
+esac
+`);
+    chmodSync(join(dir, 'bin', 'qemu-system-x86_64'), 0o755); chmodSync(join(dir, 'bin', 'multipass'), 0o755);
+    writeFileSync(join(dir, 'polite'), polite); writeFileSync(join(dir, 'force'), force); writeFileSync(join(dir, 'state'), 'Running');
+    if (mute) writeFileSync(join(dir, 'mute'), '');
+    if (saysRunning) writeFileSync(join(dir, 'says-running'), '');
+    const parents = [];
+    const qemu = (name, keep) => new Promise((resolve) => {
+        const line = `"${join(dir, 'bin', 'qemu-system-x86_64')}" -name ${name} -drive "file=${join(dir, 'instances', name, 'disk.img')}" >/dev/null 2>&1 & echo $!; ${keep ? 'exec sleep 600' : 'exit 0'}`;
+        const parent = spawn('/bin/bash', ['-c', line], { stdio: ['ignore', 'pipe', 'ignore'] });
+        if (keep) parents.push(parent);
+        /* Given back once it IS the qemu, ready, not the shell about to become it. */
+        parent.stdout.once('data', async (d) => {
+            const pid = Number(String(d).trim());
+            for (let i = 0; i < 250 && !existsSync(join(dir, `ready.${pid}`)); i++) await new Promise((r) => setTimeout(r, 20));
+            resolve({ pid });
+        });
+    });
+    const mine = await qemu(vm, stuck); writeFileSync(join(dir, 'pid'), String(mine.pid));
+    if (frozen) process.kill(mine.pid, 'SIGSTOP');
+    mkdirSync(join(dir, 'instances', 'clv-other'), { recursive: true });
+    const other = await qemu('clv-other', false);
+    t.after(() => { for (const p of [mine, other, ...parents]) try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } rmSync(dir, { recursive: true, force: true }); });
+    /* Still there and not ended (a zombie is ended). */
+    const state = (p) => { try { return /^State:\s*([A-Za-z])/m.exec(readFileSync(`/proc/${p.pid}/status`, 'utf8'))[1]; } catch { return ''; } };
+    const alive = (p) => !['', 'Z'].includes(state(p));
+    const run = async (...args) => {
+        await new Promise((r) => setTimeout(r, 200));
+        const r = spawnSync('/bin/bash', [PROGRAM, '--test', dir, 'vm', ...args.map((a) => (a === 'VM' ? vm : a))], { encoding: 'utf8', env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin` } });
+        /* Each line without its seconds, which vary. */
+        return { code: r.status, steps: r.stdout.trim().split('\n').map((l) => l.replace(/ \d+s\b/, '')), err: r.stderr };
+    };
+    const calls = () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n').filter((l) => !l.startsWith('list')) : []);
+    return { vm, dir, run, alive, state, mine, other, calls };
+}
+
+test('vm hardstop: its own qemu ends on SIGTERM, without the VM manager; another machine is not touched', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t);
+    const r = await b.run('hardstop', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check ok freed 0.0G']);
+    assert.equal(b.alive(b.mine), false); assert.equal(b.alive(b.other), true, 'the other machine runs on');
+    assert.deepEqual(b.calls(), [], 'no stop was asked of the VM manager');
+});
+
+test('vm hardstop: a qemu that ignores SIGTERM gets SIGKILL', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { ignoreTerm: true });
+    const r = await b.run('hardstop', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step term start', 'step term timeout', 'step kill start', 'step kill ok', 'step check start', 'step check ok freed 0.0G']);
+    assert.equal(b.alive(b.mine), false); assert.equal(b.alive(b.other), true);
+});
+
+test('vm halt: a polite stop that works ends there; the rest is skipped', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t);
+    const r = await b.run('halt', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step polite start', 'step polite ok', 'step force skip gone', 'step check start', 'step check ok freed 0.0G']);
+    assert.deepEqual(b.calls(), [`stop ${b.vm}`]);
+});
+
+test('vm halt: a VM manager that hangs on both stops, then its qemu ended by SIGTERM', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { polite: 'hang', force: 'fail' });
+    const r = await b.run('halt', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step polite start', 'step polite timeout', 'step force start', 'step force fail', 'step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check ok freed 0.0G']);
+    assert.equal(b.alive(b.other), true);
+});
+
+test('vm halt until force: a qemu that stays is said, and nothing is killed', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { polite: 'hang', force: 'hang' });
+    const r = await b.run('halt', 'VM', 'polite', 'force');
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.steps, ['step polite start', 'step polite timeout', 'step force start', 'step force timeout', 'step check start', 'step check fail qemu-left freed 0.0G']);
+    assert.equal(b.alive(b.mine), true, 'its qemu was not signalled');
+});
+
+test('vm halt: a mute VM manager -- its qemu still ended, the check says it could not be confirmed', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { polite: 'hang', force: 'hang', mute: true });
+    const r = await b.run('halt', 'VM', 'force');
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.steps, ['step force start', 'step force timeout', 'step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check fail mute freed 0.0G']);
+    assert.equal(b.alive(b.mine), false);
+});
+
+test('vm halt: a VM manager that still says Running after its qemu is gone fails the check', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { saysRunning: true });
+    const r = await b.run('halt', 'VM', 'term');
+    assert.equal(r.code, 1);
+    assert.equal(r.steps.at(-1), 'step check fail state Running freed 0.0G');
+});
+
+test('vm halt ended by the server ("Force now"): its step ends at once, not at its bound', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { polite: 'hang' });
+    const { dir, vm } = b;
+    const child = spawn('/bin/bash', [PROGRAM, '--test', dir, 'vm', 'halt', vm], { env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin` } });
+    let out = ''; child.stdout.on('data', (d) => { out += d; });
+    const started = Date.now();
+    await new Promise((r) => setTimeout(r, 700));
+    child.kill('SIGTERM');
+    const code = await new Promise((r) => child.on('close', (c, sig) => r(c ?? sig)));
+    assert.equal(code, 143);
+    assert.ok(Date.now() - started < 1800, 'ended before its two seconds');
+    assert.equal(out.trim(), 'step polite start');
+});
+
+test('vm hardstop: a FROZEN qemu (SIGSTOP) is let run so that SIGTERM ends it', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true });
+    assert.equal(b.state(b.mine), 'T', 'frozen');
+    const r = await b.run('hardstop', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check ok freed 0.0G']);
+    assert.equal(b.alive(b.mine), false); assert.equal(b.alive(b.other), true);
+});
+
+test('vm hardstop: a FROZEN qemu that ignores SIGTERM gets SIGKILL within its bound', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true, ignoreTerm: true });
+    const r = await b.run('hardstop', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step term start', 'step term timeout', 'step kill start', 'step kill ok', 'step check start', 'step check ok freed 0.0G']);
+    assert.equal(b.alive(b.mine), false);
+});
+
+test('a qemu ended but left unreaped by a VM manager that hangs: never taken for "gone"; the check says so', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true, stuck: true, polite: 'hang', force: 'hang' });
+    const first = await b.run('hardstop', 'VM');
+    assert.equal(first.code, 1);
+    assert.equal(b.state(b.mine), 'Z', 'ended, not reaped');
+    assert.equal(first.steps.at(-1), 'step check fail qemu-unreaped freed 0.0G');
+    /* Asked to stop after it: the polite step is tried, not skipped as "gone"; no signal can do more. */
+    const again = await b.run('halt', 'VM');
+    assert.equal(again.code, 1);
+    assert.deepEqual(again.steps, ['step polite start', 'step polite timeout', 'step force start', 'step force timeout', 'step term skip unreaped', 'step kill skip unreaped', 'step check start', 'step check fail qemu-unreaped freed 0.0G']);
+});
+
+test('vm suspend of a FROZEN qemu is refused at once (it would hang the VM manager): Force stop is what frees it', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true });
+    const r = await b.run('suspend', 'VM');
+    assert.equal(r.code, 78);
+    assert.deepEqual(r.steps, ['step suspend start', 'step suspend fail frozen']);
+    assert.match(r.err, /frozen: a suspend would hang the VM manager; use Force stop/);
+    assert.deepEqual(b.calls(), [], 'nothing was asked of the VM manager');
 });

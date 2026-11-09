@@ -23,6 +23,18 @@ const LAUNCH_SECONDS = 900;
 const PREFIX = 'clv-';
 /* Copying a ready-made disk of a few gigabytes: slow disks are given time. */
 const CLONE_MS = 15 * 60_000;
+/* The bounds of the host program's ways down (its own steps are bounded: these only catch a host
+   program that hangs). */
+const HALT_MS = 360_000;
+const HARDSTOP_MS = 120_000;
+/* A line of a way down: `step <id> <start|ok|fail|timeout|skip> [<n>s] [what more]`. */
+export function stepLine(line) {
+    const m = /^step ([a-z]+) (start|ok|fail|timeout|skip)(?: (\d+)s)?(?: (.*))?$/.exec(String(line ?? '').trim());
+    if (!m) return null;
+    const more = m[4] ?? '';
+    const freed = /(?:^| )freed (\d+(?:\.\d)?)G\b/.exec(more);
+    return { id: m[1], result: m[2], ...(m[3] !== undefined ? { s: Number(m[3]) } : {}), ...(more ? { more } : {}), ...(freed ? { freedGb: Number(freed[1]) } : {}) };
+}
 
 export function vmName(conversation) {
     if (!isConversationName(conversation)) throw new Error('not a conversation name');
@@ -41,18 +53,28 @@ export function megabytes(text) {
 /* Runs one command and resolves with what happened; it never throws for a
    non-zero exit, because "the VM does not exist" is an answer, not a crash. */
 export function runner(prefix) {
-    /* `maxBytes`: what is taken in of its output, at most (8 MB unless said). */
-    return (argv, { input, timeoutMs = 120_000, maxBytes = 8 * 1024 * 1024 } = {}) => new Promise((resolve) => {
+    /* `maxBytes`: what is taken in of its output, at most (8 MB unless said). `onLine`: told each
+       line of its output as it comes (the steps of a stop, for the page). `signal`: an AbortSignal
+       that ends it at once (a step the owner moves on from: "Force now"). */
+    return (argv, { input, timeoutMs = 120_000, maxBytes = 8 * 1024 * 1024, onLine, signal } = {}) => new Promise((resolve) => {
         const all = [...prefix, ...argv];
-        const child = execFile(all[0], all.slice(1), { timeout: timeoutMs, maxBuffer: maxBytes, encoding: 'utf8' },
-            (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr }));
+        const child = execFile(all[0], all.slice(1), { timeout: timeoutMs, maxBuffer: maxBytes, encoding: 'utf8', ...(signal ? { signal } : {}) },
+            (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr, ...(error?.name === 'AbortError' ? { aborted: true } : {}) }));
+        if (onLine) {
+            let rest = '';
+            child.stdout.on('data', (chunk) => {
+                rest += chunk;
+                const lines = rest.split('\n'); rest = lines.pop();
+                for (const line of lines) try { onLine(line); } catch { /* a listener's trouble is not the command's */ }
+            });
+        }
         child.stdin.on('error', () => {});
         child.stdin.end(input ?? '');
     });
 }
 
 /* The verbs that change a machine: its state is asked again after them. */
-const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive', 'reclaim']);
+const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'halt', 'hardstop', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive', 'reclaim']);
 export const STATES_FRESH_MS = 3000;
 /* The VM manager did not say what a machine is in: not an answer about the machine. */
 export class VmUnknown extends Error {
@@ -164,10 +186,19 @@ export class Vms {
         return this.run(['vm', 'umount', vmName(conversation), name], { timeoutMs: 120_000 });
     }
 
-    start(conversation) { return this.run(['vm', 'start', vmName(conversation)], { timeoutMs: 300_000 }); }
+    /* `signal`: a start given up (Force stop asked meanwhile). */
+    start(conversation, { signal } = {}) { return this.run(['vm', 'start', vmName(conversation)], { timeoutMs: 300_000, ...(signal ? { signal } : {}) }); }
     stop(conversation, timeoutMs = 300_000) { return this.run(['vm', 'stop', vmName(conversation)], { timeoutMs }); }
     /* Stopped without waiting for the system inside: after a clean stop hung. */
     kill(conversation) { return this.run(['vm', 'kill', vmName(conversation)], { timeoutMs: 300_000 }); }
+    /* STOPPED FOR SURE, step by step (the host program's `vm halt`): a polite stop, a stop by force,
+       then its own qemu ended (SIGTERM, SIGKILL), then checked. `from`/`until`: the first and last
+       step (polite|force|term|kill; until force|kill). Each `step ...` line is told to `onLine`. */
+    halt(conversation, { from = 'polite', until = 'kill', onLine, signal } = {}) {
+        return this.run(['vm', 'halt', vmName(conversation), from, until], { timeoutMs: HALT_MS, onLine, signal });
+    }
+    /* "Force stop", as a power cut: its qemu ended, nothing asked of the VM manager (`vm hardstop`). */
+    hardstop(conversation, { onLine, signal } = {}) { return this.run(['vm', 'hardstop', vmName(conversation)], { timeoutMs: HARDSTOP_MS, onLine, signal }); }
     /* Memory in megabytes, disk in gigabytes: only on a stopped machine. */
     setMemory(conversation, mb) { return this.run(['vm', 'set', vmName(conversation), 'memory', String(mb)], { timeoutMs: 120_000 }); }
     setCpus(conversation, n) { return this.run(['vm', 'set', vmName(conversation), 'cpus', String(n)], { timeoutMs: 120_000 }); }
@@ -182,7 +213,8 @@ export class Vms {
         const cpus = /^\d{1,3}$/.test(line('cpus') ?? '') ? Number(line('cpus')) : undefined;
         return { memoryMb: mb === undefined ? undefined : Math.round(mb), diskGb: disk === undefined ? undefined : Math.round(disk / 1024), cpus };
     }
-    suspend(conversation) { return this.run(['vm', 'suspend', vmName(conversation)], { timeoutMs: 300_000 }); }
+    /* Its steps (`step suspend ...`, then a wake and sleep again, then a clean stop) told to `onLine`. */
+    suspend(conversation, { signal, onLine } = {}) { return this.run(['vm', 'suspend', vmName(conversation)], { timeoutMs: 600_000, ...(signal ? { signal } : {}), ...(onLine ? { onLine } : {}) }); }
     /* Free the RAM of a machine that is asleep but whose qemu still holds it (a
        suspend that did not end the process): wake+resleep, then a clean stop. */
     reclaim(conversation) { return this.run(['vm', 'reclaim', vmName(conversation)], { timeoutMs: 300_000 }); }

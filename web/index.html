@@ -131,10 +131,20 @@
           </div>
           <div class="hand-acts" id="panel-actions">
             <button type="button" id="quick-wake" class="primary" hidden>Wake it</button>
-              <button type="button" id="restart" hidden data-said="set-restart-dots">Restart&hellip;</button>
-              <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation" data-said="set-sleep">Sleep</button>
+            <!-- ITS MACHINE (09-11): always the same five, never hidden; what does not apply is greyed, with why
+                 (app.js, paintMachineActs). One action at a time; Force stop takes the place of any other. -->
+            <button type="button" id="m-start" data-said="set-m-start">Start</button>
+            <button type="button" id="m-stop" data-said="set-m-stop">Stop</button>
+            <button type="button" id="restart" data-said="set-restart-dots">Restart&hellip;</button>
+            <button type="button" id="sleep" title="Freezes the tool as it is; it wakes when you open the conversation" data-said="set-sleep">Sleep</button>
+            <button type="button" id="m-force" class="danger" data-said="set-m-force">Force stop</button>
             <button type="button" id="hand-terminal" data-said="set-terminal">Terminal</button>
           </div>
+          <!-- Asked in the page, in one line: what is lost. -->
+          <div id="m-confirm" class="m-confirm" role="alertdialog" aria-labelledby="m-confirm-text" hidden><span id="m-confirm-text"></span><button type="button" id="m-confirm-yes" class="primary"></button><button type="button" id="m-confirm-no" data-said="set-mconf-no">Cancel</button></div>
+          <!-- The action under way, step by step (the escalation, in one line), then its report. -->
+          <div id="m-live" class="m-live" hidden></div>
+          <p id="m-report" class="hint m-report" role="status" hidden></p>
         </section>
         <nav id="panel-tabs" class="settings-tabs" role="tablist" aria-label="Categories of its settings">
           <button type="button" role="tab" data-group="general" data-said="set-tab-general">General</button>
@@ -193,6 +203,8 @@
             <div id="resume-box" hidden>
             <div class="set-row"><div class="set-what"><b>When its tool starts</b><small id="resume-hint">After a wake or restart</small></div><div class="set-control"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div></div>
             </div>
+            <!-- A STOP THAT HANGS: forced by itself (the default), or asked first (conversations.mjs, stopEscalate). -->
+            <div class="set-row"><div class="set-what"><b data-said="set-mesc">If a stop hangs</b></div><div class="set-control"><div class="levels" id="m-escalate" role="group" aria-label="If a stop hangs"><button type="button" data-on="true" data-said="set-mesc-auto">Force it</button><button type="button" data-on="false" data-said="set-mesc-ask">Ask me</button></div></div></div>
             <div class="panel-top"><b>Memory, cores and disk</b></div>
             <form id="machine-size" autocomplete="off">
               <label for="machine-memory">Memory</label>
@@ -522,6 +534,8 @@
         <!-- A start told step by step: what it is, which step of how many, and the time so far. -->
         <div id="notice-head" hidden><p id="notice-title"></p><p id="notice-count"></p></div>
         <ol id="notice-steps" aria-live="polite" hidden></ol>
+        <!-- Its machine's action under way (a restart, a stop, a force stop): the same steps as in its settings. -->
+        <div id="notice-mlive" class="m-live" hidden></div>
         <p id="notice-text"></p>
         <ul id="notice-health" class="health-lines" hidden></ul>
         <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-restart" type="button" hidden>Restart the machine...</button><button id="notice-cancel" type="button" hidden>Cancel</button></div>

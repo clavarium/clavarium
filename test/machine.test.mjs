@@ -24,13 +24,22 @@ function bench(t, { stuck = false, refuseSet = false, unread = false, startFails
     const states = new Map();
     const sizes = new Map();
     let starts = 0;
-    const run = async (argv) => {
+    const run = async (argv, options = {}) => {
         calls.push(argv.slice(1).join(' '));
         const [area, verb, vm] = argv;
         if (area !== 'vm') return { code: 0, stdout: '', stderr: '' };
         if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...states].map(([name, state]) => ({ name, state })) }), stderr: '' };
         if (verb === 'info') return states.has(vm) ? { code: 0, stdout: JSON.stringify({ info: { [vm]: { state: states.get(vm) } } }), stderr: '' } : { code: 2, stdout: '', stderr: 'does not exist' };
         if (verb === 'stop') { if (stuck) return { code: 1, stdout: '', stderr: 'timed out' }; states.set(vm, 'Stopped'); }
+        /* The way down, as the host program says it, step by step (a hung clean stop: the forced one ends it). */
+        if (verb === 'halt' || verb === 'hardstop') {
+            const say = (line) => options.onLine?.(line);
+            if (unread) { states.delete(vm); return { code: 1, stdout: '', stderr: 'timed out' }; }
+            if (verb === 'halt' && states.get(vm) !== 'Suspended') { say('step polite start'); say(stuck ? 'step polite timeout 60s' : 'step polite ok 3s'); }
+            if (verb === 'halt' && (stuck || states.get(vm) === 'Suspended')) { say('step force start'); say('step force ok 1s'); }
+            say('step term skip 0s gone'); say('step check start'); say('step check ok 0s freed 2.0G');
+            states.set(vm, 'Stopped');
+        }
         if (verb === 'kill') { if (unread) { states.delete(vm); return { code: 1, stdout: '', stderr: 'timed out' }; } states.set(vm, 'Stopped'); }
         if (verb === 'start' && failStarts.includes(++starts)) return { code: 1, stdout: '', stderr: 'not enough memory' };
         if (verb === 'start') { states.set(vm, 'Running'); if (startFailsRunning) return { code: 2, stdout: '', stderr: "Please install the 'multipass-sshfs' snap manually inside the instance." }; }
@@ -69,7 +78,7 @@ test('a restart stops the machine cleanly, starts it again, and gives the tool b
     assert.equal(answer.phase, 'restarting');
     await assert.rejects(b.all.restart('demo'), /being restarted already/);
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['halt clv-demo polite kill', 'start clv-demo']);
     assert.deepEqual(dropped, ['demo'], 'its terminal was closed before the stop');
     assert.deepEqual(b.readied, ['demo'], 'started again as after any start');
     const c = b.store.get('demo');
@@ -81,7 +90,7 @@ test('a clean stop that hangs is followed by a stop by force', async (t) => {
     b.ready('demo');
     await b.all.restart('demo');
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'kill clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['halt clv-demo polite kill', 'start clv-demo']);
     assert.equal(b.store.get('demo').restarted, 'Restarted.');
 });
 
@@ -92,11 +101,11 @@ test('folders being mounted again are left to finish before the machine is stopp
     b.all.quiet = (name) => (name === 'demo' ? mounting : null);
     await b.all.restart('demo');
     await new Promise((r) => setTimeout(r, 50));
-    assert.equal(b.calls.some((c) => c.startsWith('stop')), false, 'not stopped while a folder is mounted');
+    assert.equal(b.calls.some((c) => c.startsWith('halt')), false, 'not stopped while a folder is mounted');
     assert.equal(b.store.get('demo').step, 'Waiting for its folders to be mounted');
     done();
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['halt clv-demo polite kill', 'start clv-demo']);
     assert.equal(b.store.get('demo').restarted, 'Restarted.');
 });
 
@@ -125,7 +134,7 @@ test('a machine asleep is stopped by force (it cannot be stopped cleanly), then 
     b.states.set('clv-demo', 'Suspended');
     await b.all.restart('demo');
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['kill clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['halt clv-demo polite kill', 'start clv-demo']);
     assert.equal(b.store.get('demo').asleep, false);
 });
 
@@ -144,7 +153,7 @@ test('memory and disk: the machine is stopped, set, started, and the record hold
     b.sizes.set('clv-demo', { memory: '2048M', disk: '8.0GiB' });
     await b.all.resize('demo', { memoryMb: 4096, diskGb: 20 });
     await b.all.resized;
-    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'set clv-demo memory 4096', 'set clv-demo disk 20', 'start clv-demo', 'size clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['halt clv-demo polite kill', 'set clv-demo memory 4096', 'set clv-demo disk 20', 'start clv-demo', 'size clv-demo']);
     const c = b.store.get('demo');
     assert.equal(c.memoryMb, 4096); assert.equal(c.diskGb, 20); assert.equal(c.phase, 'ready');
     assert.equal(c.restarted, 'It now has 4096 MB of memory, 1 core, 20 GB of disk.');
@@ -268,7 +277,7 @@ test('the move of the work folder looks at what must hold under its own phase, a
     /* The stand-in prints no size: the move is refused, before anything is touched. */
     await assert.rejects(moving, /size of the work folder could not be read/);
     assert.equal(b.store.get('demo').phase, 'ready');
-    assert.equal(b.calls.some((c) => c.startsWith('stop') || c.startsWith('start')), false);
+    assert.equal(b.calls.some((c) => c.startsWith('halt') || c.startsWith('start')), false);
 });
 
 /* A machine made when its tool needed less memory: its disk still grows. */
@@ -334,7 +343,7 @@ test('at its wake, the size kept is applied: woken, stopped cleanly, set, starte
     const steps = [];
     const argv = await b.all.open('demo', (text, progress) => { if (progress) steps.push(progress.steps[progress.at]); });
     b.all.attached('demo'); b.all.left('demo');
-    assert.deepEqual(changes(b.calls), ['start clv-demo', 'stop clv-demo', 'set clv-demo memory 3072', 'set clv-demo cpus 2', 'set clv-demo disk 20', 'start clv-demo', 'size clv-demo']);
+    assert.deepEqual(changes(b.calls), ['start clv-demo', 'halt clv-demo polite kill', 'set clv-demo memory 3072', 'set clv-demo cpus 2', 'set clv-demo disk 20', 'start clv-demo', 'size clv-demo']);
     assert.ok(argv.join(' ').includes("'again' '--continue'"), 'its tool takes up its last session');
     assert.deepEqual(b.asked, [{ kind: 'start', name: 'demo', memoryMb: 3072 }, { kind: 'grow', name: 'demo', memoryMb: 0, diskMb: 12 * 1024 }]);
     assert.deepEqual([...new Set(steps)], ['waking', 'stopping', 'answering', 'folders', 'tool', 'resume'], 'each step told to the screen that opens');
@@ -373,7 +382,7 @@ test('at its wake, a size the VM manager refuses is said, and the machine is sta
     const b = asleep(t, { refuseSet: true });
     b.store.patch('demo', { sizeAtWake: { memoryMb: 3072, cpus: 1, diskGb: 8, at: new Date().toISOString() } });
     await b.all.open('demo'); b.all.left('demo');
-    assert.deepEqual(changes(b.calls), ['start clv-demo', 'stop clv-demo', 'set clv-demo memory 3072', 'start clv-demo', 'size clv-demo']);
+    assert.deepEqual(changes(b.calls), ['start clv-demo', 'halt clv-demo polite kill', 'set clv-demo memory 3072', 'start clv-demo', 'size clv-demo']);
     assert.equal(b.states.get('clv-demo'), 'Running');
     const c = b.store.get('demo');
     assert.equal(c.memoryMb, 2048);
@@ -386,7 +395,7 @@ test('at its wake, a machine that does not start with its new size is set back a
     const b = asleep(t, { failStarts: [2] });
     b.store.patch('demo', { sizeAtWake: { memoryMb: 3072, cpus: 1, diskGb: 8, at: new Date().toISOString() } });
     await b.all.open('demo'); b.all.left('demo');
-    assert.deepEqual(changes(b.calls), ['start clv-demo', 'stop clv-demo', 'set clv-demo memory 3072', 'start clv-demo', 'set clv-demo memory 2048', 'start clv-demo', 'size clv-demo']);
+    assert.deepEqual(changes(b.calls), ['start clv-demo', 'halt clv-demo polite kill', 'set clv-demo memory 3072', 'start clv-demo', 'set clv-demo memory 2048', 'start clv-demo', 'size clv-demo']);
     assert.equal(b.states.get('clv-demo'), 'Running');
     const c = b.store.get('demo');
     assert.equal(c.memoryMb, 2048);
@@ -408,7 +417,7 @@ test('two screens opening it at once: the size kept is applied once, and a resta
     go();
     await Promise.all([first, second]);
     b.all.left('demo'); b.all.left('demo');
-    assert.equal(changes(b.calls).filter((c) => c.startsWith('stop')).length, 1);
+    assert.equal(changes(b.calls).filter((c) => c.startsWith('halt')).length, 1);
     assert.equal(b.store.get('demo').memoryMb, 3072);
 });
 
@@ -419,7 +428,7 @@ test('a restart asked while it sleeps applies the size kept for its wake', async
     await b.all.restart('demo');
     assert.deepEqual(b.store.get('demo').progress.steps.slice(0, 3), ['stopping', 'setting', 'starting']);
     await b.all.restarted;
-    assert.deepEqual(changes(b.calls), ['kill clv-demo', 'set clv-demo memory 3072', 'start clv-demo', 'size clv-demo']);
+    assert.deepEqual(changes(b.calls), ['halt clv-demo polite kill', 'set clv-demo memory 3072', 'start clv-demo', 'size clv-demo']);
     assert.deepEqual(b.asked, [{ kind: 'start', name: 'demo', memoryMb: 3072 }]);
     const c = b.store.get('demo');
     assert.equal(c.sizeAtWake, undefined);
@@ -436,7 +445,7 @@ test('a machine that runs is resized as before: nothing is kept for later', asyn
     assert.equal(answer.phase, 'restarting');
     assert.equal(answer.sizeAtWake, undefined);
     await b.all.resized;
-    assert.deepEqual(changes(b.calls), ['stop clv-demo', 'set clv-demo memory 3072', 'start clv-demo', 'size clv-demo']);
+    assert.deepEqual(changes(b.calls), ['halt clv-demo polite kill', 'set clv-demo memory 3072', 'start clv-demo', 'size clv-demo']);
     assert.equal(b.store.get('demo').restarted, 'It now has 3072 MB of memory, 1 core, 8 GB of disk.');
 });
 

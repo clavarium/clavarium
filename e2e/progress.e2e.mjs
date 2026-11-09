@@ -64,7 +64,9 @@ test('a build, a restart, a wake: the same steps panel, in order, all the way to
     t.after(() => { delete process.env.FAKE_VM_STOP_SECONDS; delete process.env.FAKE_VM_START_SECONDS; });
     await me.page.locator('#folders').click();
     await me.page.locator('#restart').click();
-    await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
+    /* Asked in the page, in one line (09-11). */
+    assert.match(await me.page.locator('#m-confirm-text').innerText(), /^Restart it\?/);
+    await me.page.locator('#m-confirm-yes').click();
     await me.until('the machine stops, step 1 of 6', async () => (await me.page.locator('#notice-steps li[data-state="now"]').innerText().catch(() => '')) === 'Stopping the machine');
     assert.match(await me.page.locator('#notice-count').innerText(), /^1 \/ 6 · 0:0\d$/);
     assert.deepEqual(await me.page.locator('#notice-steps li[data-state="later"]').allInnerTexts(), ['Starting the machine', 'Reaching the machine', 'Folders', 'Starting Shell', 'Resuming its last session']);
@@ -82,7 +84,7 @@ test('a build, a restart, a wake: the same steps panel, in order, all the way to
     await me.api('/api/conversations/stepper/resume', { on: false });
     await me.page.locator('#folders').click();
     await me.page.locator('#restart').click();
-    await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
+    await me.page.locator('#m-confirm-yes').click();
     await me.until('its last step is a new session', async () => /^(Starting a new session|New session started)$/.test(await me.page.locator('#notice-steps li').last().innerText().catch(() => '')));
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     inOrder(await taken(me.page), [...RESTART, 'fresh'], 'Restarting its machine');

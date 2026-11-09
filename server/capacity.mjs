@@ -99,7 +99,7 @@ const percent = (part, all) => (all > 0 ? Math.round((part / all) * 100) : 0);
 export class Capacity {
     /* What the machines take on their disk, as last measured (MB), or undefined. */
     machinesUsedMb() { const u = this.#usage; if (!u) return undefined; return Object.values(u.machines ?? {}).reduce((a, b) => a + b, 0) + (u.shelf ?? 0) + (u.images ?? 0); }
-    #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #alert; #say; #reclaim; #reclaimEveryMs; #sweeping = false; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
+    #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #force; #alert; #say; #reclaim; #reclaimEveryMs; #sweeping = false; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
 
     /* `run(argv)`: the host program. `store`: where the reserve is kept.
        `conversations`: what each machine was given. `shelf`: how large a
@@ -107,8 +107,8 @@ export class Capacity {
     /* `roomMs`: how long what is free is taken as known (ROOM_MS). */
     /* `sleep(name)`, `alert(payload)`, `say(name, text)`: what watch() does
        when what is free falls under the reserve. */
-    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS, sleep = null, alert = null, say = null, reclaim = null, reclaimEveryMs = RECLAIM_EVERY_MS }) {
-        this.#roomMs = roomMs; this.#sleep = sleep; this.#alert = alert; this.#say = say; this.#reclaim = reclaim; this.#reclaimEveryMs = reclaimEveryMs;
+    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS, sleep = null, force = null, alert = null, say = null, reclaim = null, reclaimEveryMs = RECLAIM_EVERY_MS }) {
+        this.#roomMs = roomMs; this.#sleep = sleep; this.#force = force; this.#alert = alert; this.#say = say; this.#reclaim = reclaim; this.#reclaimEveryMs = reclaimEveryMs;
         this.#run = run; this.#store = store; this.#conversations = conversations; this.#shelf = shelf; this.#now = now;
     }
 
@@ -133,6 +133,16 @@ export class Capacity {
         };
         this.#store.put({ name: 'reserve', ...kept });
         return this.reserve();
+    }
+
+    /* A MACHINE TO PUT TO SLEEP THAT IS FROZEN (its qemu stopped: a suspend would hang the VM manager,
+       and the host program refuses it): forced off ('force', the default), or only said ('alert').
+       The owner's choice, kept here. */
+    frozenWay() { return this.#store.get('frozen')?.way === 'alert' ? 'alert' : 'force'; }
+    setFrozenWay(way) {
+        if (way !== 'force' && way !== 'alert') throw new Refusal(400, 'A frozen machine is either forced off (force) or only said (alert).');
+        this.#store.put({ name: 'frozen', way });
+        return this.frozenWay();
     }
 
     /* What is free now. `fresh`: asked again whatever the cache says. */
@@ -215,7 +225,7 @@ export class Capacity {
             machines: { disksMb: Object.values(u.machines).reduce((a, b) => a + b, 0), each: Object.entries(u.machines).map(([name, mb]) => ({ name, mb })).sort((a, b) => b.mb - a.mb), shelfMb: u.shelf ?? null, imagesMb: u.images ?? null, othersMb: u.others ?? null },
             at: new Date(this.#usageAt).toISOString(),
         } : null;
-        return { known: Boolean(figures), reserve: { diskMb: this.reserve().diskMb, memoryMb: this.reserve().memoryMb }, settings: this.reserve(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
+        return { known: Boolean(figures), reserve: { diskMb: this.reserve().diskMb, memoryMb: this.reserve().memoryMb }, settings: this.reserve(), frozen: this.frozenWay(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
     }
 
     /* For the list: only whether it is high, and how much. Cheap: what is
@@ -285,12 +295,17 @@ export class Capacity {
             const running = f.machines.filter((m) => m.name && awake.has(m.name));
             const takes = (m) => (what === 'disk' ? this.#usage?.machines?.[m.name] ?? -1 : m.rssMb);
             const most = running.sort((a, b) => takes(b) - takes(a) || b.rssMb - a.rssMb)[0] ?? null;
-            let slept = null;
-            if (most && this.#sleep) slept = await Promise.resolve(this.#sleep(most.name)).then(() => most.name, () => null);
+            let slept = null; let frozen = null; let forced = null;
+            if (most && this.#sleep) slept = await Promise.resolve(this.#sleep(most.name)).then(() => most.name, (error) => { if (/frozen/.test(String(error?.message ?? ''))) frozen = most.name; return null; });
+            /* Frozen: never suspended (it would hang the VM manager); forced off, as its owner chose by default. */
+            if (frozen && this.frozenWay() === 'force' && this.#force) forced = await Promise.resolve(this.#force(frozen)).then((ok) => (ok === false ? null : frozen), () => null);
             const figures = `${gb(free)} free, ${gb(f.reserve[`${what}Mb`])} kept in reserve`;
-            this.#alert?.({ title: `This server is short of ${what}`, body: `${figures}.${slept ? ` ${slept} was put to sleep.` : ''}`, url: '/?open=settings&at=resources' });
+            const did = slept ? ` ${slept} was put to sleep.` : forced ? ` ${forced} was frozen: it was forced off.` : frozen ? ` ${frozen} takes the most but is frozen: Force stop frees it.` : '';
+            this.#alert?.({ title: `This server is short of ${what}`, body: `${figures}.${did}`, url: '/?open=settings&at=resources' });
             if (slept) this.#say?.(slept, `This server ran short of ${what} (${figures}). This machine took the most, so it was put to sleep. Wake it once there is room again.`);
-            done.push({ what, slept });
+            if (forced) this.#say?.(forced, `This server ran short of ${what} (${figures}). This machine took the most and was frozen (it could not be put to sleep), so it was forced off, as after a power cut. Start it again once there is room.`);
+            else if (frozen) this.#say?.(frozen, `This server ran short of ${what} (${figures}). This machine took the most but is frozen: it could not be put to sleep. Force stop frees it.`);
+            done.push({ what, slept, ...(frozen ? { frozen, forced } : {}) });
         }
         return done;
     }

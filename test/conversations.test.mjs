@@ -34,6 +34,12 @@ function bench(t, answers = {}) {
         if (verb === 'clone') states.set(argv[3], 'Stopped');
         if (verb === 'start') states.set(vm, 'Running');
         if (verb === 'stop') states.set(vm, 'Stopped');
+        /* The way down (the host program's vm halt / vm hardstop), its steps said as it goes. */
+        if (verb === 'halt' || verb === 'hardstop') {
+            for (const line of verb === 'halt' ? ['step polite start', 'step polite ok 2s', 'step force skip 0s gone'] : ['step term start', 'step term ok 1s', 'step kill skip 0s gone']) options?.onLine?.(line);
+            states.set(vm, 'Stopped');
+            for (const line of ['step check start', 'step check ok 0s freed 1.0G']) options?.onLine?.(line);
+        }
         if (verb === 'suspend') states.set(vm, 'Suspended');
         if (verb === 'delete') states.delete(vm);
         if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...states].map(([name, state]) => ({ name, state })) }), stderr: '' };
@@ -672,7 +678,7 @@ test('the server\'s reserve is asked before a machine is created, started, woken
 function stepping(t) {
     let b;
     const slow = (to, during) => (argv) => { b.states.set(argv[2], during); return new Promise((r) => { setTimeout(() => { b.states.set(argv[2], to); r({ code: 0, stdout: '', stderr: '' }); }, 60); }); };
-    b = bench(t, { stop: slow('Stopped', 'Stopping'), start: slow('Running', 'Starting'),
+    b = bench(t, { halt: slow('Stopped', 'Stopping'), start: slow('Running', 'Starting'),
         exec: (argv) => (argv.includes('has-session') && b.noSession ? { code: 1, stdout: '', stderr: 'no session' } : argv.slice(-3).join(' ') === 'test -d /' && b.silent ? { code: 255, stdout: '', stderr: 'ssh: connect' } : undefined) });
     const all = b.make({ pollMs: 10 });
     /* Each step as the page would see it: its name, and where it is. */
