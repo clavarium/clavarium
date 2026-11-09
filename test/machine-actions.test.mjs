@@ -265,3 +265,31 @@ test('routes: POST .../machine {action} acts, {escalate} chooses, GET .../machin
     assert.deepEqual([chose.status, chose.body.escalate], [200, false]);
     assert.equal((await api('GET', '/api/conversations/nobody/machine', null, b.all)).status, 404);
 });
+
+test('the lock is given back whatever happens to the host call: killed by its bound, failing, or throwing', async (t) => {
+    for (const way of [
+        () => ({ code: null, stdout: '', stderr: '' }),
+        () => ({ code: 124, stdout: 'step polite start\n', stderr: '' }),
+        () => { throw new Error('spawn failed'); },
+    ]) {
+        const b = bench(t, { halt: (argv, options) => { options.onLine?.('step polite start'); return way(); }, suspend: () => way() });
+        await b.all.machineAction('demo', 'stop');
+        const report = await b.all.acted;
+        assert.equal(report.ok, false);
+        assert.equal(b.store.get('demo').machine, undefined, 'nothing left running on the page');
+        await assert.rejects(b.all.sleep('demo'), /did not go to sleep/, 'the next one runs: the lock was given back');
+        await b.all.machineAction('demo', 'force');
+        assert.equal((await b.all.acted).ok, true);
+    }
+});
+
+test('a frozen machine is never left "going to sleep": refused at once, Force stop advised; a busy refusal says which action runs', async (t) => {
+    const b = bench(t, { suspend: (argv, options) => { for (const l of ['step suspend start', 'step suspend fail 0s frozen']) options.onLine?.(l); return { code: 78, stdout: '', stderr: 'REFUSED: its qemu is frozen: a suspend would hang the VM manager; use Force stop' }; } });
+    await assert.rejects(b.all.sleep('demo'), /frozen/);
+    const report = b.store.get('demo').machineReport;
+    assert.equal(report.advice, 'force');
+    assert.match(report.said, /frozen/);
+    const h = bench(t, { halt: hangs(() => ['step polite start']) });
+    await h.all.machineAction('demo', 'stop');
+    await assert.rejects(h.all.machineAction('demo', 'start'), /^Error: Its machine is busy: stopping for \d+ s\. Wait, or force it off\.$|busy: stopping/);
+});

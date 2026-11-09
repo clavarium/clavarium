@@ -11,17 +11,18 @@ import { Store } from '../server/store.mjs';
 import { MIN_FREE_MB } from '../server/shelf.mjs';
 import { Capacity, readRoom, readUsage, RESERVE_DISK_MB, RESERVE_MEMORY_MB, RESERVE_DISK_PERCENT, RESERVE_MEMORY_PERCENT, ROOM_MS, NEW_MACHINE_MB } from '../server/capacity.mjs';
 
-function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 4096 }], shelfMb, awake = [], asleep, reclaim } = {}) {
+function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 4096 }], shelfMb, awake = [], asleep, reclaim, frozen = [] } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-capacity-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const world = { clock: 1_000_000, room: room ?? ['place machines 7 102400 51200', 'place data 7 102400 51200', 'place folders 9 20480 18432', 'memory 16384 10240', 'machine clv-alpha 1024'].join('\n'), usage: usage ?? 'used data 100\nused folders 2000\nused work 3000\nused machine clv-alpha 4000\nused machine clv-gone 1000\nused shelf 3500\nused images 700\nused others 0' };
     const asked = [];
     const run = async (argv) => { asked.push(argv.join(' ')); if (argv[1] === 'room') return world.room === null ? { code: 1, stdout: '' } : { code: 0, stdout: world.room }; return { code: 0, stdout: world.usage }; };
-    const slept = []; const alerts = []; const said = []; const reclaimed = [];
+    const slept = []; const alerts = []; const said = []; const reclaimed = []; const forced = [];
     const capacity = new Capacity({ run, store: new Store(join(dir, 'server.json')), conversations: { list: () => conversations, awake: () => awake, ...(asleep ? { asleep: () => asleep } : {}) }, shelf: shelfMb ? { about: () => ({ current: { sizeMb: shelfMb } }) } : null, now: () => world.clock,
-        sleep: async (name) => { slept.push(name); }, alert: (payload) => { alerts.push(payload); }, say: (name, text) => { said.push([name, text]); },
+        sleep: async (name) => { if (frozen.includes(name)) throw new Error('The machine did not go to sleep: REFUSED: its qemu is frozen: a suspend would hang the VM manager; use Force stop'); slept.push(name); },
+        force: async (name) => { forced.push(name); return true; }, alert: (payload) => { alerts.push(payload); }, say: (name, text) => { said.push([name, text]); },
         reclaim: reclaim ?? (async (name) => { reclaimed.push(name); }) });
-    return { capacity, world, asked, slept, alerts, said, reclaimed };
+    return { capacity, world, asked, slept, alerts, said, reclaimed, forced };
 }
 
 test('only lines of the expected shape are read: numbers, our machines, known places', () => {
@@ -214,4 +215,21 @@ test('reclaimSleepers never touches a machine being built: only one put to sleep
     });
     assert.deepEqual(await b.capacity.reclaimSleepers(), [], 'alpha is neither awake nor asleep: being built');
     assert.deepEqual(b.reclaimed, []);
+});
+
+test('watched: the machine that takes the most is FROZEN -- never suspended (it would hang the VM manager): forced off, or only said, as the owner chose', async (t) => {
+    const room = 'place machines 1 102400 50000\nmemory 16384 800\nmachine clv-alpha 1024\nmachine clv-beta 3000';
+    const b = bench(t, { room, awake: ['alpha', 'beta'], frozen: ['beta'] });
+    assert.equal(b.capacity.frozenWay(), 'force', 'the default');
+    assert.deepEqual(await b.capacity.watch(), [{ what: 'memory', slept: null, frozen: 'beta', forced: 'beta' }]);
+    assert.deepEqual(b.forced, ['beta']);
+    assert.match(b.alerts[0].body, /beta was frozen: it was forced off\.$/);
+    assert.match(b.said[0][1], /forced off, as after a power cut/);
+    /* Only said, as the owner may choose instead. */
+    const a = bench(t, { room, awake: ['alpha', 'beta'], frozen: ['beta'] });
+    assert.equal(a.capacity.setFrozenWay('alert'), 'alert');
+    assert.deepEqual(await a.capacity.watch(), [{ what: 'memory', slept: null, frozen: 'beta', forced: null }]);
+    assert.deepEqual(a.forced, []);
+    assert.match(a.alerts[0].body, /beta takes the most but is frozen: Force stop frees it\.$/);
+    assert.throws(() => a.capacity.setFrozenWay('nuke'), /forced off \(force\) or only said \(alert\)/);
 });

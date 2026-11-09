@@ -66,6 +66,7 @@ const DOWN = ['polite', 'force', 'term', 'kill', 'check'];
 const NEXT = Object.freeze({ polite: 'force', force: 'term', term: 'kill' });
 /* Each step in words, for the journal and the chat (the page has its own, web/app.js). */
 const STEP_WORDS = Object.freeze({ polite: 'polite stop', force: 'forced stop', term: 'SIGTERM', kill: 'SIGKILL', check: 'check', start: 'start', suspend: 'sleep', resleep: 'wake and sleep again', stop: 'clean stop' });
+const KIND_DOING = Object.freeze({ start: 'starting', stop: 'stopping', restart: 'restarting', sleep: 'going to sleep', force: 'being forced off', resize: 'being resized' });
 const KIND_WORDS = Object.freeze({ start: ['Started', 'Not started'], stop: ['Stopped', 'Not stopped'], restart: ['Restarted', 'Not restarted'], sleep: ['Asleep', 'Not asleep'], force: ['Stopped by force', 'Not stopped by force'], resize: ['Resized', 'Not resized'] });
 
 export class Refusal extends Error {
@@ -1006,7 +1007,7 @@ export class Conversations {
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'restarting' ? 'Its machine is being restarted already.' : c.phase === 'moving' ? 'It is moving its work folder.' : 'This conversation is not ready.');
         if (this.#resizing.has(name)) throw new Refusal(409, 'Its machine is being given its new size as it wakes.', { retry: true });
-        if (this.#acts.has(name)) throw new Refusal(409, 'Its machine is busy with another action: wait, or force it off.', { retry: true });
+        if (this.#acts.has(name)) throw this.#busy(name);
         return c;
     }
 
@@ -1297,7 +1298,7 @@ export class Conversations {
        Resolves once asleep; throws, in words, when it could not be. */
     async sleep(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
-        if (this.#acts.has(name)) throw new Refusal(409, 'Its machine is busy with another action: wait, or force it off.', { retry: true });
+        if (this.#acts.has(name)) throw this.#busy(name);
         const act = this.#take(name, 'sleep');
         const report = await this.#perform(name, act);
         if (!report.ok) throw new Refusal(502, `The machine did not go to sleep: ${report.why ?? 'it did not answer.'}`);
@@ -1312,6 +1313,12 @@ export class Conversations {
         act.finish = finish;
         this.#acts.set(name, act);
         return act;
+    }
+    /* Refused while another action runs: which one, since when, and what can be done. */
+    #busy(name) {
+        const act = this.#acts.get(name);
+        const s = act ? Math.max(0, Math.round((Date.now() - Date.parse(act.since)) / 1000)) : 0;
+        return new Refusal(409, `Its machine is busy: ${KIND_DOING[act?.kind] ?? 'another action'} for ${s} s. Wait, or force it off.`, { retry: true });
     }
     #give(name, act) { if (this.#acts.get(name) === act) this.#acts.delete(name); act.finish(); }
     /* The steps the page shows, in order: done, running, to come (`todo`). */
@@ -1396,7 +1403,7 @@ export class Conversations {
         }
         if (kind === 'start' && (c.asleep !== true && (await this.#vms.state(name).catch(() => undefined)) === 'Running')) throw new Refusal(409, 'Its machine runs already.');
         if (kind === 'start') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
-        if (this.#acts.has(name)) throw new Refusal(409, 'Its machine is busy with another action: wait, or force it off.', { retry: true });
+        if (this.#acts.has(name)) throw this.#busy(name);
         const act = this.#take(name, kind);
         this.acted = this.#perform(name, act);
         return this.machineState(name);

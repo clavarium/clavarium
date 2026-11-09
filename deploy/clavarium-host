@@ -70,6 +70,9 @@ HALT_TERM="5"
 HALT_KILL="5"
 HALT_LIST="20"
 HALT_SETTLE="10"
+# Where the qemu processes seen for each machine are noted (root's, in memory): a qemu ended but not
+# reaped by a VM manager that hangs (a zombie) has no command line left to tell whose it was.
+QEMU_SEEN="/run/clavarium/qemu"
 # The bounds of the plain verbs (a VM manager that hangs must not hold a call for ever).
 START_SECONDS="180"
 STOP_SECONDS="120"
@@ -193,7 +196,7 @@ while [ $# -gt 0 ]; do
                 DATA="$TEST"; MNT="$TEST"; WIFI_STATE="$TEST/wifi"; NM_KEYFILES="$TEST/system-connections"; WIFI_WAIT="3"; WIFI_UP_WAIT="3"; WIFI_STEP="0.2"
                 HAND_STATE="$TEST/network"; NETPLAN_DIR="$TEST/netplan"; HAND_WAIT="3"; SYS_NET="$TEST/sys-net"
                 MESH_DATA="$TEST/mesh"; MESH_STATE="$TEST/meshcentral"; CADDYFILE="$TEST/Caddyfile"; MESH_CADDY="$TEST/clavarium-meshcentral.caddy"
-                HALT_POLITE="2"; HALT_FORCE="2"; HALT_TERM="1"; HALT_KILL="2"; HALT_LIST="2"; HALT_SETTLE="2"; shift 2 ;;
+                HALT_POLITE="2"; HALT_FORCE="2"; HALT_TERM="1"; HALT_KILL="2"; HALT_LIST="2"; HALT_SETTLE="2"; QEMU_SEEN="$TEST/qemu"; shift 2 ;;
         *) break ;;
     esac
 done
@@ -239,6 +242,8 @@ vm_qemu_pids() {
         vm="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE '/instances/clv(shelf)?-[a-z0-9-]+/' | head -1 | cut -d/ -f3)" || vm=""
         [ "$vm" = "$want" ] && printf '%s\n' "$pid"
     done
+    # (Its status is never that of the last process looked at: callers assign it under set -e.)
+    return 0
 }
 # No qemu left for this machine after a short grace: its RAM has been freed.
 vm_freed() { local v="$1" i; for i in $(seq 1 24); do [ -z "$(vm_qemu_pids "$v")" ] && return 0; sleep 0.5; done; return 1; }
@@ -263,24 +268,66 @@ vm_state_of() {
     out="$(printf '%s\n' "$out" | awk -F, -v n="$1" '$1 == n { print $2; exit }')"
     echo "${out:-absent}"
 }
-# Nothing left to stop: no qemu of it (after a grace of $2 seconds), and not asleep (an asleep
-# machine has no qemu but is not stopped: only a stop by force ends its saved state).
+# A process's state letter (R, S, D, T stopped, t traced, Z ended but not reaped), or nothing when gone.
+proc_state() { sed -n 's/^State:[[:space:]]*\([A-Za-z]\).*/\1/p' "/proc/$1/status" 2>/dev/null || true; }
+# Still running (frozen included): its /proc entry is there and it is not a zombie.
+pid_alive() { local st; [ -d "/proc/$1" ] || return 1; st="$(proc_state "$1")"; [ -n "$st" ] && [ "$st" != "Z" ]; }
+# Its qemu, noted as seen (vm_qemu_unreaped reads it back).
+vm_qemu_note() {
+    local v="$1" pids
+    pids="$(vm_qemu_pids "$v")"
+    [ -n "$pids" ] || return 0
+    install -d -m 0700 "$QEMU_SEEN" 2>/dev/null || return 0
+    printf '%s\n' $pids > "$QEMU_SEEN/$v" 2>/dev/null || true
+}
+# A qemu of it that has ended but that the VM manager has not reaped (a zombie: it holds no memory,
+# and no signal can do more to it). The VM manager is the one stuck.
+vm_qemu_unreaped() {
+    local v="$1" pid
+    [ -r "$QEMU_SEEN/$v" ] || return 0
+    while read -r pid; do
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        [ "$(proc_state "$pid")" = "Z" ] && [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" == qemu-system* ]] && printf '%s\n' "$pid"
+    done < "$QEMU_SEEN/$v"
+    return 0
+}
+# A qemu of it that is FROZEN (stopped, or traced): it answers nothing, a suspend asked of it hangs the VM manager.
+vm_qemu_frozen() { local pid; for pid in $(vm_qemu_pids "$1"); do [[ "$(proc_state "$pid")" == [Tt] ]] && return 0; done; return 1; }
+# NOTHING LEFT TO STOP -- the same proof as the signals: no live qemu of it (after a grace of $2
+# seconds), none ended and left unreaped, and the VM manager saying Stopped (or not there, or not
+# answering: then there is nothing more it can do). Asleep, or anything else (Suspending, Running,
+# Unknown...) with no qemu: not gone -- the steps go on, and the check says what is wrong.
 halt_gone() {
-    local v="$1" i
+    local v="$1" i state
     for i in $(seq 0 "$2"); do [ -z "$(vm_qemu_pids "$v")" ] && break; [ "$i" -lt "$2" ] && sleep 1; done
     [ -z "$(vm_qemu_pids "$v")" ] || return 1
-    [ "$(vm_state_of "$v")" != "Suspended" ]
+    [ -z "$(vm_qemu_unreaped "$v")" ] || return 1
+    state="$(vm_state_of "$v")"
+    [ "$state" = "Stopped" ] || [ "$state" = "absent" ] || [ "$state" = "unknown" ]
 }
 # One step that asks the VM manager, in the background, so that a TERM of this program (the server
 # moving on: "Force now") ends it at once instead of leaving it to run its whole bound.
 HALT_CHILD=""
 halt_run() { local rc=0; "$@" >/dev/null 2>&1 & HALT_CHILD=$!; wait "$HALT_CHILD" || rc=$?; HALT_CHILD=""; return "$rc"; }
-# A signal to its qemu, each process proven first; then waited for, up to $3 seconds.
+# A signal to its qemu, each process proven first; then waited for, up to $3 seconds, by each
+# process's own /proc entry (gone, or ended) and by its name again. A FROZEN qemu (stopped: SIGSTOP,
+# or traced) keeps a TERM pending until it runs: it is let run (SIGCONT) right after. A signal
+# refused is said on the error output.
 halt_signal() {
-    local v="$1" sig="$2" wait="$3" pid i
-    for pid in $(vm_qemu_pids "$v"); do vm_qemu_is "$pid" "$v" && kill "-$sig" "$pid" 2>/dev/null || true; done
-    for i in $(seq 1 $((wait * 4))); do [ -z "$(vm_qemu_pids "$v")" ] && return 0; sleep 0.25; done
-    [ -z "$(vm_qemu_pids "$v")" ]
+    local v="$1" sig="$2" wait="$3" pid i st pids left
+    pids="$(vm_qemu_pids "$v")"
+    for pid in $pids; do
+        vm_qemu_is "$pid" "$v" || continue
+        st="$(proc_state "$pid")"
+        kill "-$sig" "$pid" 2>/dev/null || echo "signal $sig to $pid refused" >&2
+        if [[ "$st" == [Tt] ]]; then kill -CONT "$pid" 2>/dev/null || echo "signal CONT to $pid refused" >&2; fi
+    done
+    for i in $(seq 1 $((wait * 4))); do
+        left=""; for pid in $pids; do pid_alive "$pid" && left="$left $pid"; done
+        [ -z "$left" ] && [ -z "$(vm_qemu_pids "$v")" ] && return 0
+        sleep 0.25
+    done
+    return 1
 }
 # THE WAY DOWN, from step $2 to step $3 (polite, force, term, kill), then the check. One line per
 # step on the output, for the server and its page:
@@ -292,6 +339,7 @@ halt_signal() {
 halt_steps() {
     local v="$1" from="$2" until="$3" kb s on="no" t rc res grace=0 state
     trap '[ -n "$HALT_CHILD" ] && kill "$HALT_CHILD" 2>/dev/null; exit 143' TERM INT
+    vm_qemu_note "$v"
     # shellcheck disable=SC2046
     kb="$(vm_rss_kb $(vm_qemu_pids "$v"))"
     for s in polite force term kill; do
@@ -299,14 +347,18 @@ halt_steps() {
         [ "$on" = "yes" ] || continue
         if halt_gone "$v" "$grace"; then echo "step $s skip 0s gone"; break; fi
         grace=0
+        # Nothing alive to signal: said why (a qemu ended but left unreaped: the VM manager is stuck).
+        if { [ "$s" = "term" ] || [ "$s" = "kill" ]; } && [ -z "$(vm_qemu_pids "$v")" ]; then
+            if [ -n "$(vm_qemu_unreaped "$v")" ]; then echo "step $s skip 0s unreaped"; else echo "step $s skip 0s none"; fi
+            [ "$s" = "$until" ] && break; continue
+        fi
         echo "step $s start"; t=$SECONDS; rc=0
         case "$s" in
-            polite) if [ -z "$(vm_qemu_pids "$v")" ]; then echo "step polite skip 0s asleep"; [ "$s" = "$until" ] && break; continue; fi
+            polite) if [ -z "$(vm_qemu_pids "$v")" ] && [ "$(vm_state_of "$v")" = "Suspended" ]; then echo "step polite skip 0s asleep"; [ "$s" = "$until" ] && break; continue; fi
                     halt_run timeout "$HALT_POLITE" "$MULTIPASS" stop "$v" || rc=$? ;;
             force)  halt_run timeout "$HALT_FORCE" "$MULTIPASS" stop --force "$v" || rc=$? ;;
-            term)   [ -n "$(vm_qemu_pids "$v")" ] || { echo "step term skip 0s none"; [ "$s" = "$until" ] && break; continue; }
-                    halt_signal "$v" TERM "$HALT_TERM" || rc=124 ;;
-            kill)   halt_signal "$v" KILL "$HALT_KILL" || rc=124 ;;
+            term|kill)
+                    if [ "$s" = "term" ]; then halt_signal "$v" TERM "$HALT_TERM" || rc=124; else halt_signal "$v" KILL "$HALT_KILL" || rc=124; fi ;;
         esac
         case "$rc" in 0) res="ok"; grace=3 ;; 124) res="timeout" ;; *) res="fail" ;; esac
         echo "step $s $res $((SECONDS - t))s"
@@ -315,12 +367,13 @@ halt_steps() {
     echo "step check start"; t=$SECONDS
     for _ in $(seq 0 "$HALT_SETTLE"); do
         state="$(vm_state_of "$v")"
-        [ -z "$(vm_qemu_pids "$v")" ] && [ "$state" = "Stopped" ] && { echo "step check ok $((SECONDS - t))s freed $(gb_of_kb "$kb")"; exit 0; }
+        [ -z "$(vm_qemu_pids "$v")" ] && [ -z "$(vm_qemu_unreaped "$v")" ] && [ "$state" = "Stopped" ] && { echo "step check ok $((SECONDS - t))s freed $(gb_of_kb "$kb")"; exit 0; }
         # A VM manager that does not answer is not asked again and again.
         [ "$state" = "unknown" ] && break
         sleep 1
     done
     if [ -n "$(vm_qemu_pids "$v")" ]; then echo "step check fail $((SECONDS - t))s qemu-left freed 0.0G"
+    elif [ -n "$(vm_qemu_unreaped "$v")" ]; then echo "step check fail $((SECONDS - t))s qemu-unreaped freed $(gb_of_kb "$kb")"
     elif [ "$state" = "unknown" ]; then echo "step check fail $((SECONDS - t))s mute freed $(gb_of_kb "$kb")"
     else echo "step check fail $((SECONDS - t))s state $state freed $(gb_of_kb "$kb")"; fi
     exit 1
@@ -951,6 +1004,9 @@ case "$AREA $VERB" in
                 "if it still does: $MULTIPASS stop $1 (free it; it wakes by a boot)"
             exit 0
         fi
+        # FROZEN (its qemu stopped): a suspend would hang the VM manager ("Suspending" for good). Refused
+        # at once: what frees it is Force stop.
+        if vm_qemu_frozen "$1"; then echo "step suspend start"; echo "step suspend fail 0s frozen"; refuse "its qemu is frozen: a suspend would hang the VM manager; use Force stop"; fi
         # One line per step, as vm halt says them (the server shows them to the page).
         echo "step suspend start"; t=$SECONDS
         timeout "$SUSPEND_SECONDS" "$MULTIPASS" suspend "$1" || { echo "step suspend fail $((SECONDS - t))s"; refuse "suspend of $1 failed"; }
@@ -977,6 +1033,8 @@ case "$AREA $VERB" in
         fi
         # Each step that frees the RAM says how, so the server can tell the owner.
         vm_freed "$1" && { echo "freed-already"; exit 0; }
+        # Frozen: waking it and putting it back to sleep would hang the VM manager.
+        vm_qemu_frozen "$1" && refuse "its qemu is frozen: use Force stop"
         "$MULTIPASS" start "$1" >/dev/null 2>&1 && "$MULTIPASS" suspend "$1" >/dev/null 2>&1
         vm_freed "$1" && { echo "freed-resleep"; exit 0; }
         "$MULTIPASS" stop "$1" >/dev/null 2>&1 || true

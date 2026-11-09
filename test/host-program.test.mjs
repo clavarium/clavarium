@@ -515,11 +515,14 @@ test('vm halt and vm hardstop say their steps; a step out of order or a VM not o
    script named qemu-system-x86_64 whose command line holds a disk of the instance), first on PATH. */
 const ROOT = process.getuid?.() === 0 ? 'run as root: --test is refused to root, by design' : false;
 let halts = 0;
-function haltBench(t, { polite = 'ok', force = 'ok', ignoreTerm = false, mute = false, saysRunning = false } = {}) {
+/* `frozen`: its qemu stopped by SIGSTOP. `stuck`: its qemu's parent never reaps it (a VM manager that
+   hangs): once ended, it stays a zombie. Otherwise its parent is gone and it is reaped as it ends. */
+async function haltBench(t, { polite = 'ok', force = 'ok', ignoreTerm = false, mute = false, saysRunning = false, frozen = false, stuck = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-halt-'));
     const vm = `clv-hs${process.pid}x${++halts}`;
     mkdirSync(join(dir, 'bin')); mkdirSync(join(dir, 'instances', vm), { recursive: true });
-    writeFileSync(join(dir, 'bin', 'qemu-system-x86_64'), `#!/bin/bash\n${ignoreTerm ? "trap '' TERM\n" : ''}while :; do sleep 0.1; done\n`);
+    /* It says it is ready (its traps set) before it is frozen or signalled. */
+    writeFileSync(join(dir, 'bin', 'qemu-system-x86_64'), `#!/bin/bash\n${ignoreTerm ? "trap '' TERM\n" : ''}: > "${dir}/ready.$$"\nwhile :; do sleep 0.1; done\n`);
     /* The VM manager: what it does with a stop is the test's; a qemu gone is seen as Stopped (unless it says Running for ever). */
     writeFileSync(join(dir, 'bin', 'multipass'), `#!/bin/bash
 D="${dir}"; echo "$*" >> "$D/calls"
@@ -536,13 +539,26 @@ esac
     writeFileSync(join(dir, 'polite'), polite); writeFileSync(join(dir, 'force'), force); writeFileSync(join(dir, 'state'), 'Running');
     if (mute) writeFileSync(join(dir, 'mute'), '');
     if (saysRunning) writeFileSync(join(dir, 'says-running'), '');
-    const qemu = (name) => spawn(join(dir, 'bin', 'qemu-system-x86_64'), ['-name', name, '-drive', `file=${join(dir, 'instances', name, 'disk.img')}`], { stdio: 'ignore' });
-    const mine = qemu(vm); writeFileSync(join(dir, 'pid'), String(mine.pid));
+    const parents = [];
+    const qemu = (name, keep) => new Promise((resolve) => {
+        const line = `"${join(dir, 'bin', 'qemu-system-x86_64')}" -name ${name} -drive "file=${join(dir, 'instances', name, 'disk.img')}" >/dev/null 2>&1 & echo $!; ${keep ? 'exec sleep 600' : 'exit 0'}`;
+        const parent = spawn('/bin/bash', ['-c', line], { stdio: ['ignore', 'pipe', 'ignore'] });
+        if (keep) parents.push(parent);
+        /* Given back once it IS the qemu, ready, not the shell about to become it. */
+        parent.stdout.once('data', async (d) => {
+            const pid = Number(String(d).trim());
+            for (let i = 0; i < 250 && !existsSync(join(dir, `ready.${pid}`)); i++) await new Promise((r) => setTimeout(r, 20));
+            resolve({ pid });
+        });
+    });
+    const mine = await qemu(vm, stuck); writeFileSync(join(dir, 'pid'), String(mine.pid));
+    if (frozen) process.kill(mine.pid, 'SIGSTOP');
     mkdirSync(join(dir, 'instances', 'clv-other'), { recursive: true });
-    const other = qemu('clv-other');
-    t.after(() => { for (const p of [mine, other]) try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } rmSync(dir, { recursive: true, force: true }); });
-    /* Ended, though not yet reaped (this test's own children, while spawnSync holds the loop): not alive. */
-    const alive = (p) => { try { return !/^State:\s*Z/m.test(readFileSync(`/proc/${p.pid}/status`, 'utf8')); } catch { return false; } };
+    const other = await qemu('clv-other', false);
+    t.after(() => { for (const p of [mine, other, ...parents]) try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } rmSync(dir, { recursive: true, force: true }); });
+    /* Still there and not ended (a zombie is ended). */
+    const state = (p) => { try { return /^State:\s*([A-Za-z])/m.exec(readFileSync(`/proc/${p.pid}/status`, 'utf8'))[1]; } catch { return ''; } };
+    const alive = (p) => !['', 'Z'].includes(state(p));
     const run = async (...args) => {
         await new Promise((r) => setTimeout(r, 200));
         const r = spawnSync('/bin/bash', [PROGRAM, '--test', dir, 'vm', ...args.map((a) => (a === 'VM' ? vm : a))], { encoding: 'utf8', env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin` } });
@@ -550,11 +566,11 @@ esac
         return { code: r.status, steps: r.stdout.trim().split('\n').map((l) => l.replace(/ \d+s\b/, '')), err: r.stderr };
     };
     const calls = () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n').filter((l) => !l.startsWith('list')) : []);
-    return { vm, dir, run, alive, mine, other, calls };
+    return { vm, dir, run, alive, state, mine, other, calls };
 }
 
 test('vm hardstop: its own qemu ends on SIGTERM, without the VM manager; another machine is not touched', { skip: ROOT }, async (t) => {
-    const b = haltBench(t);
+    const b = await haltBench(t);
     const r = await b.run('hardstop', 'VM');
     assert.equal(r.code, 0, r.err);
     assert.deepEqual(r.steps, ['step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check ok freed 0.0G']);
@@ -563,7 +579,7 @@ test('vm hardstop: its own qemu ends on SIGTERM, without the VM manager; another
 });
 
 test('vm hardstop: a qemu that ignores SIGTERM gets SIGKILL', { skip: ROOT }, async (t) => {
-    const b = haltBench(t, { ignoreTerm: true });
+    const b = await haltBench(t, { ignoreTerm: true });
     const r = await b.run('hardstop', 'VM');
     assert.equal(r.code, 0, r.err);
     assert.deepEqual(r.steps, ['step term start', 'step term timeout', 'step kill start', 'step kill ok', 'step check start', 'step check ok freed 0.0G']);
@@ -571,7 +587,7 @@ test('vm hardstop: a qemu that ignores SIGTERM gets SIGKILL', { skip: ROOT }, as
 });
 
 test('vm halt: a polite stop that works ends there; the rest is skipped', { skip: ROOT }, async (t) => {
-    const b = haltBench(t);
+    const b = await haltBench(t);
     const r = await b.run('halt', 'VM');
     assert.equal(r.code, 0, r.err);
     assert.deepEqual(r.steps, ['step polite start', 'step polite ok', 'step force skip gone', 'step check start', 'step check ok freed 0.0G']);
@@ -579,7 +595,7 @@ test('vm halt: a polite stop that works ends there; the rest is skipped', { skip
 });
 
 test('vm halt: a VM manager that hangs on both stops, then its qemu ended by SIGTERM', { skip: ROOT }, async (t) => {
-    const b = haltBench(t, { polite: 'hang', force: 'fail' });
+    const b = await haltBench(t, { polite: 'hang', force: 'fail' });
     const r = await b.run('halt', 'VM');
     assert.equal(r.code, 0, r.err);
     assert.deepEqual(r.steps, ['step polite start', 'step polite timeout', 'step force start', 'step force fail', 'step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check ok freed 0.0G']);
@@ -587,7 +603,7 @@ test('vm halt: a VM manager that hangs on both stops, then its qemu ended by SIG
 });
 
 test('vm halt until force: a qemu that stays is said, and nothing is killed', { skip: ROOT }, async (t) => {
-    const b = haltBench(t, { polite: 'hang', force: 'hang' });
+    const b = await haltBench(t, { polite: 'hang', force: 'hang' });
     const r = await b.run('halt', 'VM', 'polite', 'force');
     assert.equal(r.code, 1);
     assert.deepEqual(r.steps, ['step polite start', 'step polite timeout', 'step force start', 'step force timeout', 'step check start', 'step check fail qemu-left freed 0.0G']);
@@ -595,7 +611,7 @@ test('vm halt until force: a qemu that stays is said, and nothing is killed', { 
 });
 
 test('vm halt: a mute VM manager -- its qemu still ended, the check says it could not be confirmed', { skip: ROOT }, async (t) => {
-    const b = haltBench(t, { polite: 'hang', force: 'hang', mute: true });
+    const b = await haltBench(t, { polite: 'hang', force: 'hang', mute: true });
     const r = await b.run('halt', 'VM', 'force');
     assert.equal(r.code, 1);
     assert.deepEqual(r.steps, ['step force start', 'step force timeout', 'step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check fail mute freed 0.0G']);
@@ -603,14 +619,14 @@ test('vm halt: a mute VM manager -- its qemu still ended, the check says it coul
 });
 
 test('vm halt: a VM manager that still says Running after its qemu is gone fails the check', { skip: ROOT }, async (t) => {
-    const b = haltBench(t, { saysRunning: true });
+    const b = await haltBench(t, { saysRunning: true });
     const r = await b.run('halt', 'VM', 'term');
     assert.equal(r.code, 1);
     assert.equal(r.steps.at(-1), 'step check fail state Running freed 0.0G');
 });
 
 test('vm halt ended by the server ("Force now"): its step ends at once, not at its bound', { skip: ROOT }, async (t) => {
-    const b = haltBench(t, { polite: 'hang' });
+    const b = await haltBench(t, { polite: 'hang' });
     const { dir, vm } = b;
     const child = spawn('/bin/bash', [PROGRAM, '--test', dir, 'vm', 'halt', vm], { env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin` } });
     let out = ''; child.stdout.on('data', (d) => { out += d; });
@@ -621,4 +637,42 @@ test('vm halt ended by the server ("Force now"): its step ends at once, not at i
     assert.equal(code, 143);
     assert.ok(Date.now() - started < 1800, 'ended before its two seconds');
     assert.equal(out.trim(), 'step polite start');
+});
+
+test('vm hardstop: a FROZEN qemu (SIGSTOP) is let run so that SIGTERM ends it', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true });
+    assert.equal(b.state(b.mine), 'T', 'frozen');
+    const r = await b.run('hardstop', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step term start', 'step term ok', 'step kill skip gone', 'step check start', 'step check ok freed 0.0G']);
+    assert.equal(b.alive(b.mine), false); assert.equal(b.alive(b.other), true);
+});
+
+test('vm hardstop: a FROZEN qemu that ignores SIGTERM gets SIGKILL within its bound', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true, ignoreTerm: true });
+    const r = await b.run('hardstop', 'VM');
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.steps, ['step term start', 'step term timeout', 'step kill start', 'step kill ok', 'step check start', 'step check ok freed 0.0G']);
+    assert.equal(b.alive(b.mine), false);
+});
+
+test('a qemu ended but left unreaped by a VM manager that hangs: never taken for "gone"; the check says so', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true, stuck: true, polite: 'hang', force: 'hang' });
+    const first = await b.run('hardstop', 'VM');
+    assert.equal(first.code, 1);
+    assert.equal(b.state(b.mine), 'Z', 'ended, not reaped');
+    assert.equal(first.steps.at(-1), 'step check fail qemu-unreaped freed 0.0G');
+    /* Asked to stop after it: the polite step is tried, not skipped as "gone"; no signal can do more. */
+    const again = await b.run('halt', 'VM');
+    assert.equal(again.code, 1);
+    assert.deepEqual(again.steps, ['step polite start', 'step polite timeout', 'step force start', 'step force timeout', 'step term skip unreaped', 'step kill skip unreaped', 'step check start', 'step check fail qemu-unreaped freed 0.0G']);
+});
+
+test('vm suspend of a FROZEN qemu is refused at once (it would hang the VM manager): Force stop is what frees it', { skip: ROOT }, async (t) => {
+    const b = await haltBench(t, { frozen: true });
+    const r = await b.run('suspend', 'VM');
+    assert.equal(r.code, 78);
+    assert.deepEqual(r.steps, ['step suspend start', 'step suspend fail frozen']);
+    assert.match(r.err, /frozen: a suspend would hang the VM manager; use Force stop/);
+    assert.deepEqual(b.calls(), [], 'nothing was asked of the VM manager');
 });

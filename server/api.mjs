@@ -123,6 +123,7 @@
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/history/all?span=1h|24h|7d    Settings, Usage: the server and every machine (asleep too) on one time axis,
  *                                           in GB and cores: {t, capacity, server, itself, machines: [{name, alloc, asleep, ...}]}
+ *   POST /api/server/frozen                 {way: force|alert}: a machine to put to sleep for room that is frozen: forced off (default) or only said
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart   POST /api/server/reboot (the whole server)
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
@@ -590,6 +591,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/updates/settings' && updates) return send(200, await updates.settings({ mode: body.mode, channel: body.channel, window: body.window })), true;
         if (pathname === '/api/updates/apply' && updates) return send(202, await updates.apply(body.version)), true;
         if (pathname === '/api/updates/back' && updates) return send(202, await updates.back(body.version)), true;
+        /* A machine to put to sleep for room that is frozen: forced off (default) or only said. */
+        if (pathname === '/api/server/frozen' && capacity) { capacity.setFrozenWay(body.way); return send(200, await capacity.about()), true; }
         if (pathname === '/api/server/reserve' && capacity) { capacity.setReserve({ diskMb: body.diskMb, diskPercent: body.diskPercent, memoryMb: body.memoryMb, memoryPercent: body.memoryPercent }); return send(200, await capacity.about()), true; }
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
