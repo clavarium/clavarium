@@ -289,7 +289,7 @@
             now.title = uiSaid('set-m-force-now-why', 'Ends this step, starts the next');
             now.addEventListener('click', () => void machineAct('force-now'));
             const force = document.createElement('button'); force.type = 'button'; force.className = 'danger m-force-stop'; force.textContent = uiSaid('set-m-force', 'Force stop');
-            force.addEventListener('click', () => askMachine('force'));
+            force.addEventListener('click', () => askMachine('force', row));
             row.append(now, force);
             el.replaceChildren(ol, row);
         }
@@ -1104,6 +1104,7 @@
         $('quick-wake').hidden = !c || c.asleep !== true;
         $('hand-terminal').hidden = !usable || noTerminal();
         $('panel-actions').hidden = DEVICE || !c;
+        $('m-danger').hidden = DEVICE || !c;
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
     }
@@ -1135,8 +1136,11 @@
         restart: () => [uiSaid('set-mconf-restart', 'Restart it? The tool restarts; its files stay.'), uiSaid('set-m-restart', 'Restart')],
         force: () => [uiSaid('set-mconf-force', 'Like a power cut: nothing is saved.'), uiSaid('set-m-force', 'Force stop')],
     };
-    function askMachine(kind) {
+    /* `near`: where it was asked (the zone apart, the steps over the chat): the question comes right under it. */
+    function askMachine(kind, near) {
         const [line, yes] = MCONFIRM[kind]();
+        const where = near ?? (kind === 'force' ? $('m-danger') : $('panel-actions'));
+        where.after($('m-confirm'));
         $('m-confirm-text').textContent = line;
         $('m-confirm-yes').textContent = yes;
         $('m-confirm-yes').className = kind === 'force' ? 'danger' : 'primary';

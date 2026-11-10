@@ -137,7 +137,6 @@
             <button type="button" id="m-stop" data-said="set-m-stop">Stop</button>
             <button type="button" id="restart" data-said="set-restart-dots">Restart&hellip;</button>
             <button type="button" id="sleep" title="Freezes the tool as it is; it wakes when you open the conversation" data-said="set-sleep">Sleep</button>
-            <button type="button" id="m-force" class="danger" data-said="set-m-force">Force stop</button>
             <button type="button" id="hand-terminal" data-said="set-terminal">Terminal</button>
           </div>
           <!-- Asked in the page, in one line: what is lost. -->
@@ -145,6 +144,11 @@
           <!-- The action under way, step by step (the escalation, in one line), then its report. -->
           <div id="m-live" class="m-live" hidden></div>
           <p id="m-report" class="hint m-report" role="status" hidden></p>
+          <!-- THE DANGEROUS ONE, APART (10-11): away from the buttons of every day, said what it does, confirmed here. -->
+          <div id="m-danger" class="m-danger" hidden>
+            <span class="m-danger-title" data-said="set-mdanger-title">If the machine is stuck</span>
+            <div class="m-danger-row"><button type="button" id="m-force" class="danger" data-said="set-m-force">Force stop</button><span class="hint" data-said="set-mwhat-force">Cuts it off, like a power cut</span></div>
+          </div>
         </section>
         <nav id="panel-tabs" class="settings-tabs" role="tablist" aria-label="Categories of its settings">
           <button type="button" role="tab" data-group="general" data-said="set-tab-general">General</button>

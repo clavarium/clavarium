@@ -331,9 +331,18 @@ test('its machine from its settings: five buttons always there; Stop asked in on
     rmSync(join(vmHome(b, 'lever'), 'hang-stop'));
     await me.page.locator('#m-start').click();
     await me.until('started', async () => /^Started/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
-    /* Force stop: asked in one line, as a power cut. */
+    /* Force stop: apart from the buttons of every day (10-11), asked in one line right under it, as a power cut. */
+    assert.equal(await me.page.locator('#panel-actions #m-force').count(), 0);
+    assert.equal(await me.page.locator('#m-danger #m-force').isVisible(), true);
+    assert.equal(await me.page.locator('#m-danger .m-danger-title').textContent(), 'If the machine is stuck');
     await me.page.locator('#m-force').click();
     assert.match(await me.page.locator('#m-confirm-text').innerText(), /power cut/);
+    assert.equal(await me.page.evaluate(() => document.getElementById('m-danger').nextElementSibling?.id), 'm-confirm');
+    if (process.env.CLAVARIUM_E2E_SHOTS) for (const [w, h, name] of [[1280, 900, 'desktop'], [900, 1200, 'tablet'], [390, 844, 'phone']]) {
+        await me.page.setViewportSize({ width: w, height: h });
+        await me.page.locator('#m-danger').scrollIntoViewIfNeeded();
+        await me.page.screenshot({ path: `${process.env.CLAVARIUM_E2E_SHOTS}/m-danger-${name}.png` });
+    }
     await me.page.locator('#m-confirm-yes').click();
     await me.until('forced off', async () => /^Forced off/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
     assert.equal(stateOf(b, 'lever'), 'Stopped');

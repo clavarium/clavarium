@@ -238,7 +238,7 @@ export const SETTINGS_WORDS_FR = {
     'set-mwhy-busy': 'Une autre action est en cours', 'set-mwhy-notready': 'Pas encore prête', 'set-mwhy-runs': 'Elle tourne déjà',
     'set-mwhy-stopped': 'Déjà arrêtée', 'set-mwhy-asleep': 'Déjà endormie', 'set-mwhy-nothing': 'Endormie : rien ne tourne',
     'set-mwhat-start': 'Démarre sa machine et son outil', 'set-mwhat-stop': 'L’arrête proprement, de force si ça bloque',
-    'set-mwhat-restart': 'L’arrête, puis la redémarre', 'set-mwhat-force': 'Coupe tout, comme une coupure de courant',
+    'set-mwhat-restart': 'L’arrête, puis la redémarre', 'set-mwhat-force': 'Coupe tout, comme une coupure de courant', 'set-mdanger-title': 'Si la machine est bloquée',
     'set-mconf-stop': 'L’arrêter ? Le travail en cours s’interrompt.', 'set-mconf-restart': 'Redémarrer ? L’outil repart, fichiers gardés.',
     'set-mconf-force': 'Comme une coupure de courant : rien n’est sauvé.', 'set-mconf-no': 'Annuler',
     'set-mesc': 'Si un arrêt bloque', 'set-mesc-auto': 'Forcer seul', 'set-mesc-ask': 'Me demander',
