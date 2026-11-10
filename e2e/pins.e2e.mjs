@@ -49,6 +49,9 @@ test('a message pinned from its menu: on a bar at the top of the chat, a tap goe
         await me.page.setViewportSize({ width: 1280, height: 900 });
         await me.page.keyboard.press('Escape');
     }
+    /* The chat's own settings stay within reach: the bar never covers them. */
+    const prefs = await thread.locator('.parley-prefs-open').boundingBox();
+    assert.equal(await me.page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('.parley-prefs-open') !== null, [prefs.x + prefs.width / 2, prefs.y + prefs.height / 2]), true, 'the settings button is not under the bar');
     /* The list, newest first; unpinned from there. */
     await thread.locator('.parley-pins-more').click();
     await me.until('the list', async () => (await thread.locator('.parley-pins-item').count()) === 2);
