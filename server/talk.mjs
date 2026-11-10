@@ -536,6 +536,15 @@ export class Talk {
         return { ...this.of(name), told };
     }
 
+    /* THE OWNER PINS a message of the chat, either side (`on` false: unpinned). Kept at the top of the
+       chat, 5 at most (Parley), and read again by the tool after a restart: it is not woken for it. */
+    async pin(name, to, on = true) {
+        if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
+        if (typeof to !== 'string' || typeof on !== 'boolean') throw new Refusal(400, 'Say which message (to), and on: true or false.');
+        try { this.#parley(name).pin(to, on); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        return this.of(name);
+    }
+
     /* A FILE THE PERSON ATTACHES, before the message that carries it: put in
        the bridge folder, in a folder of its own, under the name it had.
        Resolves with where the tool finds it. */

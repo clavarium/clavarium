@@ -3279,6 +3279,8 @@
             schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: name }); } } },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
+            /* A message pinned at the top of the chat (5 at most, either side): wherever the chat may be written in. */
+            ...(!DEVICE || deviceParts.chat === 'write' ? { pin: (to, on) => post(talkPath(name, '/pin'), { to, on }) } : {}),
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
