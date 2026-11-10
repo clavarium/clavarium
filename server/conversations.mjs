@@ -67,6 +67,11 @@ const NEXT = Object.freeze({ polite: 'force', force: 'term', term: 'kill' });
 /* Each step in words, for the journal and the chat (the page has its own, web/app.js). */
 const STEP_WORDS = Object.freeze({ polite: 'polite stop', force: 'forced stop', term: 'SIGTERM', kill: 'SIGKILL', check: 'check', start: 'start', suspend: 'sleep', resleep: 'wake and sleep again', stop: 'clean stop' });
 const KIND_DOING = Object.freeze({ start: 'starting', stop: 'stopping', restart: 'restarting', sleep: 'going to sleep', force: 'being forced off', resize: 'being resized' });
+/* THE WATCHDOG of a machine (watchdog.mjs), as its owner set it: on, with how long it may stay mute or
+   full before it is forced off and started again. The defaults, and what may be chosen (minutes). */
+export const WATCHDOG_DELAY_MIN = 60;
+export const WATCHDOG_MIN = 10;
+export const WATCHDOG_MAX = 24 * 60;
 const KIND_WORDS = Object.freeze({ start: ['Started', 'Not started'], stop: ['Stopped', 'Not stopped'], restart: ['Restarted', 'Not restarted'], sleep: ['Asleep', 'Not asleep'], force: ['Stopped by force', 'Not stopped by force'], resize: ['Resized', 'Not resized'] });
 
 export class Refusal extends Error {
@@ -1389,12 +1394,14 @@ export class Conversations {
        to its next step). Answers at once with what the page reads (machineState); the action goes
        on, its steps on the record (`machine`), its report kept after it (`machineReport`), said in
        the journal and in its chat. `this.acted`: its end, for whoever waits for it. */
-    async machineAction(name, kind) {
+    /* `wait`: resolves with its report instead, once it is done (the watchdog, the memory watch, the
+       server's list: callers that act on it, so that no other action's end is taken for theirs). */
+    async machineAction(name, kind, { wait = false } = {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (kind === 'force-now') return this.#forceNow(name);
         if (!MACHINE_KINDS.includes(kind)) throw new Refusal(400, 'Not an action of a machine.');
-        if (kind === 'restart') { await this.restart(name); this.acted = this.restarted; return this.machineState(name); }
+        if (kind === 'restart') { await this.restart(name); const done = this.restarted; this.acted = done; return wait ? done : this.machineState(name); }
         const running = this.#acts.get(name);
         if (kind !== 'force') this.#busyCheck(name);
         else {
@@ -1405,8 +1412,9 @@ export class Conversations {
         if (kind === 'start') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
         if (this.#acts.has(name)) throw this.#busy(name);
         const act = this.#take(name, kind);
-        this.acted = this.#perform(name, act);
-        return this.machineState(name);
+        const done = this.#perform(name, act);
+        this.acted = done;
+        return wait ? done : this.machineState(name);
     }
 
     /* "FORCE NOW": the step running is ended and the next one started (polite -> forced -> SIGTERM ->
@@ -1432,7 +1440,25 @@ export class Conversations {
     machineState(name) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
-        return { action: c.machine ?? null, report: c.machineReport ?? null, limits: STEP_LIMITS, escalate: c.stopEscalate !== false };
+        return { action: c.machine ?? null, report: c.machineReport ?? null, limits: STEP_LIMITS, escalate: c.stopEscalate !== false, watchdog: this.watchdog(name) };
+    }
+
+    /* ITS WATCHDOG, as its owner set it (a default, changed per conversation): on, and how long its
+       machine may stay mute or full before it is forced off and started again (watchdog.mjs). */
+    watchdog(name) {
+        const w = this.#store.get(name)?.watchdog;
+        return { on: w?.on !== false, delayMin: Number.isInteger(w?.delayMin) ? w.delayMin : WATCHDOG_DELAY_MIN };
+    }
+    setWatchdog(name, { on, delayMin } = {}) {
+        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        const now = this.watchdog(name);
+        const minutes = delayMin === undefined ? now.delayMin : delayMin;
+        if (!Number.isInteger(minutes) || minutes < WATCHDOG_MIN || minutes > WATCHDOG_MAX) throw new Refusal(400, `The watchdog waits ${WATCHDOG_MIN} to ${WATCHDOG_MAX} minutes.`);
+        const next = { on: on === undefined ? now.on : on !== false, delayMin: minutes };
+        /* Kept only where it differs from the default. */
+        const kept = { ...(next.on ? {} : { on: false }), ...(next.delayMin === WATCHDOG_DELAY_MIN ? {} : { delayMin: next.delayMin }) };
+        this.#store.patch(name, { watchdog: Object.keys(kept).length ? kept : undefined });
+        return this.machineState(name);
     }
 
     /* THE WAY DOWN, AS ITS OWNER CHOSE (a default, changed per conversation): on (the default), a stop

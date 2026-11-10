@@ -945,12 +945,15 @@ case "$AREA $VERB" in
         run "$MULTIPASS" exec "$vm" -- "$@" ;;
     "vm ping")
         # Does the VM manager answer at all? Asked now and then by the server
-        # (vmwatch.mjs); bounded, so that a VM manager that hangs is an answer.
+        # (vmwatch.mjs); bounded, so that a VM manager that hangs is an answer:
+        # mute for 30 s is mute.
         [ $# -eq 0 ] || usage
-        run timeout 90 "$MULTIPASS" list --format csv ;;
+        run timeout 30 "$MULTIPASS" list --format csv ;;
     "vm revive")
-        # The VM manager has not answered for minutes: its daemon restarted.
-        # Asked by the server at most once in hours (vmwatch.mjs), never by a page.
+        # The VM manager has not answered for minutes: its daemon restarted
+        # (every machine is suspended and resumed). Asked by the server as its
+        # owner chose (vmwatch.mjs: at night, always, or never by itself), at
+        # most once in hours; or by its owner, confirmed in Settings, Machines.
         [ $# -eq 0 ] || usage
         run timeout 170 snap restart multipass.multipassd ;;
     "vm states")
@@ -1237,6 +1240,7 @@ OOMScoreAdjust=-900'
         #   place <machines|data|folders> <device> <size MB> <free MB>
         #   memory <total MB> <available MB>
         #   machine <one of our VMs> <resident MB>
+        #   machineage <one of our VMs> <seconds its qemu has run>
         #   cpu <total ticks> <idle ticks> <cores>        (for the curves: a difference of two looks)
         #   machinecpu <one of our VMs> <ticks it used>
         [ $# -eq 0 ] || usage
@@ -1255,6 +1259,8 @@ OOMScoreAdjust=-900'
             [ -n "$vm" ] || continue
             rss="$(awk '/^VmRSS:/{print int($2/1024)}' "/proc/$pid/status" 2>/dev/null)" || rss=""
             [ -n "$rss" ] && printf 'machine %s %s\n' "$vm" "$rss"
+            age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')" || age=""
+            case "$age" in ''|*[!0-9]*) ;; *) printf 'machineage %s %s\n' "$vm" "$age" ;; esac
             ticks="$(awk '{print $14 + $15}' "/proc/$pid/stat" 2>/dev/null)" || ticks=""
             [ -n "$ticks" ] && printf 'machinecpu %s %s\n' "$vm" "$ticks"
         done

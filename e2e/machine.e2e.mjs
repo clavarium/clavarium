@@ -331,11 +331,82 @@ test('its machine from its settings: five buttons always there; Stop asked in on
     rmSync(join(vmHome(b, 'lever'), 'hang-stop'));
     await me.page.locator('#m-start').click();
     await me.until('started', async () => /^Started/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
-    /* Force stop: asked in one line, as a power cut. */
+    /* Force stop: apart from the buttons of every day (10-11), asked in one line right under it, as a power cut. */
+    assert.equal(await me.page.locator('#panel-actions #m-force').count(), 0);
+    assert.equal(await me.page.locator('#m-danger #m-force').isVisible(), true);
+    assert.equal(await me.page.locator('#m-danger .m-danger-title').textContent(), 'If the machine is stuck');
     await me.page.locator('#m-force').click();
     assert.match(await me.page.locator('#m-confirm-text').innerText(), /power cut/);
+    assert.equal(await me.page.evaluate(() => document.getElementById('m-danger').nextElementSibling?.id), 'm-confirm');
+    if (process.env.CLAVARIUM_E2E_SHOTS) for (const [w, h, name] of [[1280, 900, 'desktop'], [900, 1200, 'tablet'], [390, 844, 'phone']]) {
+        await me.page.setViewportSize({ width: w, height: h });
+        await me.page.locator('#m-danger').scrollIntoViewIfNeeded();
+        await me.page.screenshot({ path: `${process.env.CLAVARIUM_E2E_SHOTS}/m-danger-${name}.png` });
+    }
     await me.page.locator('#m-confirm-yes').click();
     await me.until('forced off', async () => /^Forced off/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
     assert.equal(stateOf(b, 'lever'), 'Stopped');
+    assert.deepEqual(me.errors, []);
+});
+
+test('its watchdog in its Machine chapter; Settings, Machines: each machine, Force stop asked in the page, the manager restarted when confirmed, its two choices', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('watched', 'Shell', { chat: false });
+    await me.create('other', 'Shell', { chat: false });
+    /* Its watchdog: one hour by default; Off, then minutes of its own. */
+    await me.page.locator('#folders').click();
+    await me.chapter('machine');
+    const dog = me.page.locator('#m-dog');
+    assert.equal(await dog.locator('button[aria-pressed="true"]').innerText(), '1 h');
+    await dog.locator('button[data-min="0"]').click();
+    await me.until('off', async () => (await me.api('/api/conversations/other/machine')).body.watchdog.on === false);
+    await dog.locator('button[data-min="custom"]').click();
+    assert.equal(await me.page.locator('#m-dog-custom').isVisible(), true);
+    await me.page.locator('#m-dog-min').fill('45');
+    await me.page.locator('#m-dog-min').press('Enter');
+    await me.page.locator('#m-dog-min').blur();
+    await me.until('45 minutes', async () => (await me.api('/api/conversations/other/machine')).body.watchdog.delayMin === 45);
+    assert.deepEqual((await me.api('/api/conversations/other/machine')).body.watchdog, { on: true, delayMin: 45 });
+    const shots = process.env.SHOTS;
+    if (shots) await me.page.locator('#m-dog-row').screenshot({ path: join(shots, 'watchdog-row.png') });
+    /* Settings, Machines. */
+    await me.page.goto(`${b.origin}/?open=settings&at=machines`);
+    await me.until('the list', async () => (await me.page.locator('#machines-rows .machine-item').count()) === 2);
+    const row = (name) => me.page.locator(`#machines-rows .machine-item[data-name="${name}"]`);
+    assert.match(await row('watched').locator('small').innerText(), /^Running · 0\.9 GB · since \d/);
+    assert.equal(await me.page.locator('#manager-mode button[aria-pressed="true"]').innerText(), 'At night');
+    assert.equal(await me.page.locator('#pressure-way button[aria-pressed="true"]').innerText(), 'Force stop');
+    assert.match(await me.page.locator('#manager-line').innerText(), /^Answers/);
+    if (shots) for (const [w, h] of [[1280, 800], [390, 844]]) for (const scheme of ['light', 'dark']) {
+        await me.page.setViewportSize({ width: w, height: h });
+        await me.page.emulateMedia({ colorScheme: scheme });
+        await me.page.locator('#settings-ch-machines').scrollIntoViewIfNeeded();
+        await me.page.screenshot({ path: join(shots, `machines-${w}-${scheme}.png`) });
+        assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `no sideways scroll at ${w}`);
+    }
+    await me.page.setViewportSize({ width: 1280, height: 800 }); await me.page.emulateMedia({ colorScheme: 'light' });
+    /* Force stop from the list: asked in the page first; Cancel does nothing. */
+    await row('watched').locator('button[data-act="force"]').click();
+    assert.match(await me.page.locator('#machines-confirm-text').innerText(), /^Force stop watched\? Nothing is saved\.$/);
+    if (shots) await me.page.locator('#settings-ch-machines').screenshot({ path: join(shots, 'machines-confirm.png') });
+    await me.page.locator('#machines-confirm-no').click();
+    assert.equal(stateOf(b, 'watched'), 'Running');
+    await row('watched').locator('button[data-act="force"]').click();
+    await me.page.locator('#machines-confirm-yes').click();
+    await me.until('forced off', async () => stateOf(b, 'watched') === 'Stopped', 20_000);
+    await me.until('said in the list', async () => /^Stopped/.test(await row('watched').locator('small').innerText().catch(() => '')), 20_000);
+    assert.equal(await row('watched').locator('button[data-act="force"]').isDisabled(), true);
+    /* The manager: restarted only once confirmed (every machine is resumed). */
+    await me.page.locator('#manager-restart').click();
+    assert.equal(await me.page.locator('#machines-confirm-text').innerText(), 'Restart the manager? All machines are resumed.');
+    await me.page.locator('#machines-confirm-yes').click();
+    await me.until('restarted by its owner', async () => (await me.api('/api/server/machines')).body.manager.last?.by === 'owner');
+    /* Its two choices. */
+    await me.page.locator('#manager-mode button[data-mode="ask"]').click();
+    await me.until('ask', async () => (await me.api('/api/server/machines')).body.manager.mode === 'ask');
+    await me.page.locator('#pressure-way button[data-way="sleep"]').click();
+    await me.until('sleep', async () => (await me.api('/api/server/machines')).body.pressure === 'sleep');
+    assert.equal(await me.page.locator('#pressure-way button[aria-pressed="true"]').innerText(), 'Sleep');
     assert.deepEqual(me.errors, []);
 });

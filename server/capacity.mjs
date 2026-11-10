@@ -39,6 +39,8 @@ import { Refusal, DISK_GB } from './conversations.mjs';
 import { MIN_FREE_MB } from './shelf.mjs';
 
 export const RESERVE_DISK_MB = 5 * 1024;
+/* Short of memory: what is done to the machine that takes the most (pressureWay). */
+export const PRESSURE_WAYS = Object.freeze(['force', 'sleep', 'alert']);
 export const RESERVE_MEMORY_MB = 1024;
 export const RESERVE_DISK_PERCENT = 5;
 export const RESERVE_MEMORY_PERCENT = 5;
@@ -69,12 +71,13 @@ const whole = (text) => (/^\d{1,12}$/.test(String(text)) ? Number(text) : undefi
 
 /* What "server room" printed, as facts; any other line is left out. */
 export function readRoom(text) {
-    const facts = { places: [], memory: null, machines: [], cpu: null, machineCpu: {} };
+    const facts = { places: [], memory: null, machines: [], cpu: null, machineCpu: {}, machineAge: {} };
     for (const line of String(text ?? '').slice(0, 64 * 1024).split('\n').slice(0, 500)) {
         const p = line.trim().split(' ');
         if (p[0] === 'place' && p.length === 5 && PLACES.includes(p[1]) && [2, 3, 4].every((i) => whole(p[i]) !== undefined) && !facts.places.some((x) => x.what === p[1])) facts.places.push({ what: p[1], device: whole(p[2]), sizeMb: whole(p[3]), freeMb: whole(p[4]) });
         if (p[0] === 'memory' && p.length === 3 && whole(p[1]) > 0 && whole(p[2]) !== undefined) facts.memory = { totalMb: whole(p[1]), availableMb: whole(p[2]) };
         if (p[0] === 'cpu' && p.length === 4 && [1, 2, 3].every((i) => whole(p[i]) !== undefined)) facts.cpu = { ticks: whole(p[1]), idle: whole(p[2]), cores: whole(p[3]) };
+        if (p[0] === 'machineage' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined) facts.machineAge[p[1]] = whole(p[2]);
         if (p[0] === 'machinecpu' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined) facts.machineCpu[p[1]] = whole(p[2]);
         if (p[0] === 'machine' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined && !facts.machines.some((m) => m.vm === p[1])) facts.machines.push({ vm: p[1], rssMb: whole(p[2]) });
     }
@@ -135,14 +138,15 @@ export class Capacity {
         return this.reserve();
     }
 
-    /* A MACHINE TO PUT TO SLEEP THAT IS FROZEN (its qemu stopped: a suspend would hang the VM manager,
-       and the host program refuses it): forced off ('force', the default), or only said ('alert').
-       The owner's choice, kept here. */
-    frozenWay() { return this.#store.get('frozen')?.way === 'alert' ? 'alert' : 'force'; }
-    setFrozenWay(way) {
-        if (way !== 'force' && way !== 'alert') throw new Refusal(400, 'A frozen machine is either forced off (force) or only said (alert).');
-        this.#store.put({ name: 'frozen', way });
-        return this.frozenWay();
+    /* SHORT OF MEMORY (under the reserve), WHAT IS DONE to the running machine that takes the most, as
+       its owner chose (09-11): forced off ('force', the default: quick, and sure for this server), put
+       to sleep ('sleep': keeps its state, but writes all its memory to disk at the worst time; a frozen
+       one, which cannot be put to sleep, is forced off), or nothing but the alert ('alert'). */
+    pressureWay() { const w = this.#store.get('pressure')?.way; return PRESSURE_WAYS.includes(w) ? w : 'force'; }
+    setPressureWay(way) {
+        if (!PRESSURE_WAYS.includes(way)) throw new Refusal(400, 'Short of memory, a machine is forced off (force), put to sleep (sleep), or only said (alert).');
+        this.#store.put({ name: 'pressure', way });
+        return this.pressureWay();
     }
 
     /* What is free now. `fresh`: asked again whatever the cache says. */
@@ -178,7 +182,7 @@ export class Capacity {
         const records = new Map(all.map((c) => [`clv-${c.name}`, c]));
         const machines = room.machines.map((m) => {
             const c = records.get(m.vm);
-            return { name: c ? c.name : null, shelf: m.vm.startsWith('clvshelf-'), rssMb: m.rssMb, sizeMb: c?.memoryMb ?? null };
+            return { name: c ? c.name : null, shelf: m.vm.startsWith('clvshelf-'), rssMb: m.rssMb, sizeMb: c?.memoryMb ?? null, ...(room.machineAge?.[m.vm] !== undefined ? { ageS: room.machineAge[m.vm] } : {}) };
         });
         /* What the system says is available: the machines' own use is in it already. */
         const memory = room.memory ? { totalMb: room.memory.totalMb, freeMb: room.memory.availableMb, usedPercent: percent(room.memory.totalMb - room.memory.availableMb, room.memory.totalMb) } : null;
@@ -225,7 +229,7 @@ export class Capacity {
             machines: { disksMb: Object.values(u.machines).reduce((a, b) => a + b, 0), each: Object.entries(u.machines).map(([name, mb]) => ({ name, mb })).sort((a, b) => b.mb - a.mb), shelfMb: u.shelf ?? null, imagesMb: u.images ?? null, othersMb: u.others ?? null },
             at: new Date(this.#usageAt).toISOString(),
         } : null;
-        return { known: Boolean(figures), reserve: { diskMb: this.reserve().diskMb, memoryMb: this.reserve().memoryMb }, settings: this.reserve(), frozen: this.frozenWay(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
+        return { known: Boolean(figures), reserve: { diskMb: this.reserve().diskMb, memoryMb: this.reserve().memoryMb }, settings: this.reserve(), pressure: this.pressureWay(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
     }
 
     /* For the list: only whether it is high, and how much. Cheap: what is
@@ -295,17 +299,21 @@ export class Capacity {
             const running = f.machines.filter((m) => m.name && awake.has(m.name));
             const takes = (m) => (what === 'disk' ? this.#usage?.machines?.[m.name] ?? -1 : m.rssMb);
             const most = running.sort((a, b) => takes(b) - takes(a) || b.rssMb - a.rssMb)[0] ?? null;
-            let slept = null; let frozen = null; let forced = null;
-            if (most && this.#sleep) slept = await Promise.resolve(this.#sleep(most.name)).then(() => most.name, (error) => { if (/frozen/.test(String(error?.message ?? ''))) frozen = most.name; return null; });
-            /* Frozen: never suspended (it would hang the VM manager); forced off, as its owner chose by default. */
-            if (frozen && this.frozenWay() === 'force' && this.#force) forced = await Promise.resolve(this.#force(frozen)).then((ok) => (ok === false ? null : frozen), () => null);
+            let slept = null; let frozen = null; let forced = null; let held = null;
+            /* Memory: as its owner chose (pressureWay). Disk: put to sleep, as before. */
+            const way = what === 'memory' ? this.pressureWay() : 'sleep';
+            if (most && way === 'alert') held = most.name;
+            if (most && way === 'force' && this.#force) forced = await Promise.resolve(this.#force(most.name)).then((ok) => (ok === false ? null : most.name), () => null);
+            if (most && way === 'sleep' && this.#sleep) slept = await Promise.resolve(this.#sleep(most.name)).then(() => most.name, (error) => { if (/frozen/.test(String(error?.message ?? ''))) frozen = most.name; return null; });
+            /* Frozen: never suspended (it would hang the VM manager); forced off instead. */
+            if (frozen && this.#force) forced = await Promise.resolve(this.#force(frozen)).then((ok) => (ok === false ? null : frozen), () => null);
             const figures = `${gb(free)} free, ${gb(f.reserve[`${what}Mb`])} kept in reserve`;
-            const did = slept ? ` ${slept} was put to sleep.` : forced ? ` ${forced} was frozen: it was forced off.` : frozen ? ` ${frozen} takes the most but is frozen: Force stop frees it.` : '';
+            const did = slept ? ` ${slept} was put to sleep.` : forced ? ` ${forced} was forced off${frozen ? ' (frozen)' : ''}.` : frozen ? ` ${frozen} takes the most but is frozen: Force stop frees it.` : held ? ` ${held} takes the most: nothing was done, as you chose.` : '';
             this.#alert?.({ title: `This server is short of ${what}`, body: `${figures}.${did}`, url: '/?open=settings&at=resources' });
             if (slept) this.#say?.(slept, `This server ran short of ${what} (${figures}). This machine took the most, so it was put to sleep. Wake it once there is room again.`);
-            if (forced) this.#say?.(forced, `This server ran short of ${what} (${figures}). This machine took the most and was frozen (it could not be put to sleep), so it was forced off, as after a power cut. Start it again once there is room.`);
+            if (forced) this.#say?.(forced, `This server ran short of ${what} (${figures}). This machine took the most${frozen ? ' and was frozen' : ''}, so it was forced off, as after a power cut. Start it again once there is room.`);
             else if (frozen) this.#say?.(frozen, `This server ran short of ${what} (${figures}). This machine took the most but is frozen: it could not be put to sleep. Force stop frees it.`);
-            done.push({ what, slept, ...(frozen ? { frozen, forced } : {}) });
+            done.push({ what, way, slept, ...(forced ? { forced } : {}), ...(frozen ? { frozen } : {}), ...(held ? { held } : {}) });
         }
         return done;
     }

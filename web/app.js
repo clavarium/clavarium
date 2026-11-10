@@ -289,7 +289,7 @@
             now.title = uiSaid('set-m-force-now-why', 'Ends this step, starts the next');
             now.addEventListener('click', () => void machineAct('force-now'));
             const force = document.createElement('button'); force.type = 'button'; force.className = 'danger m-force-stop'; force.textContent = uiSaid('set-m-force', 'Force stop');
-            force.addEventListener('click', () => askMachine('force'));
+            force.addEventListener('click', () => askMachine('force', row));
             row.append(now, force);
             el.replaceChildren(ol, row);
         }
@@ -1104,6 +1104,7 @@
         $('quick-wake').hidden = !c || c.asleep !== true;
         $('hand-terminal').hidden = !usable || noTerminal();
         $('panel-actions').hidden = DEVICE || !c;
+        $('m-danger').hidden = DEVICE || !c;
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
     }
@@ -1135,8 +1136,11 @@
         restart: () => [uiSaid('set-mconf-restart', 'Restart it? The tool restarts; its files stay.'), uiSaid('set-m-restart', 'Restart')],
         force: () => [uiSaid('set-mconf-force', 'Like a power cut: nothing is saved.'), uiSaid('set-m-force', 'Force stop')],
     };
-    function askMachine(kind) {
+    /* `near`: where it was asked (the zone apart, the steps over the chat): the question comes right under it. */
+    function askMachine(kind, near) {
         const [line, yes] = MCONFIRM[kind]();
+        const where = near ?? (kind === 'force' ? $('m-danger') : $('panel-actions'));
+        where.after($('m-confirm'));
         $('m-confirm-text').textContent = line;
         $('m-confirm-yes').textContent = yes;
         $('m-confirm-yes').className = kind === 'force' ? 'danger' : 'primary';
@@ -2929,6 +2933,8 @@
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
         /* A stop that hangs: forced by itself (the default), or asked first. */
         for (const b of $('m-escalate').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.stopEscalate !== false)));
+        /* Its watchdog: off, or how long it waits (a custom one shown in its field). */
+        paintWatchdog(here);
         /* Whether its tool asks before acting -- for a tool that can be given every right in its machine. */
         $('rights-box').hidden = DEVICE || !here?.rights;
         for (const b of $('ask-first').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.askFirst === true)));
@@ -3273,6 +3279,8 @@
             schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: name }); } } },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
+            /* A message pinned at the top of the chat (5 at most, either side): wherever the chat may be written in. */
+            ...(!DEVICE || deviceParts.chat === 'write' ? { pin: (to, on) => post(talkPath(name, '/pin'), { to, on }) } : {}),
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
@@ -7263,7 +7271,7 @@
         if ($('settings-wifi-top').open) void paintWifi();
         if ($('settings-mesh-top').open) void paintScreen();
         if ($('settings-usage-top').open) void paintUsage();
-        await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
+        await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates(), paintMachines()]);
         await paintSettingsStates();
     }
 
@@ -8500,6 +8508,87 @@
         try { await post(`${API}/server/reserve`, { diskMb, diskPercent, memoryMb, memoryPercent }); $('reserve-saved').textContent = 'Saved.'; } catch (error) { $('reserve-error').textContent = error.message; $('reserve-error').hidden = false; return; }
         await paintServer(); void paintGauge();
     });
+    /* SETTINGS, MACHINES (server/machinelist.mjs): each machine, its state, the memory its qemu holds, since
+       when, and Force stop (confirmed here); the machine manager, and Restart the manager (confirmed: every
+       machine is resumed); what is done when it hangs, and when memory is short. */
+    const ML_STATE = { Running: ['set-ml-running', 'Running', 'ok'], Suspended: ['set-ml-asleep', 'Asleep', 'ok'], Stopped: ['set-ml-stopped', 'Stopped', 'ok'],
+        Starting: ['set-ml-starting', 'Starting', 'warn'], Stopping: ['set-ml-stopping', 'Stopping', 'warn'], Unknown: ['set-ml-unknown', 'Unknown', 'warn'], Gone: ['set-ml-gone', 'Gone', 'bad'] };
+    const sinceSaid = (iso) => {
+        const d = new Date(iso);
+        const today = d.toDateString() === new Date().toDateString();
+        return uiSaid('set-ml-since', 'since {t}', { t: today ? d.toLocaleTimeString([], { timeStyle: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) });
+    };
+    let machinesAsk = null;
+    let machinesTimer;
+    async function paintMachines() {
+        clearTimeout(machinesTimer);
+        if (DEVICE) { $('settings-ch-machines').hidden = true; return; }
+        const r = await fetch(`${API}/server/machines`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        $('settings-ch-machines').hidden = !r;
+        if (!r) return;
+        const running = r.machines.filter((m) => m.state === 'Running').length;
+        chapterNow('s-machines', uiSaid('set-ml-now', '{n} running of {all}', { n: running, all: r.machines.length }));
+        const rows = $('machines-rows'); rows.replaceChildren();
+        $('machines-none').hidden = r.machines.length > 0;
+        for (const m of r.machines) {
+            const row = el('div', 'list-item machine-item'); row.dataset.name = m.name;
+            const [key, en, tone] = ML_STATE[m.state] ?? ['set-ml-unknown', m.state, 'warn'];
+            const what = el('div', 'set-what');
+            what.append(el('b', '', machineTitle(m.name)));
+            const line = el('small', 'status-line'); line.dataset.tone = tone;
+            line.textContent = [m.action ? uiSaid('set-ml-busy', 'Busy') : uiSaid(key, en), m.rssMb > 0 ? GB(m.rssMb) : '', m.since ? sinceSaid(m.since) : ''].filter(Boolean).join(' · ');
+            what.append(line);
+            const acts = el('div', 'set-control');
+            const force = el('button', 'danger', uiSaid('set-m-force', 'Force stop')); force.type = 'button'; force.dataset.act = 'force';
+            force.disabled = m.state === 'Stopped' || m.state === 'Gone';
+            force.addEventListener('click', () => askMachines({ kind: 'force', name: m.name }));
+            acts.append(force);
+            row.append(what, acts);
+            rows.append(row);
+        }
+        /* The machine manager: does it answer, since when not, waiting for its owner, the last restart. */
+        const g = r.manager;
+        const ml = $('manager-line');
+        if (g) {
+            ml.dataset.tone = g.reviving ? 'warn' : g.ok ? 'ok' : 'bad';
+            ml.textContent = g.reviving ? uiSaid('set-ml-reviving', 'Restarting…')
+                : g.ok ? [uiSaid('set-ml-answers', 'Answers'), g.last?.at ? uiSaid('set-ml-last', 'restarted {t}', { t: agoSaid(g.last.at) }) : ''].filter(Boolean).join(' · ')
+                : [uiSaid('set-ml-mute', 'Not answering'), g.downSince ? sinceSaid(g.downSince) : '', g.asked ? uiSaid('set-ml-asked', 'waits for you') : ''].filter(Boolean).join(' · ');
+            $('manager-restart').disabled = Boolean(g.reviving);
+            $('manager-restart').classList.toggle('primary', Boolean(g.asked));
+            for (const b of $('manager-mode').children) b.setAttribute('aria-pressed', String(b.dataset.mode === g.mode));
+        }
+        $('manager-row').hidden = !g;
+        for (const b of $('pressure-way').children) b.setAttribute('aria-pressed', String(b.dataset.way === r.pressure));
+        /* While it is in sight and something moves (an action, a restart of the manager): looked at again. */
+        if ($('settings-ch-machines').open && !$('settings').hidden && (g?.reviving || r.machines.some((m) => m.action))) machinesTimer = setTimeout(() => { void paintMachines(); }, 3000);
+    }
+    /* Asked in the page, in one line: what is lost. */
+    function askMachines(ask) {
+        machinesAsk = ask;
+        $('machines-confirm-text').textContent = ask.kind === 'force'
+            ? uiSaid('set-ml-force-q', 'Force stop {name}? Nothing is saved.', { name: machineTitle(ask.name) })
+            : uiSaid('set-ml-revive-q', 'Restart the manager? All machines are resumed.');
+        $('machines-confirm-yes').textContent = ask.kind === 'force' ? uiSaid('set-m-force', 'Force stop') : uiSaid('set-ml-revive-yes', 'Restart');
+        $('machines-confirm').hidden = false;
+        $('machines-confirm-yes').focus();
+    }
+    async function machinesPost(path, body) {
+        $('machines-error').hidden = true;
+        try { await post(`${API}${path}`, body); } catch (error) { $('machines-error').textContent = error.message; $('machines-error').hidden = false; }
+        await paintMachines();
+    }
+    $('machines-confirm-no').addEventListener('click', () => { machinesAsk = null; $('machines-confirm').hidden = true; });
+    $('machines-confirm-yes').addEventListener('click', () => {
+        const ask = machinesAsk; machinesAsk = null; $('machines-confirm').hidden = true;
+        if (!ask) return;
+        if (ask.kind === 'force') void machinesPost(`/server/machines/${encodeURIComponent(ask.name)}/force`, {});
+        else { $('manager-restart').disabled = true; $('manager-line').dataset.tone = 'warn'; $('manager-line').textContent = uiSaid('set-ml-reviving', 'Restarting…'); void machinesPost('/server/vm-manager/restart', { confirm: true }); }
+    });
+    $('manager-restart').addEventListener('click', () => askMachines({ kind: 'revive' }));
+    for (const b of $('manager-mode').children) b.addEventListener('click', () => void machinesPost('/server/vm-manager', { mode: b.dataset.mode }));
+    for (const b of $('pressure-way').children) b.addEventListener('click', () => void machinesPost('/server/pressure', { way: b.dataset.way }));
+    $('settings-ch-machines').addEventListener('toggle', () => { if ($('settings-ch-machines').open) void paintMachines(); });
     /* THE SMALL GAUGE at the bottom of the list: only when disk or memory is
        short. A click opens Settings, at This server. */
     async function paintGauge() {
@@ -11663,6 +11752,39 @@
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
+    /* ITS WATCHDOG (server/watchdog.mjs): Off, 30 min, 1 h (the default), 2 h, or minutes of its own. */
+    const DOG_CHOICES = [30, 60, 120];
+    function paintWatchdog(here) {
+        const on = here?.watchdog?.on !== false;
+        const min = Number.isInteger(here?.watchdog?.delayMin) ? here.watchdog.delayMin : 60;
+        const custom = on && !DOG_CHOICES.includes(min);
+        if ($('m-dog').dataset.of !== (here?.name ?? '')) { $('m-dog').dataset.of = here?.name ?? ''; $('m-dog').dataset.custom = 'false'; }
+        const choosing = $('m-dog').dataset.custom === 'true';
+        for (const b of $('m-dog').children) {
+            const pressed = b.dataset.min === '0' ? !on : b.dataset.min === 'custom' ? custom || (on && choosing) : on && !choosing && Number(b.dataset.min) === min;
+            b.setAttribute('aria-pressed', String(pressed));
+        }
+        $('m-dog-custom').hidden = !(custom || (on && choosing));
+        if (document.activeElement !== $('m-dog-min')) $('m-dog-min').value = String(min);
+    }
+    async function setWatchdog(watchdog) {
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/machine`, { watchdog }); await refresh(); paintMachine(conversations.find((x) => x.name === current)); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    }
+    for (const b of $('m-dog').children) {
+        b.addEventListener('click', () => {
+            const m = b.dataset.min;
+            $('m-dog').dataset.custom = String(m === 'custom');
+            if (m === 'custom') { paintWatchdog({ ...conversations.find((x) => x.name === current), watchdog: { on: true, delayMin: Number($('m-dog-min').value) || 60 } }); $('m-dog-min').focus(); return; }
+            void setWatchdog(m === '0' ? { on: false } : { on: true, delayMin: Number(m) });
+        });
+    }
+    $('m-dog-min').addEventListener('change', () => {
+        const n = Math.round(Number($('m-dog-min').value));
+        if (!Number.isFinite(n)) return;
+        void setWatchdog({ on: true, delayMin: Math.min(1440, Math.max(10, n)) });
+    });
     /* The quick actions at the top of the panel do the same as the Machine chapter's. */
     $('hand-terminal').addEventListener('click', () => { leavePanel(); seeTerminal(); });
     $('quick-wake').addEventListener('click', () => { leavePanel(); seeTerminal(); });

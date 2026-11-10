@@ -238,7 +238,7 @@ export const SETTINGS_WORDS_FR = {
     'set-mwhy-busy': 'Une autre action est en cours', 'set-mwhy-notready': 'Pas encore prête', 'set-mwhy-runs': 'Elle tourne déjà',
     'set-mwhy-stopped': 'Déjà arrêtée', 'set-mwhy-asleep': 'Déjà endormie', 'set-mwhy-nothing': 'Endormie : rien ne tourne',
     'set-mwhat-start': 'Démarre sa machine et son outil', 'set-mwhat-stop': 'L’arrête proprement, de force si ça bloque',
-    'set-mwhat-restart': 'L’arrête, puis la redémarre', 'set-mwhat-force': 'Coupe tout, comme une coupure de courant',
+    'set-mwhat-restart': 'L’arrête, puis la redémarre', 'set-mwhat-force': 'Coupe tout, comme une coupure de courant', 'set-mdanger-title': 'Si la machine est bloquée',
     'set-mconf-stop': 'L’arrêter ? Le travail en cours s’interrompt.', 'set-mconf-restart': 'Redémarrer ? L’outil repart, fichiers gardés.',
     'set-mconf-force': 'Comme une coupure de courant : rien n’est sauvé.', 'set-mconf-no': 'Annuler',
     'set-mesc': 'Si un arrêt bloque', 'set-mesc-auto': 'Forcer seul', 'set-mesc-ask': 'Me demander',
@@ -253,5 +253,18 @@ export const SETTINGS_WORDS_FR = {
     'set-mrep-freed': '{gb} Go rendus', 'set-mrep-replaced': 'Remplacée par Forcer l’arrêt',
     'set-mt-stop': 'Arrêt de sa machine', 'set-mt-force': 'Arrêt forcé de sa machine', 'set-mt-sleep': 'Mise en veille', 'set-mt-start': 'Démarrage de sa machine',
     'set-stopped-page': 'Arrêtée. Elle démarre quand vous la démarrez.',
+    /* Its watchdog (watchdog.mjs, 09-11). */
+    'set-mdog': 'Chien de garde', 'set-mdog-what': 'La redémarre si elle bloque', 'set-mdog-off': 'Désactivé', 'set-mdog-custom': 'Autre',
+    /* Settings, Machines (machinelist.mjs, 09-11): the list, the machine manager, the server's two choices. */
+    'set-ch-s-machines': 'Machines', 'set-ml-about': 'État et mémoire.', 'set-ml-none': 'Aucune machine',
+    'set-ml-now': '{n} en marche sur {all}', 'set-ml-since': 'depuis {t}', 'set-ml-busy': 'Occupée',
+    'set-ml-running': 'En marche', 'set-ml-asleep': 'Endormie', 'set-ml-stopped': 'Arrêtée', 'set-ml-starting': 'Démarre',
+    'set-ml-stopping': 'S’arrête', 'set-ml-unknown': 'Inconnu', 'set-ml-gone': 'Disparue',
+    'set-ml-manager': 'Gestionnaire de machines', 'set-ml-revive': 'Redémarrer le gestionnaire', 'set-ml-revive-yes': 'Redémarrer',
+    'set-ml-revive-q': 'Redémarrer ? Toutes les machines sont reprises.', 'set-ml-reviving': 'Redémarrage…',
+    'set-ml-answers': 'Répond', 'set-ml-last': 'redémarré {t}', 'set-ml-mute': 'Ne répond pas', 'set-ml-asked': 'attend votre accord',
+    'set-ml-force-q': 'Forcer l’arrêt de {name} ? Rien n’est sauvé.',
+    'set-ml-hang': 'S’il bloque', 'set-ml-hang-what': 'Nuit : de 0 h à 7 h', 'set-ml-night': 'La nuit', 'set-ml-always': 'Toujours', 'set-ml-ask': 'Me demander',
+    'set-ml-short': 'Manque de mémoire', 'set-ml-short-what': 'La plus grosse machine', 'set-ml-force': 'Forcer l’arrêt', 'set-ml-sleep': 'Mettre en veille', 'set-ml-alert': 'Alerter seulement',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});
