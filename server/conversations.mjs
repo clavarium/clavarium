@@ -445,7 +445,7 @@ export class Conversations {
         if (me.code !== 0 || !Number.isInteger(uid) || !Number.isInteger(gid)) return fail('Its own user could not be made', me);
         this.#store.patch(name, { machineUser: { uid, gid } });
         const kept = await this.#vms.workMake(name);
-        const shown = kept.code === 0 ? await this.#vms.workMount(name, uid, gid) : kept;
+        const shown = kept.code === 0 ? await this.#vms.workMount(name, this.#uid, this.#gid) : kept;
         if (shown.code !== 0) return fail('The work folder could not be shown in the shared machine', shown);
         /* Its tool: there already (another conversation installed it), or installed -- a step as root for the
            machine, any other as its own user (its settings, in its home). */

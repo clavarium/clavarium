@@ -188,7 +188,7 @@ export class Vms {
        files written in the VM belong, on the host, to this account. */
     mount(conversation, kind, name, uid, gid) {
         /* In a shared machine (#221): into its own place there, where its door finds it. */
-        if (this.shared(conversation)) { const u = this.#userOf(conversation) ?? { uid, gid }; return this.run(['vm', 'smount', this.vmOf(conversation), conversation, kind, name, String(u.uid), String(u.gid)], { timeoutMs: 600_000 }); }
+        if (this.shared(conversation)) { const u = this.#userOf(conversation); if (!u) throw new Error('its own user in the shared machine is not known yet'); return this.run(['vm', 'smount', this.vmOf(conversation), conversation, kind, name, String(uid), String(gid), String(u.uid), String(u.gid)], { timeoutMs: 600_000 }); }
         return this.run(['vm', 'mount', this.vmOf(conversation), kind, name, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
 
@@ -196,7 +196,7 @@ export class Vms {
        machine at /work. Made (or found again) before it is mounted. */
     workMake(conversation) { this.vmOf(conversation); return this.run(['work', 'make', conversation]); }
     workMount(conversation, uid, gid) {
-        if (this.shared(conversation)) { const u = this.#userOf(conversation) ?? { uid, gid }; return this.run(['vm', 'smount', this.vmOf(conversation), conversation, 'work', conversation, String(u.uid), String(u.gid)], { timeoutMs: 600_000 }); }
+        if (this.shared(conversation)) { const u = this.#userOf(conversation); if (!u) throw new Error('its own user in the shared machine is not known yet'); return this.run(['vm', 'smount', this.vmOf(conversation), conversation, 'work', conversation, String(uid), String(gid), String(u.uid), String(u.gid)], { timeoutMs: 600_000 }); }
         return this.run(['vm', 'mount', this.vmOf(conversation), 'work', conversation, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
     workUnmount(conversation) {

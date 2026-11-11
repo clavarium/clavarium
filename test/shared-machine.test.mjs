@@ -56,7 +56,7 @@ test('two conversations in one shared machine: made once, a place each, its tool
     assert.match(first, /^vm launch clv-assist 1024$/m, 'the machine made, by its own name');
     assert.match(first, /exec clv-assist -- sudo -n install -m 0755 -o root -g root \/dev\/stdin \/usr\/local\/sbin\/clavarium-enter/, 'its door put in');
     assert.match(first, /^vm share clv-assist mail$/m);
-    assert.match(first, /^vm smount clv-assist mail work mail 1001 1001$/m, 'its work, for its own user');
+    assert.match(first, /^vm smount clv-assist mail work mail 1000 1000 1001 1001$/m, 'its work, for its own user');
     assert.match(first, /exec clv-assist -- sudo -n npm install -g tool/, 'the tool installed for the machine, as root');
     assert.match(first, /exec clv-assist -- sudo -n clavarium-enter mail -- tool --init/, 'its settings as its own user');
     assert.equal(b.store.get('mail').phase, 'ready');
@@ -69,7 +69,7 @@ test('two conversations in one shared machine: made once, a place each, its tool
     await b.all.built;
     const second = b.calls.join('\n');
     assert.doesNotMatch(second, /vm launch/, 'the machine is there: not made again');
-    assert.match(second, /^vm smount clv-assist diary work diary 1002 1002$/m, 'its own user, not the first one\'s');
+    assert.match(second, /^vm smount clv-assist diary work diary 1000 1000 1002 1002$/m, 'its own user, not the first one\'s');
     assert.doesNotMatch(second, /npm install -g tool/, 'the tool is there already');
     assert.equal(b.store.get('diary').phase, 'ready');
     assert.equal(b.vms.size, 1, 'one machine for both');

@@ -1121,10 +1121,11 @@ case "$AREA $VERB" in
         fi
         exit 0 ;;
     "vm smount")
-        # <vm> <conversation> <work|folder|view> <resource> <uid> <gid>: into the conversation's own place in a
-        # shared machine (/srv/clavarium/<conversation>/...), where its door (clavarium-enter) finds it -- only for
-        # a conversation that lives in that machine.
-        [ $# -eq 6 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a conversation name: $2"; is_name "$4" || refuse "not a folder name: $4"; number "$5"; number "$6"
+        # <vm> <conversation> <work|folder|view> <resource> <uid> <gid> <its uid> <its gid>: into the conversation's
+        # own place in a shared machine (/srv/clavarium/<conversation>/...), where its door (clavarium-enter) finds
+        # it, owned there by ITS user (not the machine's admin) -- only for a conversation that lives in that machine.
+        [ $# -eq 8 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a conversation name: $2"; is_name "$4" || refuse "not a folder name: $4"; number "$5"; number "$6"; number "$7"; number "$8"
+        [ "$7" -ge 1001 ] && [ "$8" -ge 1001 ] || refuse "its own user is not the machine's admin"
         [ -f "$DATA/shared/$1" ] && grep -qx "$2" "$DATA/shared/$1" || refuse "$2 does not live in $1"
         case "$3" in
             work)   [ "$4" = "$2" ] || refuse "a work folder belongs to its own conversation"
@@ -1137,7 +1138,7 @@ case "$AREA $VERB" in
                     target="$1:/srv/clavarium/$2/resources/$4" ;;
             *) refuse "a shared mount is of a work folder, a folder or a view" ;;
         esac
-        run "$MULTIPASS" mount -u "$5:$VM_ID" -g "$6:$VM_ID" "$source" "$target" ;;
+        run "$MULTIPASS" mount -u "$5:$7" -g "$6:$8" "$source" "$target" ;;
     "vm sumount")
         # <vm> <conversation> <work|resource name>: taken out of its place in a shared machine.
         [ $# -eq 3 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a conversation name: $2"; is_name "$3" || refuse "not a name: $3"
