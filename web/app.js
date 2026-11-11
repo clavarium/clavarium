@@ -9174,20 +9174,96 @@
         btn.disabled = false; btn.textContent = was;
         await paintAssets();
     });
-    /* ADD AN MCP SERVER (mcpx.mjs): its name, address and key -- the key kept on the server, never shown again. Or a
-       pasted { "mcpServers": ... } block, its keys named as secrets. */
+    /* ADD AN MCP SERVER (mcpx.mjs): the block the service gives, pasted -- its name, address and key read from it, shown
+       ticked, the key masked; or filled in by hand. The key goes to the server's vault on Add, never shown again. A block
+       naming its keys as secrets (${NAME}) is imported as it is; a program to start (stdio) is not run here. */
+    const mcpWord = (k, en, v) => uiSaid(k, en, v);
+    const mcpMask = (k) => (k.length <= 8 ? '••••' : `${k.slice(0, 4)}••••${k.slice(-3)}`);
+    function mcpRead(text) {
+        let j;
+        try { j = JSON.parse(text); } catch { return { error: mcpWord('set-mcp-notjson', 'Not JSON: paste the whole block.') }; }
+        const all = j && typeof j === 'object' ? (j.mcpServers ?? j.servers ?? (j.url || j.serverUrl ? { [j.name || 'mcp']: j } : null)) : null;
+        if (!all || typeof all !== 'object' || Array.isArray(all) || !Object.keys(all).length) return { error: mcpWord('set-mcp-noserver', 'No server in this block.') };
+        const servers = []; let refs = false;
+        for (const [name, s] of Object.entries(all)) {
+            if (!s || typeof s !== 'object') return { error: mcpWord('set-mcp-noserver', 'No server in this block.') };
+            if (s.command !== undefined || s.args !== undefined || s.type === 'stdio') return { error: mcpWord('set-mcp-program', '« {name} »: a program to start, refused here.', { name }) };
+            const heads = s.headers && typeof s.headers === 'object' ? Object.entries(s.headers) : [];
+            if (heads.length > 1) return { error: mcpWord('set-mcp-heads', '« {name} »: one header for its key at most.', { name }) };
+            let key = '', header = '';
+            if (heads.length) {
+                const [h, v] = heads[0]; const value = String(v ?? '').trim();
+                if (/\$\{[^}]+\}/.test(value)) refs = true;
+                const bearer = /^Bearer\s+(.+)$/i.exec(value);
+                if (h.toLowerCase() === 'authorization') { if (!bearer) return { error: mcpWord('set-mcp-basic', '« {name} »: not a « Bearer » key, fill in by hand.', { name }) }; key = bearer[1].trim(); }
+                else { key = value; header = h; }
+            }
+            servers.push({ name: String(name).slice(0, 120), url: String(s.url ?? s.serverUrl ?? ''), key, header });
+        }
+        return { servers, refs };
+    }
+    let mcpPasted = null, mcpPick = 0;
+    function mcpShow() {
+        const s = mcpPasted?.servers?.[mcpPick];
+        $('mcp-found').hidden = !s;
+        const n = mcpPasted?.servers?.length ?? 0;
+        $('mcp-add').textContent = n > 1 ? mcpWord('set-mcp-add-n', 'Add the {n}', { n }) : mcpWord('set-mcp-add', 'Add');
+        if (!s) return;
+        $('mcp-found-name').textContent = s.name; $('mcp-found-url').textContent = s.url;
+        $('mcp-found-keyline').classList.toggle('mcp-found-miss', !s.key);
+        $('mcp-found-key').textContent = !s.key ? mcpWord('set-mcp-nokey', 'none') : mcpPasted.refs ? s.key : `${mcpMask(s.key)}${s.header ? ` · ${s.header}` : ''}`;
+        if (n === 1 && !mcpPasted.refs) { $('mcp-name').value = s.name; $('mcp-url').value = s.url; $('mcp-key').value = s.key; }
+    }
+    function mcpPaste() {
+        const text = $('mcp-config').value.trim();
+        const drop = $('mcp-drop'); drop.classList.toggle('filled', !!text); drop.classList.remove('ok', 'bad');
+        $('mcp-error').hidden = true; mcpPasted = null; mcpPick = 0;
+        const pick = $('mcp-pick'); pick.replaceChildren(); pick.hidden = true;
+        if (text) {
+            const r = mcpRead(text);
+            if (r.error) { drop.classList.add('bad'); $('mcp-error').textContent = r.error; $('mcp-error').hidden = false; }
+            else {
+                mcpPasted = r; drop.classList.add('ok');
+                if (r.servers.length > 1) {
+                    r.servers.forEach((s, i) => { const b = el('button', '', s.name); b.type = 'button'; b.setAttribute('aria-pressed', String(i === 0));
+                        b.addEventListener('click', () => { mcpPick = i; [...pick.children].forEach((x, k) => x.setAttribute('aria-pressed', String(k === i))); mcpShow(); }); pick.append(b); });
+                    pick.hidden = false;
+                }
+            }
+        }
+        mcpShow();
+    }
+    $('mcp-config').addEventListener('input', mcpPaste);
+    const mcpClear = () => { $('mcp-new').reset(); $('mcp-config').value = ''; mcpPaste(); };
     $('mcp-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('mcp-error').hidden = true;
         const btn = $('mcp-add'); btn.disabled = true;
+        const fail = (message) => { $('mcp-error').textContent = message; $('mcp-error').hidden = false; };
         try {
-            const made = await post(`${API}/tether/mcp-add`, { name: $('mcp-name').value.trim(), url: $('mcp-url').value.trim(), key: $('mcp-key').value });
-            $('mcp-new').reset();
-            await assetMade($('mcp-box'), { key: `connexion:${made.id}`, name: made.title, note: made.error ? uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: made.error }) : '',
-                give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
-        } catch (error) { $('mcp-error').textContent = error.message; $('mcp-error').hidden = false; }
-        $('mcp-key').value = '';
-        btn.disabled = false;
+            const many = mcpPasted && (mcpPasted.refs || mcpPasted.servers.length > 1);
+            if (mcpPasted?.refs) {
+                const made = await post(`${API}/tether/mcp-import`, { config: $('mcp-config').value });
+                const first = made.servers?.[0];
+                mcpClear();
+                if (first) await assetMade($('mcp-box'), { key: `connexion:${first.id}`, name: first.title, give: (to, level) => Promise.all(made.servers.map((x) => grantTarget(x.id, to, targetLevel(level)))) });
+            } else if (many) {
+                const made = [];
+                for (const s of mcpPasted.servers) made.push(await post(`${API}/tether/mcp-add`, { name: s.name, url: s.url, ...(s.key ? { key: s.key } : {}), ...(s.header ? { header: s.header } : {}) }));
+                mcpClear();
+                await assetMade($('mcp-box'), { key: `connexion:${made[0].id}`, name: made[0].title, give: (to, level) => Promise.all(made.map((x) => grantTarget(x.id, to, targetLevel(level)))) });
+            } else {
+                const name = $('mcp-name').value.trim(), url = $('mcp-url').value.trim(), key = $('mcp-key').value;
+                if (!name || !url) { $('mcp-hand').open = true; fail(mcpWord('set-mcp-need', 'Paste the block, or give a name and an address.')); return; }
+                const one = mcpPasted?.servers?.[0];
+                const header = one && one.key && one.key === key ? one.header : '';
+                const made = await post(`${API}/tether/mcp-add`, { name, url, key, ...(header ? { header } : {}) });
+                mcpClear();
+                await assetMade($('mcp-box'), { key: `connexion:${made.id}`, name: made.title, note: made.error ? uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: made.error }) : '',
+                    give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
+            }
+        } catch (error) { fail(error.message); }
+        finally { $('mcp-key').value = ''; btn.disabled = false; }
         await paintAssets();
     });
     /* PAIR A BROWSER (browsers.mjs): one line to copy into the Tether extension's popup -- its address and a key good once,
@@ -9238,18 +9314,6 @@
     $('browser-copy').addEventListener('click', async () => {
         try { await navigator.clipboard.writeText($('browser-config').value); $('browser-copy').textContent = uiSaid('set-br-copied', 'Copied'); }
         catch { $('browser-config').select(); }
-    });
-    $('mcp-import').addEventListener('click', async () => {
-        $('mcp-error').hidden = true;
-        const btn = $('mcp-import'); btn.disabled = true;
-        try {
-            const made = await post(`${API}/tether/mcp-import`, { config: $('mcp-config').value });
-            $('mcp-config').value = '';
-            const first = made.servers?.[0];
-            if (first) await assetMade($('mcp-box'), { key: `connexion:${first.id}`, name: first.title, give: (to, level) => Promise.all(made.servers.map((x) => grantTarget(x.id, to, targetLevel(level)))) });
-        } catch (error) { $('mcp-error').textContent = error.message; $('mcp-error').hidden = false; }
-        btn.disabled = false;
-        await paintAssets();
     });
     const connexionKinds = () => [['connexion-mail', 'mail'], ['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']].filter(([id]) => $(id).checked && !$(id).disabled).map(([, k]) => k);
     $('connexion-open').addEventListener('click', async () => {
