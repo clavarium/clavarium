@@ -98,6 +98,10 @@ test('the door, act: wake (202), sleep, stop at "act"; 403 below it, for another
     assert.equal((await call(opts, { path: '/api/ext/v1/conversations', secret: actor.secret })).body.conversations[0].level, 'act');
 
     /* MCP: the same rights, the same calls. */
+    /* A protocol version not spoken here, said in its header: refused (MCP review 11-11); one spoken: answered. */
+    const versioned = (v) => call(opts, { method: 'POST', path: '/api/ext/mcp', secret: actor.secret, headers: { 'mcp-protocol-version': v }, body: { jsonrpc: '2.0', id: 1, method: 'ping' } });
+    assert.equal((await versioned('1999-01-01')).status, 400);
+    assert.equal((await versioned('2025-06-18')).status, 200);
     assert.equal((await mcp(talker.secret, 'clavarium_conversation_sleep', { conversation: 'hugo' })).status, 403);
     assert.equal((await mcp(actor.secret, 'clavarium_conversation_stop', { conversation: 'compta' })).status, 403);
     assert.equal((await mcp(actor.secret, 'clavarium_conversation_wake', {})).body.error.code, -32602);
