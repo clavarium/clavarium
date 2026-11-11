@@ -44,7 +44,7 @@ function bench(t) {
     const store = new Store(join(dir, 'conversations.json'));
     const machines = new Vms(run, ['vmm'], { freshMs: 0,
         machineOf: (n) => store.get(n)?.sharedMachine, userOf: (n) => store.get(n)?.machineUser });
-    const all = new Conversations({ store, vms: machines, tools: TOOLS });
+    const all = new Conversations({ store, vms: machines, tools: TOOLS, uid: 1000, gid: 1000 });
     return { calls, vms, store, all, users };
 }
 
