@@ -6,6 +6,7 @@
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
+ *   GET  /api/conversations/<name>/export        its tool's state, one archive (#351)   POST .../import  put back (same tool)
  *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?, cpus?}: stopped, set, started again (202);
  *                                                asleep: checked and kept for its wake, as `sizeAtWake` (200)
  *   POST /api/conversations/<name>/machine       {action: start|stop|restart|sleep|force|force-now}: done on its machine,
@@ -291,6 +292,20 @@ export async function handleApi(request, response, conversations, headers, resou
                 return send(403, { error: 'This request does not come from this site.' }), true;
             }
             return send(201, await importFile(attached('write'), query.get('p') ?? '', query.get('name') ?? '', request, { exists: query.get('exists') ?? 'keep', dir: query.get('dir') ?? '', batch: query.get('batch') ?? undefined })), true;
+        }
+        /* A CONVERSATION CARRIED ELSEWHERE (#351): its tool's state as one archive, streamed from its machine;
+           put back into a conversation of the same tool. Downloaded and sent by the person, from the page. */
+        const carry = /^\/api\/conversations\/([^/]+)\/(export|import)$/.exec(pathname);
+        if (carry && request.method === 'GET' && carry[2] === 'export') {
+            const out = await conversations.exportState(decodeURIComponent(carry[1]));
+            response.writeHead(200, { ...headers, 'content-type': 'application/gzip', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(out.name)}` });
+            out.stream.pipe(response);
+            response.on('close', () => { try { out.child?.kill(); } catch { /* ended */ } });
+            return true;
+        }
+        if (carry && request.method === 'POST' && carry[2] === 'import') {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
+            return send(200, await conversations.importState(decodeURIComponent(carry[1]), request)), true;
         }
         if (pathname.startsWith('/api/files/')) {
             if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' }), true;

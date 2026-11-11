@@ -2574,6 +2574,25 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; focusTerminal(); });
         };
+        /* Its tool's memory, exported as one file, or put back from one (#351): the person's own act, from here. */
+        $('carry-box').hidden = DEVICE || !here;
+        $('carry-export').href = `${API}/conversations/${encodeURIComponent(current)}/export`;
+        $('carry-import').onclick = () => $('carry-file').click();
+        $('carry-file').onchange = () => {
+            const file = $('carry-file').files?.[0]; $('carry-file').value = '';
+            if (!file) return;
+            const name = current;
+            leavePanel();
+            show(uiSaid('set-carry-ask', '« {file} » into « {name} »? Its memory is replaced.', { file: file.name, name }),
+                uiSaid('set-carry-go', 'Import'), async () => {
+                    try {
+                        const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/import`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                        const said = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(said.error ?? `HTTP ${r.status}`);
+                        show(uiSaid('set-carry-done', 'Imported from « {from} ».', { from: said.from?.name ?? file.name }), 'OK', () => { notice.hidden = true; focusTerminal(); });
+                    } catch (error) { show(error.message, 'Back to the terminal', enter); }
+                }, () => { notice.hidden = true; focusTerminal(); });
+        };
         void paintAnswerer(); paintWakeups(); void paintTalkBox(); void paintShareHere();
         paintMachine(here);
         void paintGuide(here);

@@ -12,6 +12,16 @@
       "--continue"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".claude",
+        ".claude.json"
+      ],
+      "skip": [
+        ".claude/shell-snapshots",
+        ".claude/statsig"
+      ]
+    },
     "rights": {
       "full": [
         "--dangerously-skip-permissions",
@@ -76,6 +86,15 @@
       "--continue"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".config/opencode",
+        ".local/share/opencode"
+      ],
+      "skip": [
+        ".local/share/opencode/log"
+      ]
+    },
     "rights": {
       "full": [
         "--auto"
@@ -156,6 +175,14 @@
       "--last"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".codex"
+      ],
+      "skip": [
+        ".codex/log"
+      ]
+    },
     "rights": {
       "full": [
         "--dangerously-bypass-approvals-and-sandbox"
@@ -190,6 +217,11 @@
       "--continue"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".vibe"
+      ]
+    },
     "rights": {
       "full": [
         "--auto-approve"
@@ -246,6 +278,11 @@
       "latest"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".gemini"
+      ]
+    },
     "rights": {
       "full": [
         "--yolo",
@@ -275,6 +312,13 @@
       "-l"
     ],
     "memoryMb": 768,
+    "state": {
+      "keep": [
+        ".bash_history",
+        ".bashrc",
+        ".profile"
+      ]
+    },
     "install": []
   }
 ]

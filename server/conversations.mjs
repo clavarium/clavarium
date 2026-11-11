@@ -13,6 +13,7 @@ import { WORK, VM_USER, SHARING_STEP, stepLine } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { availableParallelism } from 'node:os';
+import { spawn } from 'node:child_process';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -823,6 +824,60 @@ export class Conversations {
         await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
         this.ready(name);
         return true;
+    }
+
+    /* CARRIED ELSEWHERE (11-11, #351): what the conversation is beyond /work -- its tool's state, where its
+       entry in config/tools.json says it is (`state.keep`, without `state.skip`) -- as one .tar.gz streamed
+       from its machine, a manifest first (clavarium-conversation.json: its tool, its name, its size). Nothing
+       of the tool is known here: any tool that says where its state is can be exported, imported, moved.
+       The machine must run (its home is in it). -> { name: the file's name, stream } */
+    async exportState(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: it cannot be exported.`);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        const manifest = JSON.stringify({ kind: 'clavarium-conversation', version: 1, tool: c.tool, name: c.name, ...(c.title ? { title: c.title } : {}), memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB, at: new Date().toISOString() });
+        /* In its machine: the manifest written aside, then one archive -- the manifest first, then what is kept
+           (a path it has not made yet left out), the cache left out. */
+        /* (Its paths are plain -- letters, digits, . _ / - -- checked by tools.mjs: given as words.) */
+        const script = 'set -e; m=$(mktemp -d); printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+            + 'ex=""; for a in $2; do ex="$ex --exclude=./$a"; done; ks=""; for a in $3; do if [ -e "$HOME/$a" ]; then ks="$ks ./$a"; fi; done; '
+            + 'tar -czf - -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks; rm -rf "$m"';
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' ')]);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'ignore'] });
+        return { name: `${name}-${new Date().toISOString().slice(0, 10)}.clavarium.tar.gz`, stream: child.stdout, child };
+    }
+
+    /* PUT BACK an exported state in this conversation (same tool): its tool stopped, the archive unpacked in
+       its home, its tool started again, taking up its last session. -> { tool, from } */
+    async importState(name, input) {
+        const c = this.#busyCheck(name);
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: nothing can be imported in it.`);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        this.drop(name);
+        await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+        /* Unpacked aside first: its manifest read, its tool checked; then moved into the home. */
+        /* Aside in the home itself (never /tmp, which may be memory): then each part moved in place of the old. */
+        const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; tar -xzf - -C "$m"; '
+            + 'grep -q "\\"kind\\":\\"clavarium-conversation\\"" "$m/clavarium-conversation.json" || { echo "not an exported conversation" >&2; exit 3; }; '
+            + 'grep -q "\\"tool\\":\\"$1\\"" "$m/clavarium-conversation.json" || { echo "another tool" >&2; exit 4; }; '
+            + 'cat "$m/clavarium-conversation.json"; rm -f "$m/clavarium-conversation.json"; '
+            + 'for e in "$m"/.[!.]* "$m"/*; do if [ ! -e "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', c.tool]);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
+        const out = []; const err = [];
+        child.stdout.on('data', (d) => out.push(d)); child.stderr.on('data', (d) => err.push(d));
+        input.pipe(child.stdin);
+        child.stdin.on('error', () => { /* it stopped reading: said below */ });
+        const code = await new Promise((ok) => child.on('close', ok));
+        this.ready(name);
+        if (code === 3) throw new Refusal(400, 'This is not an exported conversation.');
+        if (code === 4) throw new Refusal(400, `This export is of another tool: import it into a conversation with that tool.`);
+        if (code !== 0) throw new Refusal(502, `Not imported: ${firstLine(Buffer.concat(err).toString()) || `exit ${code}`}`);
+        let from = null; try { from = JSON.parse(Buffer.concat(out).toString()); } catch { /* said nothing */ }
+        return { tool: c.tool, from: from ? { name: from.name, at: from.at } : null };
     }
 
     async #fixup(name, tool) {
