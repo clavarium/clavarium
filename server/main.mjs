@@ -312,7 +312,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const asHost = runner(host);
     /* A conversation in a shared machine (#221) says which: the machine its VM operations reach. */
     const conversationStore = new Store(`${dataDir}/conversations.json`);
-    const vms = new Vms(asHost, host, { machineOf: (name) => { const m = conversationStore.get(name)?.machine; return typeof m === 'string' && m ? m : undefined; } });
+    const vms = new Vms(asHost, host, {
+        machineOf: (name) => { const m = conversationStore.get(name)?.sharedMachine; return typeof m === 'string' && m ? m : undefined; },
+        userOf: (name) => { const u = conversationStore.get(name)?.machineUser; return u && Number.isInteger(u.uid) && Number.isInteger(u.gid) ? u : undefined; },
+    });
     const all = conversations ?? new Conversations({ store: conversationStore, layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
     /* Who may do what with what: ONE table, shared by everything below. */
     const grants = new Grants(new Store(`${dataDir}/grants.json`));

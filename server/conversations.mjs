@@ -14,10 +14,13 @@ import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { availableParallelism } from 'node:os';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
+/* The door of a conversation in a shared machine (#221), put in the machine by the server. */
+export const DOOR = new URL('../config/machine/clavarium-enter', import.meta.url);
 /* Moving a work folder: what must stay free after it, and how long a copy may take. */
 export const ROOM_MB = 1024;
 /* A file shown straight from a machine's disk: where, and how large at most. */
@@ -268,8 +271,10 @@ export class Conversations {
 
     /* Whether a new machine may be made for this request: what `create`
        checks, and the server's room (capacity.mjs). Asked before `create`. */
-    async admit({ name, title, tool, memoryMb } = {}) {
+    async admit({ name, title, tool, memoryMb, machine } = {}) {
         if (!name && typeof title === 'string' && !titleProblem(title)) ({ name } = this.#naming({ title }));
+        /* Into a shared machine that is there already: no new machine, no room asked for it. */
+        if (typeof machine === 'string' && this.#store.all().some((x) => x.sharedMachine === machine && x.machineUser)) return;
         const chosen = this.#tools.find((t) => t.id === tool);
         /* What `create` refuses anyway is said by `create`. */
         if (!chosen || !isConversationName(name) || this.#store.get(name)) return;
@@ -290,8 +295,11 @@ export class Conversations {
         return { name: id, title: title !== undefined && title !== id ? title : undefined };
     }
 
-    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group }) {
+    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group, machine }) {
         const { name, title } = this.#naming({ name: given, title: read });
+        /* IN A SHARED MACHINE (#221), named: its work is always kept here (mounted into its place there). */
+        if (machine !== undefined && (typeof machine !== 'string' || !isConversationName(machine))) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
+        if (machine !== undefined && machine === given) throw new Refusal(400, 'A shared machine has a name of its own, not a conversation\'s.');
         if (group !== undefined) { const problem = groupProblem(group); if (problem) throw new Refusal(400, problem); }
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         const chosen = this.#tools.find((t) => t.id === tool);
@@ -307,7 +315,7 @@ export class Conversations {
         if (!Number.isInteger(disk) || disk < DISK_GB || disk > DISK_MAX_GB) throw new Refusal(400, `Disk is ${DISK_GB} to ${DISK_MAX_GB} GB.`);
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, ...(machine ? { sharedMachine: machine } : {}), work: workOnDisk === true && !machine ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         /* A new one comes first in its folder (or first of those in none). */
         const { order, groups } = this.#order();
         this.#store.put(conversation);
@@ -318,6 +326,7 @@ export class Conversations {
 
     /* `again`: a machine built anew for a conversation that had one. */
     async #build(name, tool, memoryMb, again = false) {
+        if (this.#store.get(name)?.sharedMachine) return this.#buildShared(name, tool, memoryMb);
         const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
         /* The size chosen at creation (stored by create, kept on a rebuild): launched with it, or, for a
            copy of a ready-made machine, brought to it while the copy is still stopped. */
@@ -404,6 +413,54 @@ export class Conversations {
         this.#mountAgain.add(name);
         this.ready(name);
         if (again) this.renewed(name, 'Its machine was built again: what was on its own disk is gone, its work folder and this chat are kept. The tool started again.', true);
+        return undefined;
+    }
+
+    /* A CONVERSATION IN A SHARED MACHINE (#221): the machine made by the first one that lives in it (its door
+       installed), started if it sleeps; then this one's place in it -- told to the host, its own user made by its
+       door, its work mounted there for that user, its tool installed (what runs as root for the machine, the rest
+       as its user). The same end as a machine of its own: ready, its tool started by the next opening. */
+    async #buildShared(name, tool, memoryMb) {
+        const c = this.#store.get(name);
+        const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`, buildingSince: undefined }); return undefined; };
+        let state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (state === undefined) {
+            this.#store.patch(name, { step: `Making the shared machine ${c.sharedMachine}` });
+            const launched = await this.#vms.launch(name, memoryMb);
+            if (launched.code !== 0) return fail('The shared machine did not start', launched);
+            const sharing = await this.#vms.execMachine(name, [...SHARING_STEP], { timeoutMs: STEP_MS });
+            if (sharing.code !== 0) return fail('The shared machine could not be prepared for shared folders', sharing);
+        } else if (state !== 'Running') {
+            const started = await this.#vms.start(name);
+            if (started.code !== 0) return fail('The shared machine did not start', started);
+        }
+        /* Its door, always the one of this version (put again: an older one is replaced). */
+        const door = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-m', '0755', '-o', 'root', '-g', 'root', '/dev/stdin', '/usr/local/sbin/clavarium-enter'], { input: readFileSync(DOOR, 'utf8'), timeoutMs: STEP_MS });
+        if (door.code !== 0) return fail('The door of the shared machine could not be put in place', door);
+        this.#store.patch(name, { step: 'Making its place in the shared machine' });
+        const told = await this.#vms.share(name);
+        if (told.code !== 0) return fail('The host did not take it into the shared machine', told);
+        const me = await this.#vms.execMachine(name, ['sudo', '-n', 'clavarium-enter', name, '--', 'sh', '-c', 'id -u; id -g'], { timeoutMs: STEP_MS });
+        const [uid, gid] = String(me.stdout ?? '').trim().split('\n').map(Number);
+        if (me.code !== 0 || !Number.isInteger(uid) || !Number.isInteger(gid)) return fail('Its own user could not be made', me);
+        this.#store.patch(name, { machineUser: { uid, gid } });
+        const kept = await this.#vms.workMake(name);
+        const shown = kept.code === 0 ? await this.#vms.workMount(name, uid, gid) : kept;
+        if (shown.code !== 0) return fail('The work folder could not be shown in the shared machine', shown);
+        /* Its tool: there already (another conversation installed it), or installed -- a step as root for the
+           machine, any other as its own user (its settings, in its home). */
+        const there = tool.steps.length === 0 || (await this.#vms.exec(name, ['sh', '-c', `command -v ${tool.command[0]}`])).code === 0;
+        for (const [i, step] of (there ? [] : tool.steps).entries()) {
+            if (!this.#store.get(name)) return undefined;
+            this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${tool.steps.length})` });
+            const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
+            if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
+        }
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
+        this.#reach(name, 'folders');
+        this.#fresh.add(name);
+        this.#mountAgain.add(name);
+        this.ready(name);
         return undefined;
     }
 
@@ -1618,10 +1675,33 @@ export class Conversations {
         this.#cancelStop(name);
         this.drop(name);
         const kept = this.#store.get(name).work === 'kept';
-        this.#store.remove(name);
-        if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        if (this.#store.get(name).sharedMachine) await this.#leaveShared(name, { erase: false });
+        else {
+            this.#store.remove(name);
+            if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        }
         /* Its work is moved aside on the server, not erased. */
         if (kept) await this.#vms.workAside(name);
+    }
+
+    /* OUT OF A SHARED MACHINE (#221): its programs ended, its work taken out of its place there, the host told;
+       its user and home removed when it is erased (kept when archived). The machine itself goes only with the last
+       conversation that lived in it. The record is removed here, before the machine is looked at. */
+    async #leaveShared(name, { erase }) {
+        const shared = this.#store.get(name).sharedMachine;
+        const others = this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared);
+        const running = (await this.#vms.state(name, { fresh: true }).catch(() => undefined)) === 'Running';
+        if (running) {
+            await this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: 30_000 }).catch(() => {});
+            await this.#vms.workUnmount(name).catch(() => {});
+            if (erase) await this.#vms.execMachine(name, ['sudo', '-n', 'userdel', '--remove', `c-${name}`], { timeoutMs: 60_000 }).catch(() => {});
+        }
+        await this.#vms.unshare(name).catch(() => {});
+        const last = others.length === 0;
+        const state = last ? await this.#vms.state(name, { fresh: true }).catch(() => undefined) : undefined;
+        this.#store.remove(name);
+        /* (Its name gone from the store, the VM manager is still reached through the machine's own name.) */
+        if (last && state !== undefined) await this.#vms.removeVm(`clv-${shared}`);
     }
 
     /* DELETED FOR GOOD (01-11, its owner's ask, confirmed by typing its name): as archived, but its work is
@@ -1631,8 +1711,11 @@ export class Conversations {
         this.#cancelStop(name);
         this.drop(name);
         const kept = this.#store.get(name).work === 'kept';
-        this.#store.remove(name);
-        if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        if (this.#store.get(name).sharedMachine) await this.#leaveShared(name, { erase: true });
+        else {
+            this.#store.remove(name);
+            if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        }
         if (kept) {
             const r = await this.#vms.workErase(name);
             if (r?.code) throw new Refusal(500, `Its machine is deleted, but its files could not be erased: ${firstLine(r.stderr) || `exit ${r.code}`}`);

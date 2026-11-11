@@ -84,11 +84,12 @@ export class VmUnknown extends Error {
 export class Vms {
     /* `run(argv, options)` reaches the host program; `prefix` is the same
        route as an argument vector, for the one caller that needs a terminal. */
-    #ask; #snapshot = null; #asking = null; #now; #freshMs; #machineOf;
+    #ask; #snapshot = null; #asking = null; #now; #freshMs; #machineOf; #userOf;
     /* `freshMs`: how long one answer serves every caller (0: only those asking meanwhile). */
     /* `machineOf(conversation)`: the shared machine it lives in (#221), or nothing -- its own, `clv-<conversation>`. */
-    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined } = {}) {
-        this.#ask = run; this.prefix = prefix; this.#now = now; this.#freshMs = freshMs; this.#machineOf = machineOf;
+    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined, userOf = () => undefined } = {}) {
+        /* `userOf(conversation)`: its own user in a shared machine, { uid, gid } -- what its mounts are owned by there. */
+        this.#ask = run; this.prefix = prefix; this.#now = now; this.#freshMs = freshMs; this.#machineOf = machineOf; this.#userOf = userOf;
         /* What changes a machine makes the states asked again (not taken from before it). */
         this.run = async (argv, options) => {
             const changes = argv[0] === 'vm' && CHANGES.has(argv[1]);
@@ -116,6 +117,8 @@ export class Vms {
         return this.#asking;
     }
 
+    /* Whether it lives in a shared machine (#221). */
+    shared(conversation) { return this.#machineOf(conversation) !== undefined; }
     /* ITS MACHINE (#221): a conversation's own (`clv-<name>`, as always), or the shared one it lives in. */
     vmOf(conversation) {
         const shared = this.#machineOf(conversation);
@@ -126,8 +129,16 @@ export class Vms {
     /* In a shared machine, everything run for a conversation goes through its door (clavarium-enter, as root):
        its own /work, its own home and user, its limits -- each tool sees what it sees in a machine of its own. */
     #door(conversation, argv) {
-        return this.#machineOf(conversation) === undefined ? argv : ['sudo', '-n', 'clavarium-enter', conversation, '--', ...argv];
+        /* A command run as root (sudo) is the server's own work on the machine (an install, a mount): not
+           through the door. Everything else -- a terminal, a tool, a probe -- is the conversation's. */
+        if (this.#machineOf(conversation) === undefined || argv[0] === 'sudo') return argv;
+        return ['sudo', '-n', 'clavarium-enter', conversation, '--', ...argv];
     }
+    /* In a shared machine: its machine-wide work, as its admin user, never through a door (the door itself installed). */
+    execMachine(conversation, argv, options) { return this.run(['vm', 'exec', this.vmOf(conversation), '--', ...argv], options); }
+    /* The host's list of who lives in a shared machine (vm share / unshare). */
+    share(conversation) { return this.run(['vm', 'share', this.vmOf(conversation), conversation]); }
+    unshare(conversation) { return this.run(['vm', 'unshare', this.vmOf(conversation), conversation]); }
 
     launch(conversation, memoryMb, diskGb, cpus) {
         /* The disk and cores go with the memory only when they are the chosen size, not the defaults. */
@@ -176,6 +187,8 @@ export class Vms {
        is on the host is decided by the host program, not here. `uid`/`gid`:
        files written in the VM belong, on the host, to this account. */
     mount(conversation, kind, name, uid, gid) {
+        /* In a shared machine (#221): into its own place there, where its door finds it. */
+        if (this.shared(conversation)) { const u = this.#userOf(conversation) ?? { uid, gid }; return this.run(['vm', 'smount', this.vmOf(conversation), conversation, kind, name, String(u.uid), String(u.gid)], { timeoutMs: 600_000 }); }
         return this.run(['vm', 'mount', this.vmOf(conversation), kind, name, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
 
@@ -183,9 +196,13 @@ export class Vms {
        machine at /work. Made (or found again) before it is mounted. */
     workMake(conversation) { this.vmOf(conversation); return this.run(['work', 'make', conversation]); }
     workMount(conversation, uid, gid) {
+        if (this.shared(conversation)) { const u = this.#userOf(conversation) ?? { uid, gid }; return this.run(['vm', 'smount', this.vmOf(conversation), conversation, 'work', conversation, String(u.uid), String(u.gid)], { timeoutMs: 600_000 }); }
         return this.run(['vm', 'mount', this.vmOf(conversation), 'work', conversation, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
-    workUnmount(conversation) { return this.run(['vm', 'unwork', this.vmOf(conversation)], { timeoutMs: 120_000 }); }
+    workUnmount(conversation) {
+        if (this.shared(conversation)) return this.run(['vm', 'sumount', this.vmOf(conversation), conversation, 'work'], { timeoutMs: 120_000 });
+        return this.run(['vm', 'unwork', this.vmOf(conversation)], { timeoutMs: 120_000 });
+    }
     /* Megabytes left: { disk, host }, or undefined if it cannot be told. */
     async workRoom(conversation) {
         this.vmOf(conversation);
@@ -204,6 +221,7 @@ export class Vms {
     unmountTools(conversation) { return this.run(['vm', 'untools', this.vmOf(conversation)], { timeoutMs: 120_000 }); }
 
     umount(conversation, name) {
+        if (this.shared(conversation)) return this.run(['vm', 'sumount', this.vmOf(conversation), conversation, name], { timeoutMs: 120_000 });
         return this.run(['vm', 'umount', this.vmOf(conversation), name], { timeoutMs: 120_000 });
     }
 
@@ -240,4 +258,6 @@ export class Vms {
        suspend that did not end the process): wake+resleep, then a clean stop. */
     reclaim(conversation) { return this.run(['vm', 'reclaim', this.vmOf(conversation)], { timeoutMs: 300_000 }); }
     remove(conversation) { return this.run(['vm', 'delete', this.vmOf(conversation)], { timeoutMs: 300_000 }); }
+    /* A shared machine deleted by its own name (its last conversation gone: no conversation leads to it any more). */
+    removeVm(vm) { if (!/^clv-[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/.test(vm)) throw new Error('not one of our machines'); return this.run(['vm', 'delete', vm], { timeoutMs: 300_000 }); }
 }

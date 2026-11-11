@@ -21,3 +21,15 @@ test('a shared machine: its operations reach it, its runs go through the door of
     ]);
     assert.deepEqual(vms.execArgv('diary', ['bash']), ['host', 'vm', 'exec', 'clv-assistants', '--', 'sudo', '-n', 'clavarium-enter', 'diary', '--', 'bash']);
 });
+
+test('a shared machine: its work and its folders go into its own place there, and come out of it', async () => {
+    const asked = [];
+    const vms = new Vms(async (argv) => { asked.push(argv.join(' ')); return { code: 0, stdout: '', stderr: '' }; }, ['host'], { machineOf: (c) => (c === 'mail' ? 'assistants' : undefined) });
+    await vms.workMount('mail', 1001, 1001); await vms.mount('mail', 'folder', 'docs', 1001, 1001); await vms.umount('mail', 'docs'); await vms.workUnmount('mail');
+    await vms.workMount('alone', 1000, 1000); await vms.umount('alone', 'docs');
+    assert.deepEqual(asked, [
+        'vm smount clv-assistants mail work mail 1001 1001', 'vm smount clv-assistants mail folder docs 1001 1001',
+        'vm sumount clv-assistants mail docs', 'vm sumount clv-assistants mail work',
+        'vm mount clv-alone work alone 1000 1000', 'vm umount clv-alone docs',
+    ]);
+});
