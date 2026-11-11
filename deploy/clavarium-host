@@ -1106,6 +1106,42 @@ case "$AREA $VERB" in
             *) refuse "a mount is of a folder, of a view, of a work folder or of the tools" ;;
         esac
         run "$MULTIPASS" mount -u "$4:$VM_ID" -g "$5:$VM_ID" "$source" "$target" ;;
+    "vm share"|"vm unshare")
+        # A SHARED MACHINE (#221): the conversations that live in it, kept here (DATA/shared/<vm>), so that a
+        # work folder or a resource only ever goes into the machine its conversation lives in. <vm> <conversation>
+        [ $# -eq 2 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a conversation name: $2"
+        [ "$1" != "clv-$2" ] || refuse "a conversation of its own is not shared"
+        list="$DATA/shared/$1"
+        if [ "$SAY" = "yes" ]; then printf '%s %s %s\n' "$VERB" "$list" "$2"; exit 0; fi
+        mkdir -p "$DATA/shared"; touch "$list"
+        if [ "$VERB" = "share" ]; then
+            grep -qx "$2" "$list" || printf '%s\n' "$2" >> "$list"
+        else
+            grep -vx "$2" "$list" > "$list.new" || true; mv "$list.new" "$list"
+        fi
+        exit 0 ;;
+    "vm smount")
+        # <vm> <conversation> <work|folder|view> <resource> <uid> <gid>: into the conversation's own place in a
+        # shared machine (/srv/clavarium/<conversation>/...), where its door (clavarium-enter) finds it -- only for
+        # a conversation that lives in that machine.
+        [ $# -eq 6 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a conversation name: $2"; is_name "$4" || refuse "not a folder name: $4"; number "$5"; number "$6"
+        [ -f "$DATA/shared/$1" ] && grep -qx "$2" "$DATA/shared/$1" || refuse "$2 does not live in $1"
+        case "$3" in
+            work)   [ "$4" = "$2" ] || refuse "a work folder belongs to its own conversation"
+                    kept work; source="$MNT/work/$2"; held "$source"
+                    [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the work disk of $2 is not in place"
+                    target="$1:/srv/clavarium/$2/work" ;;
+            folder) folder_of "$4"; source="$MNT/resources/$4"; target="$1:/srv/clavarium/$2/resources/$4" ;;
+            view)   kept views; source="$MNT/views/$4"; held "$source"
+                    [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the read-only view of $4 is not in place"
+                    target="$1:/srv/clavarium/$2/resources/$4" ;;
+            *) refuse "a shared mount is of a work folder, a folder or a view" ;;
+        esac
+        run "$MULTIPASS" mount -u "$5:$VM_ID" -g "$6:$VM_ID" "$source" "$target" ;;
+    "vm sumount")
+        # <vm> <conversation> <work|resource name>: taken out of its place in a shared machine.
+        [ $# -eq 3 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a conversation name: $2"; is_name "$3" || refuse "not a name: $3"
+        if [ "$3" = "work" ]; then run "$MULTIPASS" umount "$1:/srv/clavarium/$2/work"; else run "$MULTIPASS" umount "$1:/srv/clavarium/$2/resources/$3"; fi ;;
     "vm unwork")
         # The work folder is taken out of its machine (its work moves to the
         # machine's own disk, or a move is undone).
