@@ -5,7 +5,7 @@
 mode="$1"; shift
 case "$mode" in full|ask) ;; *) echo "launch: the first argument is full or ask" >&2; exit 64 ;; esac
 [ $# -gt 0 ] || { echo "launch: no command to run" >&2; exit 64; }
-here="$(dirname "$0")"; relay="$here/mcp-relay.mjs"
+here="$(dirname "$0")"; relay="$here/mcp-sock.sh"
 chat="${PARLEY_DIR:-/work/.parley}"; docket="/work/.docket"; tether="/work/.tether"
 # ITS KEY: a secret named MISTRAL_API_KEY given to the conversation is in its environment; Vibe reads it
 # there, and asks nothing. Without it, Vibe asks for it in its terminal at its first start.
@@ -15,19 +15,19 @@ if [ -f "$chat/server.mjs" ] && command -v parley-mcp >/dev/null 2>&1; then bloc
 [[mcp_servers]]
 name = \"parley\"
 transport = \"stdio\"
-command = \"node\"
+command = \"sh\"
 args = [\"$relay\", \"parley-mcp\", \"--dir\", \"$chat\"]"; fi
 if [ -f "$chat/server.mjs" ] && command -v docket-mcp >/dev/null 2>&1; then block="$block
 [[mcp_servers]]
 name = \"docket\"
 transport = \"stdio\"
-command = \"node\"
+command = \"sh\"
 args = [\"$relay\", \"docket-mcp\", \"--dir\", \"$docket\"]"; fi
 if command -v tether-mcp >/dev/null 2>&1; then block="$block
 [[mcp_servers]]
 name = \"tether\"
 transport = \"stdio\"
-command = \"node\"
+command = \"sh\"
 args = [\"$relay\", \"tether-mcp\", \"--dir\", \"$tether\"]"; fi
 node "$here/toml-block.mjs" .vibe/config.toml tools "$block" \
     || echo "launch: Vibe has not its tools (MCP)" >&2
