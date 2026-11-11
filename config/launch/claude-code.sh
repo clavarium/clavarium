@@ -21,17 +21,18 @@ node "$(dirname "$0")/json-set.mjs" .claude/settings.json "$keys" \
 # work folder trusted -- in its own file, as it records them itself; nothing to answer in the terminal.
 node "$(dirname "$0")/json-set.mjs" .claude.json '{"hasCompletedOnboarding": true, "projects": {"/work": {"hasTrustDialogAccepted": true}}}' \
     || echo "launch: Claude Code may ask its first questions in the terminal" >&2
-# ITS TOOLS (MCP), EACH THROUGH THE RELAY (02-11): a tool updated on the machine is taken up between two of
-# its requests -- whatever the tool, the session never restarted, nothing for the agent to do. Declared
-# once, by Claude Code itself (its other servers kept); an older declaration without the relay is replaced.
+# ITS TOOLS (MCP), EACH THROUGH THE SHARED HOST (11-11, #350; the relay since 02-11): one program for all its
+# tools (mcp-sock.sh -> tools-host.mjs), a tool updated on the machine taken up between two of its requests,
+# the session never restarted. Declared once, by Claude Code itself (its other servers kept); an older
+# declaration (the relay alone) is replaced.
 # Looked for in its settings first, since asking Claude Code takes seconds. Nothing stops the start.
-relay="$(dirname "$0")/mcp-relay.mjs"
+relay="$(dirname "$0")/mcp-sock.sh"
 tool() {   # NAME FOLDER COMMAND ARGS...
     name="$1"; folder="$2"; shift 2
-    if grep -q "\"$folder\"" "$HOME/.claude.json" 2>/dev/null && grep -q "mcp-relay.mjs" "$HOME/.claude.json" 2>/dev/null \
-        && node -e 'const d=require(process.argv[1]);const s=d.mcpServers?.[process.argv[2]];const a=JSON.stringify(s?.args??[]);process.exit(a.includes("mcp-relay.mjs")&&a.includes(JSON.stringify(process.argv[3]))?0:1)' "$HOME/.claude.json" "$name" "$1" 2>/dev/null; then return 0; fi
+    if grep -q "\"$folder\"" "$HOME/.claude.json" 2>/dev/null && grep -q "mcp-sock.sh" "$HOME/.claude.json" 2>/dev/null \
+        && node -e 'const d=require(process.argv[1]);const s=d.mcpServers?.[process.argv[2]];const a=JSON.stringify(s?.args??[]);process.exit(a.includes("mcp-sock.sh")&&a.includes(JSON.stringify(process.argv[3]))?0:1)' "$HOME/.claude.json" "$name" "$1" 2>/dev/null; then return 0; fi
     claude mcp remove --scope user "$name" >/dev/null 2>&1
-    claude mcp add --scope user "$name" -- node "$relay" "$@" >/dev/null 2>&1 \
+    claude mcp add --scope user "$name" -- sh "$relay" "$@" >/dev/null 2>&1 \
         || echo "launch: $name was not given to Claude Code as tools: the command $name still works" >&2
 }
 # Parley, the chat of the conversation, when it has one: the version installed on the machine (parley-mcp),

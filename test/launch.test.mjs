@@ -63,7 +63,7 @@ test('the launcher of Claude Code gives it its tools through the relay (MCP), on
     const chat = join(dir, 'work', '.parley'); mkdirSync(chat, { recursive: true });
     const bin = join(dir, 'bin'); mkdirSync(bin);
     const asked = join(dir, 'asked.txt');
-    const relay = join(LAUNCH, 'mcp-relay.mjs');
+    const relay = join(LAUNCH, 'mcp-sock.sh');
     /* A Claude Code that notes what it is asked, and records a server added as the real one does. */
     const fake = `#!/bin/sh\necho "$*" >> "${asked}"\nnode -e '
 const fs=require("fs"),f=process.env.HOME+"/.claude.json";let d={};try{d=JSON.parse(fs.readFileSync(f,"utf8"))}catch{}d.mcpServers??={};
@@ -78,20 +78,20 @@ if(a[0]==="mcp"&&a[1]==="add"){const i=a.indexOf("--");d.mcpServers[a[4]]={comma
     assert.deepEqual(lines(), [], 'no chat (no server in its folder): nothing asked');
     writeFileSync(join(chat, 'server.mjs'), '');
     assert.equal(run().status, 0);
-    assert.equal(lines().at(-1), `mcp add --scope user parley -- node ${relay} node ${chat}/server.mjs --dir ${chat}`, 'Parley, through the relay');
+    assert.equal(lines().at(-1), `mcp add --scope user parley -- sh ${relay} node ${chat}/server.mjs --dir ${chat}`, 'Parley, through the relay');
     const n = lines().length;
     assert.equal(run().status, 0);
     assert.equal(lines().length, n, 'declared already: Claude Code not asked again');
-    /* An older declaration, without the relay: replaced. */
+    /* An older declaration, without the shared host: replaced. */
     writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { parley: { command: 'node', args: [`${chat}/server.mjs`, '--dir', chat] } } }));
     assert.equal(run().status, 0);
-    assert.deepEqual(lines().slice(-2), ['mcp remove --scope user parley', `mcp add --scope user parley -- node ${relay} node ${chat}/server.mjs --dir ${chat}`]);
+    assert.deepEqual(lines().slice(-2), ['mcp remove --scope user parley', `mcp add --scope user parley -- sh ${relay} node ${chat}/server.mjs --dir ${chat}`]);
     /* Parley and Docket installed on the machine: their own commands, through the relay. */
     writeFileSync(join(bin, 'parley-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     writeFileSync(join(bin, 'docket-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     assert.equal(run().status, 0);
-    assert.ok(lines().includes(`mcp add --scope user docket -- node ${relay} docket-mcp --dir /work/.docket`), lines().join('\n'));
-    assert.ok(lines().includes(`mcp add --scope user parley -- node ${relay} parley-mcp --dir ${chat}`), 'the copy beside the chat replaced by the version installed');
+    assert.ok(lines().includes(`mcp add --scope user docket -- sh ${relay} docket-mcp --dir /work/.docket`), lines().join('\n'));
+    assert.ok(lines().includes(`mcp add --scope user parley -- sh ${relay} parley-mcp --dir ${chat}`), 'the copy beside the chat replaced by the version installed');
     /* Claude Code refusing: said, and the tool starts all the same. */
     rmSync(join(dir, '.claude.json')); writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     const refused = run();
@@ -188,7 +188,7 @@ test('toml-block keeps its own block, every other line as it was; codex.sh and v
         const r = spawnSync('sh', [join(LAUNCH, launcher), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH, PARLEY_DIR: join(dir, 'nochat') }, encoding: 'utf8' });
         assert.equal(r.status, 0, r.stderr);
         const text = readFileSync(join(dir, file), 'utf8');
-        assert.ok(text.includes(`"${join(LAUNCH, 'mcp-relay.mjs')}", "tether-mcp"`), `${launcher}: Tether through the relay\n${text}`);
+        assert.ok(text.includes(`command = "sh"\nargs = ["${join(LAUNCH, 'mcp-sock.sh')}", "tether-mcp"`), `${launcher}: Tether through the shared host\n${text}`);
         assert.doesNotMatch(text, /parley-mcp/, `${launcher}: no chat, no Parley`);
     }
     assert.match(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), /\[projects\."\/work"\]\ntrust_level = "trusted"/);

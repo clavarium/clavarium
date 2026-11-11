@@ -5,7 +5,7 @@
 mode="$1"; shift
 case "$mode" in full|ask) ;; *) echo "launch: the first argument is full or ask" >&2; exit 64 ;; esac
 [ $# -gt 0 ] || { echo "launch: no command to run" >&2; exit 64; }
-here="$(dirname "$0")"; relay="$here/mcp-relay.mjs"
+here="$(dirname "$0")"; relay="$here/mcp-sock.sh"
 chat="${PARLEY_DIR:-/work/.parley}"; docket="/work/.docket"; tether="/work/.tether"
 # ITS SETTINGS (~/.codex/config.toml), in a block of their own, the rest kept: its work folder trusted (no
 # question at its first start), and its tools (MCP) each through the relay -- a tool updated on the
@@ -14,15 +14,15 @@ block='[projects."/work"]
 trust_level = "trusted"'
 if [ -f "$chat/server.mjs" ] && command -v parley-mcp >/dev/null 2>&1; then block="$block
 [mcp_servers.parley]
-command = \"node\"
+command = \"sh\"
 args = [\"$relay\", \"parley-mcp\", \"--dir\", \"$chat\"]"; fi
 if [ -f "$chat/server.mjs" ] && command -v docket-mcp >/dev/null 2>&1; then block="$block
 [mcp_servers.docket]
-command = \"node\"
+command = \"sh\"
 args = [\"$relay\", \"docket-mcp\", \"--dir\", \"$docket\"]"; fi
 if command -v tether-mcp >/dev/null 2>&1; then block="$block
 [mcp_servers.tether]
-command = \"node\"
+command = \"sh\"
 args = [\"$relay\", \"tether-mcp\", \"--dir\", \"$tether\"]"; fi
 node "$here/toml-block.mjs" .codex/config.toml tools "$block" \
     || echo "launch: Codex may ask its first questions, and has not its tools (MCP)" >&2

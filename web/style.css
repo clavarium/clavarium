@@ -1258,6 +1258,28 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as-form { display: flex; flex-direction: column; gap: 8px; }
 .as-form h3 { margin: 0; font-size: 1.125rem; }
 .as-form form, #connexion-classic:not([hidden]) { display: flex; flex-direction: column; gap: 6px; }
+/* Add an MCP server: the service's block pasted, what was read from it ticked. */
+.mcp-drop { position: relative; border: 1.5px dashed var(--line); border-radius: 10px; background: var(--bar); transition: border-color .2s; }
+.mcp-drop:focus-within { border-color: var(--brass); }
+.mcp-drop.ok { border-style: solid; border-color: var(--ok); }
+.mcp-drop.bad { border-style: solid; border-color: var(--danger); }
+/* Read: the block (its key in clear) blurred until touched again (no change of size: nothing moves under the pointer). */
+#mcp-box .mcp-drop.ok textarea:not(:focus) { color: transparent; text-shadow: 0 0 7px var(--ink2); }
+#mcp-box .mcp-drop textarea { display: block; width: 100%; min-height: 84px; box-sizing: border-box; border: 0; background: transparent; color: var(--ink); font: .8125rem/1.45 var(--mono, ui-monospace, monospace); padding: 12px; resize: vertical; outline: none; }
+.mcp-drop-ph { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; padding: 10px; color: var(--ink2); font-size: .8125rem; pointer-events: none; }
+.mcp-drop-ph b { color: var(--ink); font-size: .9375rem; }
+.mcp-drop.filled .mcp-drop-ph { display: none; }
+.mcp-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcp-pick button { border-radius: 999px; padding: 4px 12px; }
+.mcp-pick button[aria-pressed="true"] { border-color: var(--brass); color: var(--brass-ink, var(--brass)); }
+.mcp-found { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mcp-found li { display: flex; align-items: center; gap: 10px; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; font-size: .875rem; }
+.mcp-found-k { flex: none; width: 5.5em; color: var(--ink2); font-size: .8125rem; }
+.mcp-found-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-found-t { color: var(--ok); font-weight: 700; }
+.mcp-found-miss .mcp-found-t { visibility: hidden; }
+.mcp-found-miss .mcp-found-v { color: var(--ink2); }
+#mcp-hand[open] { display: flex; flex-direction: column; gap: 6px; }
 #gitview-remote-box > summary { display: none; }
 #gitview-remote { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .as-none { margin: auto; text-align: center; }
