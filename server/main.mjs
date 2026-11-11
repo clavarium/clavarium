@@ -310,8 +310,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const instance = new Instance({ file: new JsonFile(`${dataDir}/instance.json`, {}), origin: publicOrigin, given: appName });
     let repairTerminal = async () => { throw new Error('not ready'); };
     const asHost = runner(host);
-    const vms = new Vms(asHost, host);
-    const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
+    /* A conversation in a shared machine (#221) says which: the machine its VM operations reach. */
+    const conversationStore = new Store(`${dataDir}/conversations.json`);
+    const vms = new Vms(asHost, host, { machineOf: (name) => { const m = conversationStore.get(name)?.machine; return typeof m === 'string' && m ? m : undefined; } });
+    const all = conversations ?? new Conversations({ store: conversationStore, layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
     /* Who may do what with what: ONE table, shared by everything below. */
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
     /* Folder-style boxes the owner drops assets into, to tidy the views and hand a whole box at once (groups.mjs). */

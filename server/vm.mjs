@@ -84,10 +84,11 @@ export class VmUnknown extends Error {
 export class Vms {
     /* `run(argv, options)` reaches the host program; `prefix` is the same
        route as an argument vector, for the one caller that needs a terminal. */
-    #ask; #snapshot = null; #asking = null; #now; #freshMs;
+    #ask; #snapshot = null; #asking = null; #now; #freshMs; #machineOf;
     /* `freshMs`: how long one answer serves every caller (0: only those asking meanwhile). */
-    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS } = {}) {
-        this.#ask = run; this.prefix = prefix; this.#now = now; this.#freshMs = freshMs;
+    /* `machineOf(conversation)`: the shared machine it lives in (#221), or nothing -- its own, `clv-<conversation>`. */
+    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined } = {}) {
+        this.#ask = run; this.prefix = prefix; this.#now = now; this.#freshMs = freshMs; this.#machineOf = machineOf;
         /* What changes a machine makes the states asked again (not taken from before it). */
         this.run = async (argv, options) => {
             const changes = argv[0] === 'vm' && CHANGES.has(argv[1]);
@@ -115,25 +116,38 @@ export class Vms {
         return this.#asking;
     }
 
+    /* ITS MACHINE (#221): a conversation's own (`clv-<name>`, as always), or the shared one it lives in. */
+    vmOf(conversation) {
+        const shared = this.#machineOf(conversation);
+        if (shared === undefined) return vmName(conversation);
+        vmName(conversation);   /* its own name checked all the same */
+        return vmName(shared);
+    }
+    /* In a shared machine, everything run for a conversation goes through its door (clavarium-enter, as root):
+       its own /work, its own home and user, its limits -- each tool sees what it sees in a machine of its own. */
+    #door(conversation, argv) {
+        return this.#machineOf(conversation) === undefined ? argv : ['sudo', '-n', 'clavarium-enter', conversation, '--', ...argv];
+    }
+
     launch(conversation, memoryMb, diskGb, cpus) {
         /* The disk and cores go with the memory only when they are the chosen size, not the defaults. */
         const size = diskGb && cpus ? [String(diskGb), String(cpus)] : [];
-        return this.run(['vm', 'launch', vmName(conversation), String(memoryMb), ...size], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
+        return this.run(['vm', 'launch', this.vmOf(conversation), String(memoryMb), ...size], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
     }
 
     /* The machine of a conversation as a COPY of the ready-made one (see
        shelf.mjs), with its own memory. Left stopped: started by the caller. */
     clone(conversation, shelf, memoryMb) {
-        return this.run(['vm', 'clone', shelf, vmName(conversation), String(memoryMb)], { timeoutMs: CLONE_MS });
+        return this.run(['vm', 'clone', shelf, this.vmOf(conversation), String(memoryMb)], { timeoutMs: CLONE_MS });
     }
 
     exec(conversation, argv, options) {
-        return this.run(['vm', 'exec', vmName(conversation), '--', ...argv], options);
+        return this.run(['vm', 'exec', this.vmOf(conversation), '--', ...this.#door(conversation, argv)], options);
     }
 
     /* What a terminal attaches to: the same `exec`, as an argument vector. */
     execArgv(conversation, argv) {
-        return [...this.prefix, 'vm', 'exec', vmName(conversation), '--', ...argv];
+        return [...this.prefix, 'vm', 'exec', this.vmOf(conversation), '--', ...this.#door(conversation, argv)];
     }
 
     /* Every machine's state, by VM name (a Map); throws VmUnknown when the VM manager did not answer. */
@@ -150,7 +164,7 @@ export class Vms {
        frozen inside had "multipass info" fail, read as "no longer exists"). */
     /* `fresh`: asked now (an owner opening it, building it again), not taken from a few seconds ago. */
     async state(conversation, { fresh = false } = {}) {
-        const name = vmName(conversation);
+        const name = this.vmOf(conversation);
         const snap = await this.#states(fresh);
         if (!snap.states) throw new VmUnknown(snap.why);
         return snap.states.get(name);
@@ -162,57 +176,57 @@ export class Vms {
        is on the host is decided by the host program, not here. `uid`/`gid`:
        files written in the VM belong, on the host, to this account. */
     mount(conversation, kind, name, uid, gid) {
-        return this.run(['vm', 'mount', vmName(conversation), kind, name, String(uid), String(gid)], { timeoutMs: 600_000 });
+        return this.run(['vm', 'mount', this.vmOf(conversation), kind, name, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
 
     /* The work folder of a conversation: kept on the host, shown in its
        machine at /work. Made (or found again) before it is mounted. */
-    workMake(conversation) { vmName(conversation); return this.run(['work', 'make', conversation]); }
+    workMake(conversation) { this.vmOf(conversation); return this.run(['work', 'make', conversation]); }
     workMount(conversation, uid, gid) {
-        return this.run(['vm', 'mount', vmName(conversation), 'work', conversation, String(uid), String(gid)], { timeoutMs: 600_000 });
+        return this.run(['vm', 'mount', this.vmOf(conversation), 'work', conversation, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
-    workUnmount(conversation) { return this.run(['vm', 'unwork', vmName(conversation)], { timeoutMs: 120_000 }); }
+    workUnmount(conversation) { return this.run(['vm', 'unwork', this.vmOf(conversation)], { timeoutMs: 120_000 }); }
     /* Megabytes left: { disk, host }, or undefined if it cannot be told. */
     async workRoom(conversation) {
-        vmName(conversation);
+        this.vmOf(conversation);
         const r = await this.run(['work', 'room', conversation]);
         const m = /^disk (\d+) host (\d+)$/m.exec(r.stdout ?? '');
         return r.code === 0 && m ? { disk: Number(m[1]), host: Number(m[2]) } : undefined;
     }
-    workAside(conversation) { vmName(conversation); return this.run(['work', 'aside', conversation]); }
+    workAside(conversation) { this.vmOf(conversation); return this.run(['work', 'aside', conversation]); }
     /* Deleted for good, or reset, by its owner: its work disk erased, not put aside. */
-    workErase(conversation) { vmName(conversation); return this.run(['work', 'erase', conversation]); }
+    workErase(conversation) { this.vmOf(conversation); return this.run(['work', 'erase', conversation]); }
 
     /* The tools folder (see toolbox.mjs), shown read-only at /tools. */
     mountTools(conversation, uid, gid) {
-        return this.run(['vm', 'mount', vmName(conversation), 'tools', 'tools', String(uid), String(gid)], { timeoutMs: 600_000 });
+        return this.run(['vm', 'mount', this.vmOf(conversation), 'tools', 'tools', String(uid), String(gid)], { timeoutMs: 600_000 });
     }
-    unmountTools(conversation) { return this.run(['vm', 'untools', vmName(conversation)], { timeoutMs: 120_000 }); }
+    unmountTools(conversation) { return this.run(['vm', 'untools', this.vmOf(conversation)], { timeoutMs: 120_000 }); }
 
     umount(conversation, name) {
-        return this.run(['vm', 'umount', vmName(conversation), name], { timeoutMs: 120_000 });
+        return this.run(['vm', 'umount', this.vmOf(conversation), name], { timeoutMs: 120_000 });
     }
 
     /* `signal`: a start given up (Force stop asked meanwhile). */
-    start(conversation, { signal } = {}) { return this.run(['vm', 'start', vmName(conversation)], { timeoutMs: 300_000, ...(signal ? { signal } : {}) }); }
-    stop(conversation, timeoutMs = 300_000) { return this.run(['vm', 'stop', vmName(conversation)], { timeoutMs }); }
+    start(conversation, { signal } = {}) { return this.run(['vm', 'start', this.vmOf(conversation)], { timeoutMs: 300_000, ...(signal ? { signal } : {}) }); }
+    stop(conversation, timeoutMs = 300_000) { return this.run(['vm', 'stop', this.vmOf(conversation)], { timeoutMs }); }
     /* Stopped without waiting for the system inside: after a clean stop hung. */
-    kill(conversation) { return this.run(['vm', 'kill', vmName(conversation)], { timeoutMs: 300_000 }); }
+    kill(conversation) { return this.run(['vm', 'kill', this.vmOf(conversation)], { timeoutMs: 300_000 }); }
     /* STOPPED FOR SURE, step by step (the host program's `vm halt`): a polite stop, a stop by force,
        then its own qemu ended (SIGTERM, SIGKILL), then checked. `from`/`until`: the first and last
        step (polite|force|term|kill; until force|kill). Each `step ...` line is told to `onLine`. */
     halt(conversation, { from = 'polite', until = 'kill', onLine, signal } = {}) {
-        return this.run(['vm', 'halt', vmName(conversation), from, until], { timeoutMs: HALT_MS, onLine, signal });
+        return this.run(['vm', 'halt', this.vmOf(conversation), from, until], { timeoutMs: HALT_MS, onLine, signal });
     }
     /* "Force stop", as a power cut: its qemu ended, nothing asked of the VM manager (`vm hardstop`). */
-    hardstop(conversation, { onLine, signal } = {}) { return this.run(['vm', 'hardstop', vmName(conversation)], { timeoutMs: HARDSTOP_MS, onLine, signal }); }
+    hardstop(conversation, { onLine, signal } = {}) { return this.run(['vm', 'hardstop', this.vmOf(conversation)], { timeoutMs: HARDSTOP_MS, onLine, signal }); }
     /* Memory in megabytes, disk in gigabytes: only on a stopped machine. */
-    setMemory(conversation, mb) { return this.run(['vm', 'set', vmName(conversation), 'memory', String(mb)], { timeoutMs: 120_000 }); }
-    setCpus(conversation, n) { return this.run(['vm', 'set', vmName(conversation), 'cpus', String(n)], { timeoutMs: 120_000 }); }
-    setDisk(conversation, gb) { return this.run(['vm', 'set', vmName(conversation), 'disk', String(gb)], { timeoutMs: 600_000 }); }
+    setMemory(conversation, mb) { return this.run(['vm', 'set', this.vmOf(conversation), 'memory', String(mb)], { timeoutMs: 120_000 }); }
+    setCpus(conversation, n) { return this.run(['vm', 'set', this.vmOf(conversation), 'cpus', String(n)], { timeoutMs: 120_000 }); }
+    setDisk(conversation, gb) { return this.run(['vm', 'set', this.vmOf(conversation), 'disk', String(gb)], { timeoutMs: 600_000 }); }
     /* What the machine really has: { memoryMb, diskGb }, each undefined when it cannot be told. */
     async size(conversation) {
-        const r = await this.run(['vm', 'size', vmName(conversation)], { timeoutMs: 60_000 });
+        const r = await this.run(['vm', 'size', this.vmOf(conversation)], { timeoutMs: 60_000 });
         if (r.code !== 0) return { memoryMb: undefined, diskGb: undefined };
         const line = (key) => new RegExp(`^${key} (\\S+)$`, 'm').exec(r.stdout ?? '')?.[1];
         const mb = megabytes(line('memory'));
@@ -221,9 +235,9 @@ export class Vms {
         return { memoryMb: mb === undefined ? undefined : Math.round(mb), diskGb: disk === undefined ? undefined : Math.round(disk / 1024), cpus };
     }
     /* Its steps (`step suspend ...`, then a wake and sleep again, then a clean stop) told to `onLine`. */
-    suspend(conversation, { signal, onLine } = {}) { return this.run(['vm', 'suspend', vmName(conversation)], { timeoutMs: 600_000, ...(signal ? { signal } : {}), ...(onLine ? { onLine } : {}) }); }
+    suspend(conversation, { signal, onLine } = {}) { return this.run(['vm', 'suspend', this.vmOf(conversation)], { timeoutMs: 600_000, ...(signal ? { signal } : {}), ...(onLine ? { onLine } : {}) }); }
     /* Free the RAM of a machine that is asleep but whose qemu still holds it (a
        suspend that did not end the process): wake+resleep, then a clean stop. */
-    reclaim(conversation) { return this.run(['vm', 'reclaim', vmName(conversation)], { timeoutMs: 300_000 }); }
-    remove(conversation) { return this.run(['vm', 'delete', vmName(conversation)], { timeoutMs: 300_000 }); }
+    reclaim(conversation) { return this.run(['vm', 'reclaim', this.vmOf(conversation)], { timeoutMs: 300_000 }); }
+    remove(conversation) { return this.run(['vm', 'delete', this.vmOf(conversation)], { timeoutMs: 300_000 }); }
 }
