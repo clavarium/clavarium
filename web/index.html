@@ -203,6 +203,8 @@
               <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>
               <div class="curves-row"></div>
             </div>
+            <!-- IN A SHARED MACHINE (#221): which, and who else lives in it -- its stop or restart stops them too. -->
+            <p id="machine-shared" class="hint machine-shared" hidden></p>
             <p id="machine-restarted" class="hint" role="status" hidden></p>
             <div id="resume-box" hidden>
             <div class="set-row"><div class="set-what"><b>When its tool starts</b><small id="resume-hint">After a wake or restart</small></div><div class="set-control"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div></div>
@@ -1432,7 +1434,16 @@
             </div>
             <small id="newconv-oc-raw" class="hint" hidden>Set it up yourself in its terminal.</small>
           </div>
-          <div class="nc-card">
+          <!-- WHERE IT LIVES (#221): a machine of its own, or a shared one (lighter, for assistants). -->
+          <div class="nc-card" id="newconv-where-card">
+            <span class="sub-head">Where it lives</span>
+            <div id="newconv-where" class="pick two" role="radiogroup" aria-label="Where it lives">
+              <button type="button" role="radio" data-where="own" aria-checked="true"><b>Its own machine</b><small>All to itself</small></button>
+              <button type="button" role="radio" data-where="shared" aria-checked="false"><b>A shared machine</b><small>Lighter. For assistants</small></button>
+            </div>
+            <div class="set-row" id="newconv-machine-row" hidden><div class="set-what"><label for="newconv-machine">Machine</label><small>An existing one, or a new name</small><span id="newconv-machine-error" class="err" role="alert" hidden></span></div><div class="set-control"><input id="newconv-machine" maxlength="32" list="machine-names" placeholder="assistants" spellcheck="false" autocapitalize="off" autocomplete="off"><datalist id="machine-names"></datalist></div></div>
+          </div>
+          <div class="nc-card" id="newconv-files-card">
             <span class="sub-head">Its files</span>
             <div id="newconv-work" class="pick two" role="radiogroup" aria-label="Its files">
               <button type="button" role="radio" data-work="kept" aria-checked="true"><b>Kept here</b><small>Seen in Files. Outlives the machine</small></button>

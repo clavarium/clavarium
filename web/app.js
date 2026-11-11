@@ -1987,7 +1987,7 @@
     let chosenTool = '';
     let newTools = [];
     const ID_SHAPE = /^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/;
-    const NEW_FIELDS = ['name', 'group', 'id', 'memory'];
+    const NEW_FIELDS = ['name', 'group', 'id', 'memory', 'machine'];
     function newError(field, text) {
         const at = field && NEW_FIELDS.includes(field) ? field : '';
         for (const f of NEW_FIELDS) {
@@ -2101,6 +2101,20 @@
         b.addEventListener('click', () => { for (const other of $('newconv-work').querySelectorAll('[data-work]')) other.setAttribute('aria-checked', String(other === b)); });
     }
     const newOnDisk = () => $('newconv-work').querySelector('[data-work="disk"]').getAttribute('aria-checked') === 'true';
+    /* WHERE IT LIVES (#221): its own machine, or a shared one -- an existing one offered, or a new name. In a shared
+       machine its files are always kept here: that choice is hidden. */
+    const newShared = () => $('newconv-where').querySelector('[data-where="shared"]').getAttribute('aria-checked') === 'true';
+    const paintWhere = () => {
+        const shared = newShared();
+        $('newconv-machine-row').hidden = !shared;
+        $('newconv-files-card').hidden = shared;
+        const names = [...new Set(conversations.map((c) => c.sharedMachine).filter(Boolean))].sort();
+        $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
+        if (shared && !$('newconv-machine').value && names.length) $('newconv-machine').value = names[0];
+    };
+    for (const b of $('newconv-where').querySelectorAll('[data-where]')) {
+        b.addEventListener('click', () => { for (const other of $('newconv-where').querySelectorAll('[data-where]')) other.setAttribute('aria-checked', String(other === b)); paintWhere(); });
+    }
     async function openNew({ push = true, group = null } = {}) {
         if (DEVICE) return;
         newError('', '');
@@ -2149,6 +2163,7 @@
         const group = $('newconv-group').value.trim();
         if (!title) { newError('name', 'Give a name.'); return; }
         if (id && !ID_SHAPE.test(id)) { newError('id', 'Lower-case letters, digits, hyphens'); return; }
+        if (newShared() && !ID_SHAPE.test($('newconv-machine').value.trim())) { newError('machine', 'A name: lower-case letters, digits, hyphens'); return; }
         const least = newTools.find((t) => t.id === chosenTool)?.memoryMb;
         const memoryMb = Number($('newconv-memory').value);
         const cpus = Number($('newconv-cpus').value); const diskGb = Number($('newconv-disk').value);
@@ -2156,9 +2171,9 @@
         creating = true; $('newconv-create').disabled = true;
         try {
             const opencode = await openCodeChoice();
-            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
+            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newShared() ? false : newOnDisk(), ...(newShared() ? { machine: $('newconv-machine').value.trim() } : {}), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
-            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
+            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-where').querySelector('[data-where="own"]').click(); $('newconv-machine').value = ''; $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
             await refresh();
             /* The new one is selected: the page gives way to it, with no step of it left behind. */
             select(made.name);
@@ -2574,6 +2589,15 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; focusTerminal(); });
         };
+        /* In a shared machine (#221): its name and the others in it, said once -- stopping it stops them too. */
+        const sharedIn = here?.sharedMachine;
+        $('machine-shared').hidden = DEVICE || !sharedIn;
+        if (sharedIn) {
+            const others = conversations.filter((c) => c.sharedMachine === sharedIn && c.name !== current).map((c) => c.title ?? c.name);
+            $('machine-shared').textContent = others.length
+                ? uiSaid('set-mshared-with', 'Shared machine « {m} », with {others}. Stopping it stops them too.', { m: sharedIn, others: others.join(', ') })
+                : uiSaid('set-mshared-alone', 'Shared machine « {m} », alone in it for now.', { m: sharedIn });
+        }
         /* Its tool's memory, exported as one file, or put back from one (#351): the person's own act, from here. */
         $('carry-box').hidden = DEVICE || !here;
         $('carry-export').href = `${API}/conversations/${encodeURIComponent(current)}/export`;
