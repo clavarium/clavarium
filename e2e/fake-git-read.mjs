@@ -9,7 +9,8 @@
  * account's rights. What the sandbox stops is tried for real, as root, in
  * the trial written at the end of blueprint/git-runner-core.md.
  *
- * FAKE_GIT_READ_CODE, when set, is the exit code to give instead (with no
+ * FAKE_GIT_READ_CODE, when set, is the exit code to give instead (FAKE_GIT_READ_SAY,
+ * when set too, the line it writes on stderr first) (with no
  * output): for the tests of what each code means.
  */
 import { spawn } from 'node:child_process';
@@ -18,7 +19,7 @@ import { dirname } from 'node:path';
 
 const READER = fileURLToPath(new URL('../deploy/git-read', import.meta.url));
 const [folder, name, ...how] = process.argv.slice(2);
-if (process.env.FAKE_GIT_READ_CODE) process.exit(Number(process.env.FAKE_GIT_READ_CODE));
+if (process.env.FAKE_GIT_READ_CODE) { if (process.env.FAKE_GIT_READ_SAY) process.stderr.write(`${process.env.FAKE_GIT_READ_SAY}\n`); process.exit(Number(process.env.FAKE_GIT_READ_CODE)); }
 const child = spawn('sh', [READER, name, ...how], {
     cwd: folder, stdio: ['ignore', 'inherit', 'inherit'],
     env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', XDG_CONFIG_HOME: '/nonexistent', LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',

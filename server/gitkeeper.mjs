@@ -420,7 +420,8 @@ export class GitKeeper {
         const message = failure.message ?? 'The repository could not be read.';
         const kind = failure.kind ?? 'error';
         const record = this.#record(name);
-        const count = (record.readFailures ?? 0) + 1;
+        /* A read refused because another one runs ("busy") is no failure of the repository: it counts for nothing. */
+        const count = kind === 'busy' ? (record.readFailures ?? 0) : (record.readFailures ?? 0) + 1;
         /* The same failure as the last read's: the same kind, and the same
            words unless the words carry a number that moves at every read. */
         const same = record.lastRead?.ok === false && record.lastRead.kind === kind && (VARYING.has(kind) || record.lastRead.what === message);
@@ -434,7 +435,8 @@ export class GitKeeper {
         else if (count === 2) this.#tell(`${name}: could not be read`, message);
         /* The agent is told where it can act; a git failure, or refs that may
            only have been changing during the read, only after two in a row. */
-        if (failure.ai && (!['git', 'refs'].includes(kind) || count >= 2)) this.#toAgent(name, failure.ai);
+        /* Two in a row OF THAT KIND: refs caught changing once, after a failure of another kind, are not "broken". */
+        if (failure.ai && (!['git', 'refs'].includes(kind) || (count >= 2 && record.lastRead?.ok === false && record.lastRead.kind === kind))) this.#toAgent(name, failure.ai);
     }
 
     #refreshOutcome(name, result) {
