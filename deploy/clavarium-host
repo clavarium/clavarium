@@ -1700,9 +1700,21 @@ OOMScoreAdjust=-900'
         # unreadable; 78 refused before anything ran; 79 the unit did not
         # start or its state is unknown; 80 time limit; 81 memory limit;
         # 82 killed by a signal.
-        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
+        #
+        # <name> --tips: the list of branches alone, no pack (deploy/git-read).
+        # <name> --have <id>...: the pack leaves out what those commits reach
+        # (at most 256, each a full object id): the server has it already.
+        [ $# -ge 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         case "$1" in *-origin) refuse "the reference of a repository is never read this way: $1" ;; esac
-        name="$1"
+        name="$1"; shift
+        how=()
+        if [ $# -eq 1 ] && [ "$1" = "--tips" ]; then how=(--tips)
+        elif [ $# -ge 2 ] && [ $# -le 257 ] && [ "$1" = "--have" ]; then
+            shift
+            for id in "$@"; do [[ "$id" =~ ^[0-9a-f]{40}$ ]] || refuse "not an object id: $id"; done
+            how=(--have "$@")
+        elif [ $# -ne 0 ]; then usage
+        fi
         rand="RANDOM16"
         [ "$SAY" = "yes" ] || rand="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
         unit="clvread-${name}_${rand}"
@@ -1722,7 +1734,7 @@ OOMScoreAdjust=-900'
             -E PATH=/usr/bin -E HOME=/nonexistent -E XDG_CONFIG_HOME=/nonexistent -E LC_ALL=C -E GIT_CONFIG_NOSYSTEM=1
             -E GIT_CONFIG_GLOBAL=/dev/null -E GIT_CEILING_DIRECTORIES=/resources -E GIT_NO_LAZY_FETCH=1
             -E GIT_TERMINAL_PROMPT=0 -E GIT_OPTIONAL_LOCKS=0 -E GIT_NO_REPLACE_OBJECTS=1
-            "$GIT_READ" "$name")
+            "$GIT_READ" "$name" "${how[@]}")
         if [ "$SAY" = "yes" ]; then printf '%s\n' "${vector[@]}"; exit 0; fi
         folder_of "$name"
         [ -d "$RUNNER_ROOT" ] && [ ! -L "$RUNNER_ROOT" ] && [ -x "$GIT_READ" ] || refuse "the git reader is not installed (run install.sh again)"

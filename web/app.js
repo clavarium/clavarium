@@ -4527,7 +4527,7 @@
             /* By repositories: how many there are is known from the start, how many branches each has is not. */
             meter.hidden = !reading; meterFill.style.width = `${names.length ? Math.round((reposDone / names.length) * 100) : 100}%`;
             progress.toggleAttribute('data-busy', reading);
-            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Checking with the remotes: ${reposDone} of ${names.length}`; }
+            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Checking: ${reposDone} of ${names.length}`; }
             else {
                 const failed = rows.filter((r) => unread(r.out)).length;
                 const notLooked = [...notLookedBy.values()].reduce((n, x) => n + x, 0);
@@ -4575,7 +4575,8 @@
                 row.classList.toggle('off', !ahead);
                 const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || r.known || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
                 tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paint(); if (!review.hidden) paintReview(); });
-                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', `${out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''}${r.known ? ` · ${asOfText(r.asOf)}` : ''}`));
+                /* The remote is not asked when the page opens (the server's clock keeps it): how old what is known of it is, said. */
+                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', `${out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''}${r.known ? ` · ${asOfText(r.asOf)}` : out?.remote && r.fetchedAt ? ` · remote ${asOfText(r.fetchedAt)}` : ''}`));
                 const way = el('div', 'ts-way');
                 /* Its own name even when it could not be read: which branch is missing is said. */
                 const named = out?.branch ?? (unread(out) ? r.branch : '');
@@ -4785,7 +4786,7 @@
             paint();
             said.scrollIntoView({ block: 'nearest' });
         });
-        /* ONE REPOSITORY READ AFRESH (one fetch, one read, its branches that moved last reviewed): its rows replaced
+        /* ONE REPOSITORY READ AFRESH (its branches listed; only those that moved read and reviewed again, no fetch): its rows replaced
            where they were, each keeping what was said or ticked of the same commit. A branch with nothing to send is
            listed only when it is the one that moved last (or what became of its sending is said); one that could not be
            read always, with why. */
@@ -4797,7 +4798,7 @@
             if (Array.isArray(all.rows) && all.rows.length) {
                 fresh = all.rows.filter((out, i) => i === 0 || out.state === 'ahead' || unread(out) || before.some((x) => x.branch === out.branch && x.sent)).map((out) => {
                     const was = before.find((x) => x.branch === out.branch);
-                    const r = { name, out: null, keep, branch: out.branch, target: '', picked: false, check: null, sent: was?.sent ?? null, movedAt: (all.agentBranches ?? []).find((b) => b.name === out.branch)?.movedAt ?? null };
+                    const r = { name, out: null, keep, branch: out.branch, target: '', picked: false, check: null, sent: was?.sent ?? null, movedAt: (all.agentBranches ?? []).find((b) => b.name === out.branch)?.movedAt ?? null, fetchedAt: all.fetchedAt ?? null };
                     apply(r, out, keep);
                     /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
                     r.picked = was && !was.known && was.out?.head === out.head ? was.picked && out.state === 'ahead' : kindOfRow(out) === 'update';
@@ -4829,7 +4830,7 @@
             }
         }
         paint();
-        /* THEN, IN THE BACKGROUND: each repository brought up to date with its remote and read, a few at a time; its rows replaced as it comes. */
+        /* THEN, IN THE BACKGROUND: each repository's branches listed, those that moved read again, a few at a time; its rows replaced as it comes. */
         await inTurns(names, TS_PARALLEL, async (name) => {
             try { await readRepo(name); } catch { /* said by its rows */ }
             reposDone++; paint();

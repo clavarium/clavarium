@@ -24,7 +24,7 @@ import { git, standInRead, ENV } from './git-stand-in.mjs';
    `readCode`: an exit code every read of the host program gives. `wrap`: around the builder's git.
    `reserve`: free room the runner keeps (huge: every read refused for room). `heard`: what telling the agent resolves to. */
 /* `attach`: alpha writes in the repository from the start (its automatic sending can be set). `runs(conversation, name)`: does its machine run. */
-async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = async () => 'alpha', runs, readCode, wrap, reserve = 0, heard, attach = true, moved = () => [], gate } = {}) {
+async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = async () => 'alpha', runs, readCode, readEnv, wrap, reserve = 0, heard, attach = true, moved = () => [], gate } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-keep-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const remote = join(dir, 'remote.git');
@@ -50,7 +50,7 @@ async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = a
     let clock = new Date('2026-03-02T10:00:00Z');
     const now = () => clock;
     const reads = [];
-    const runner = new GitRunner({ dataDir: join(dir, 'data'), reserveBytes: reserve, spawnRead: standInRead((n) => resources.folder(n), { reads, code: readCode }), ...(wrap ? { git: (argv, options) => wrap(argv, options, runGit) } : {}) });
+    const runner = new GitRunner({ dataDir: join(dir, 'data'), reserveBytes: reserve, spawnRead: standInRead((n) => resources.folder(n), { reads, code: readCode, ...(readEnv ? { env: readEnv } : {}) }), ...(wrap ? { git: (argv, options) => wrap(argv, options, runGit) } : {}) });
     const review = new GitReview({ store: new Store(join(dir, 'git.json')), vault: new Vault(join(dir, 'vault.key')), resources, dataDir: join(dir, 'data'), localRemotes: true, runner, now });
     review.setRemote('site', { url: remote });
     git(work, 'fetch', '--quiet', remote, '+refs/heads/*:refs/remotes/origin/*');
@@ -534,6 +534,26 @@ test('every failure is said: in the log once while it lasts, the phone after two
     assert.equal(rw.keeper.about('site').origin.ok, false);
 });
 
+test('refs caught changing: the agent told only after two such reads in a row, never after one following another failure', async (t) => {
+    const env = { FAKE_GIT_READ_SAY: 'BROKEN OR CHANGING REFS' };
+    const b = await bench(t, { readCode: 66, readEnv: env });
+    b.auto({ branches: 'main' });
+    await b.keeper.tick();
+    assert.match(b.log()[0].what, /a ref under refs\/heads is one git skips/);
+    assert.deepEqual(b.agent, [], 'once: maybe only changing during the read');
+    b.later(11); await b.keeper.tick();
+    assert.equal(b.agent.length, 1, 'twice in a row: told'); assert.match(b.agent[0], /not a branch git can read/);
+    /* Another failure first, then refs once: not told. */
+    const other = { FAKE_GIT_READ_SAY: 'something else' };
+    const c = await bench(t, { readCode: 66, readEnv: other });
+    c.auto({ branches: 'main' });
+    await c.keeper.tick();
+    other.FAKE_GIT_READ_SAY = 'BROKEN OR CHANGING REFS';
+    c.later(11); await c.keeper.tick();
+    assert.ok(c.log().some((l) => /a ref under refs\/heads is one git skips/.test(l.what)), 'the refs failure logged');
+    assert.deepEqual(c.agent, [], 'refs once, after a failure of another kind: not told');
+});
+
 test('the reference is never what is read, and the workspaces are gone after every read', async (t) => {
     const b = await bench(t);
     b.auto({ branches: 'main', quietSeconds: 0 });
@@ -543,7 +563,7 @@ test('the reference is never what is read, and the workspaces are gone after eve
     await b.review.readTips('site');
     assert.deepEqual(Object.keys(b.review.tips('site')), ['main']);
     await settle(b);
-    assert.deepEqual(b.reads.every((n) => n === 'site'), true, 'only the agent\'s folder is read, never site-origin');
+    assert.deepEqual(b.reads.every((n) => n.split(' ')[0] === 'site'), true, 'only the agent\'s folder is read, never site-origin');
     assert.deepEqual(readdirSync(b.runner.workRoot), []);
 });
 

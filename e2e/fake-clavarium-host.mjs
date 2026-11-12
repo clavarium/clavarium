@@ -263,13 +263,15 @@ if (area === 'shelf') {
 /* THE GIT READER: the real reader script, run in the folder, with the host's
    exit codes (see fake-git-read.mjs). A reference is refused, as for real. */
 if (area === 'git') {
-    const [name] = argv;
-    if (!/^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/.test(name ?? '') || argv.length !== 1) { console.error('REFUSED: not a folder name'); process.exit(78); }
+    const [name, ...how] = argv;
+    /* As the host program takes them: nothing, --tips, or --have and full object ids (read only). */
+    const ways = how.length === 0 || (verb === 'read' && ((how.length === 1 && how[0] === '--tips') || (how[0] === '--have' && how.length >= 2 && how.length <= 257 && how.slice(1).every((id) => /^[0-9a-f]{40}$/.test(id)))));
+    if (!/^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/.test(name ?? '') || !ways) { console.error('REFUSED: not a folder name'); process.exit(78); }
     if (verb === 'stop') process.exit(0);
     if (verb !== 'read') { console.error(`REFUSED: unknown verb: git ${verb}`); process.exit(78); }
     if (name.endsWith('-origin')) { console.error('REFUSED: the reference of a repository is never read this way'); process.exit(78); }
     if (!existsSync(folderOf(name)) || lstatSync(folderOf(name)).isSymbolicLink()) { console.error(`REFUSED: no such folder: ${name}`); process.exit(78); }
-    const child = spawn(process.execPath, [join(dirname(new URL(import.meta.url).pathname), 'fake-git-read.mjs'), folderOf(name), name], { stdio: ['ignore', 'inherit', 'inherit'] });
+    const child = spawn(process.execPath, [join(dirname(new URL(import.meta.url).pathname), 'fake-git-read.mjs'), folderOf(name), name, ...how], { stdio: ['ignore', 'inherit', 'inherit'] });
     child.on('close', (code) => process.exit(code ?? 82));
 /* The views never break here: nothing to take off. */
 } else if (area === 'mounts' && verb === 'repair') { process.exit(0);
