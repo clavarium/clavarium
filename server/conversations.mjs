@@ -21,6 +21,8 @@ export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
 /* The door of a conversation in a shared machine (#221), put in the machine by the server. */
 export const DOOR = new URL('../config/machine/clavarium-enter', import.meta.url);
+/* The most programs one conversation may run in a shared machine. */
+export const SHARED_PROCS = 1024;
 /* Moving a work folder: what must stay free after it, and how long a copy may take. */
 export const ROOM_MB = 1024;
 /* A file shown straight from a machine's disk: where, and how large at most. */
@@ -444,6 +446,11 @@ export class Conversations {
         const [uid, gid] = String(me.stdout ?? '').trim().split('\n').map(Number);
         if (me.code !== 0 || !Number.isInteger(uid) || !Number.isInteger(gid)) return fail('Its own user could not be made', me);
         this.#store.patch(name, { machineUser: { uid, gid } });
+        /* Its limits, read by its door at each entry: the memory chosen for it, and a bound on its programs -- one
+           conversation that runs away never takes the machine from the others. */
+        const limits = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-D', '-m', '0644', '-o', 'root', '-g', 'root', '/dev/stdin', `/etc/clavarium/limits/${name}`],
+            { input: `mem=${Number(c.memoryMb) || tool.memoryMb}\nprocs=${SHARED_PROCS}\n`, timeoutMs: STEP_MS });
+        if (limits.code !== 0) return fail('Its limits could not be set in the shared machine', limits);
         const kept = await this.#vms.workMake(name);
         const shown = kept.code === 0 ? await this.#vms.workMount(name, this.#uid, this.#gid) : kept;
         if (shown.code !== 0) return fail('The work folder could not be shown in the shared machine', shown);
@@ -1695,6 +1702,7 @@ export class Conversations {
             await this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: 30_000 }).catch(() => {});
             await this.#vms.workUnmount(name).catch(() => {});
             if (erase) await this.#vms.execMachine(name, ['sudo', '-n', 'userdel', '--remove', `c-${name}`], { timeoutMs: 60_000 }).catch(() => {});
+            if (erase) await this.#vms.execMachine(name, ['sudo', '-n', 'rm', '-f', `/etc/clavarium/limits/${name}`], { timeoutMs: 30_000 }).catch(() => {});
         }
         await this.#vms.unshare(name).catch(() => {});
         const last = others.length === 0;

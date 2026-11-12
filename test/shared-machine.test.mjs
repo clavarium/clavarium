@@ -38,6 +38,7 @@ function bench(t) {
             const door = cmd[2] === 'clavarium-enter' ? cmd[3] : null;
             if (door && cmd.includes('id -u; id -g')) { if (!users.has(door)) users.set(door, ++uid); return { code: 0, stdout: `${users.get(door)}\n${users.get(door)}\n`, stderr: '' }; }
             if (cmd.includes('/usr/local/sbin/clavarium-enter')) assert.match(options.input ?? '', /THE DOOR OF A CONVERSATION/);
+            if (cmd.some((x) => String(x).startsWith('/etc/clavarium/limits/'))) assert.equal(options.input, 'mem=1024\nprocs=1024\n');
         }
         return { code: 0, stdout: '', stderr: '' };
     };
@@ -56,6 +57,7 @@ test('two conversations in one shared machine: made once, a place each, its tool
     assert.match(first, /^vm launch clv-assist 1024$/m, 'the machine made, by its own name');
     assert.match(first, /exec clv-assist -- sudo -n install -m 0755 -o root -g root \/dev\/stdin \/usr\/local\/sbin\/clavarium-enter/, 'its door put in');
     assert.match(first, /^vm share clv-assist mail$/m);
+    assert.match(first, /exec clv-assist -- sudo -n install -D -m 0644 -o root -g root \/dev\/stdin \/etc\/clavarium\/limits\/mail/, 'its limits set');
     assert.match(first, /^vm smount clv-assist mail work mail 1000 1000 1001 1001$/m, 'its work, for its own user');
     assert.match(first, /exec clv-assist -- sudo -n npm install -g tool/, 'the tool installed for the machine, as root');
     assert.match(first, /exec clv-assist -- sudo -n clavarium-enter mail -- tool --init/, 'its settings as its own user');
