@@ -54,7 +54,7 @@ test('two conversations in one shared machine: made once, a place each, its tool
     b.all.create({ name: 'mail', tool: 'tool', machine: 'assist' });
     await b.all.built;
     const first = b.calls.join('\n');
-    assert.match(first, /^vm launch clv-assist 1024$/m, 'the machine made, by its own name');
+    assert.match(first, /^vm launch clv-assist 4096$/m, 'the machine made, by its own name, 4 GB unless said');
     assert.match(first, /exec clv-assist -- sudo -n install -m 0755 -o root -g root \/dev\/stdin \/usr\/local\/sbin\/clavarium-enter/, 'its door put in');
     assert.match(first, /^vm share clv-assist mail$/m);
     assert.match(first, /exec clv-assist -- sudo -n install -D -m 0644 -o root -g root \/dev\/stdin \/etc\/clavarium\/limits\/mail/, 'its limits set');
@@ -64,6 +64,7 @@ test('two conversations in one shared machine: made once, a place each, its tool
     assert.equal(b.store.get('mail').phase, 'ready');
     assert.deepEqual(b.store.get('mail').machineUser, { uid: 1001, gid: 1001 });
     assert.equal(b.store.get('mail').work, 'kept', 'its work always kept here');
+    assert.equal(b.store.get('mail').machineMb, 4096);
 
     b.calls.length = 0;
     await b.all.admit({ name: 'diary', tool: 'tool', machine: 'assist' });
@@ -76,6 +77,24 @@ test('two conversations in one shared machine: made once, a place each, its tool
     assert.equal(b.store.get('diary').phase, 'ready');
     assert.equal(b.vms.size, 1, 'one machine for both');
     assert.throws(() => b.all.create({ name: 'x', tool: 'tool', machine: 'Bad Name' }), Refusal);
+    assert.equal(b.store.get('diary').machineMb, 4096, 'the size of its machine, the same for all');
+});
+
+test('a new shared machine: its size chosen when it is made; a conversation never asks more than it has', async (t) => {
+    const b = bench(t);
+    assert.throws(() => b.all.create({ name: 'mail', tool: 'tool', machine: 'small', machineMb: 512 }), /1024 to 16384/);
+    assert.throws(() => b.all.create({ name: 'mail', tool: 'tool', machine: 'small', machineMb: 1024, memoryMb: 2048 }), /has 1024 MB/);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'small', machineMb: 2048 }); await b.all.built;
+    assert.match(b.calls.join('\n'), /^vm launch clv-small 2048$/m, 'made with the size chosen');
+    /* Its size is its own: a second one does not change it, and cannot ask more. */
+    assert.throws(() => b.all.create({ name: 'diary', tool: 'tool', machine: 'small', memoryMb: 3072 }), /has 2048 MB/);
+    b.all.create({ name: 'diary', tool: 'tool', machine: 'small', machineMb: 8192 }); await b.all.built;
+    assert.equal(b.store.get('diary').machineMb, 2048);
+    /* The room asked: a new shared machine's size; none for one that is there. */
+    const asked = []; b.all.room = async (x) => { asked.push(x.memoryMb); };
+    await b.all.admit({ name: 'other', tool: 'tool', machine: 'big', machineMb: 6144 });
+    await b.all.admit({ name: 'third', tool: 'tool', machine: 'small' });
+    assert.deepEqual(asked, [6144]);
 });
 
 test('leaving a shared machine: its programs ended, its work taken out, the host told; the machine goes with the last', async (t) => {

@@ -2111,7 +2111,10 @@
         const names = [...new Set(conversations.map((c) => c.sharedMachine).filter(Boolean))].sort();
         $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
         if (shared && !$('newconv-machine').value && names.length) $('newconv-machine').value = names[0];
+        /* A new shared machine: its memory chosen here (12-11); one that is there keeps its own. */
+        $('newconv-machine-mb-row').hidden = !shared || names.includes($('newconv-machine').value.trim());
     };
+    $('newconv-machine').addEventListener('input', () => paintWhere());
     for (const b of $('newconv-where').querySelectorAll('[data-where]')) {
         b.addEventListener('click', () => { for (const other of $('newconv-where').querySelectorAll('[data-where]')) other.setAttribute('aria-checked', String(other === b)); paintWhere(); });
     }
@@ -2171,7 +2174,7 @@
         creating = true; $('newconv-create').disabled = true;
         try {
             const opencode = await openCodeChoice();
-            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newShared() ? false : newOnDisk(), ...(newShared() ? { machine: $('newconv-machine').value.trim() } : {}), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
+            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newShared() ? false : newOnDisk(), ...(newShared() ? { machine: $('newconv-machine').value.trim(), ...($('newconv-machine-mb-row').hidden ? {} : { machineMb: Number($('newconv-machine-mb').value) }) } : {}), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
             $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-where').querySelector('[data-where="own"]').click(); $('newconv-machine').value = ''; $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
             await refresh();

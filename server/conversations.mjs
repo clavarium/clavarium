@@ -23,6 +23,9 @@ const STEP_MS = 15 * 60_000;
 export const DOOR = new URL('../config/machine/clavarium-enter', import.meta.url);
 /* The most programs one conversation may run in a shared machine. */
 export const SHARED_PROCS = 1024;
+/* A NEW SHARED MACHINE's memory (12-11, operator): chosen when it is made, 4 GB unless said; the conversations
+   that live in it share it, each within its own limit. */
+export const SHARED_MB = 4096;
 /* Moving a work folder: what must stay free after it, and how long a copy may take. */
 export const ROOM_MB = 1024;
 /* A file shown straight from a machine's disk: where, and how large at most. */
@@ -273,14 +276,15 @@ export class Conversations {
 
     /* Whether a new machine may be made for this request: what `create`
        checks, and the server's room (capacity.mjs). Asked before `create`. */
-    async admit({ name, title, tool, memoryMb, machine } = {}) {
+    async admit({ name, title, tool, memoryMb, machine, machineMb } = {}) {
         if (!name && typeof title === 'string' && !titleProblem(title)) ({ name } = this.#naming({ title }));
         /* Into a shared machine that is there already: no new machine, no room asked for it. */
-        if (typeof machine === 'string' && this.#store.all().some((x) => x.sharedMachine === machine && x.machineUser)) return;
+        if (typeof machine === 'string' && this.#machineMbOf(machine) !== undefined) return;
         const chosen = this.#tools.find((t) => t.id === tool);
         /* What `create` refuses anyway is said by `create`. */
         if (!chosen || !isConversationName(name) || this.#store.get(name)) return;
-        const memory = memoryMb ?? chosen.memoryMb;
+        /* A new shared machine: the room it takes is its own size, not the conversation's. */
+        const memory = typeof machine === 'string' ? (machineMb ?? SHARED_MB) : (memoryMb ?? chosen.memoryMb);
         if (!Number.isInteger(memory)) return;
         await this.room({ kind: 'create', memoryMb: memory });
     }
@@ -297,7 +301,15 @@ export class Conversations {
         return { name: id, title: title !== undefined && title !== id ? title : undefined };
     }
 
-    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group, machine }) {
+    /* The size of a shared machine: what its first conversation made it with (each of its conversations carries
+       it); undefined while none lives in it. */
+    #machineMbOf(machine) {
+        const there = this.#store.all().filter((x) => x.sharedMachine === machine);
+        if (!there.length) return undefined;
+        return there.map((x) => x.machineMb).find(Number.isInteger) ?? Math.max(...there.map((x) => Number(x.memoryMb) || 0));
+    }
+
+    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group, machine, machineMb }) {
         const { name, title } = this.#naming({ name: given, title: read });
         /* IN A SHARED MACHINE (#221), named: its work is always kept here (mounted into its place there). */
         if (machine !== undefined && (typeof machine !== 'string' || !isConversationName(machine))) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
@@ -315,9 +327,18 @@ export class Conversations {
         if (!Number.isInteger(cores) || cores < 1 || cores > availableParallelism()) throw new Refusal(400, `Cores are 1 to ${availableParallelism()} (what this server has).`);
         const disk = diskGb ?? DISK_GB;
         if (!Number.isInteger(disk) || disk < DISK_GB || disk > DISK_MAX_GB) throw new Refusal(400, `Disk is ${DISK_GB} to ${DISK_MAX_GB} GB.`);
+        /* Its shared machine's size: chosen when it is made (4 GB unless said), then the same for all in it; a
+           conversation never asks more than its machine has. */
+        let size;
+        if (machine !== undefined) {
+            const there = this.#machineMbOf(machine);
+            size = there ?? machineMb ?? SHARED_MB;
+            if (there === undefined && (!Number.isInteger(size) || size < 1024 || size > 16384)) throw new Refusal(400, 'A shared machine has 1024 to 16384 MB of memory.');
+            if (memory > size) throw new Refusal(400, `The machine ${machine} has ${size} MB of memory: this conversation cannot have more (${memory} MB).`);
+        }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, ...(machine ? { sharedMachine: machine } : {}), work: workOnDisk === true && !machine ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, ...(machine ? { sharedMachine: machine, machineMb: size } : {}), work: workOnDisk === true && !machine ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         /* A new one comes first in its folder (or first of those in none). */
         const { order, groups } = this.#order();
         this.#store.put(conversation);
@@ -428,7 +449,7 @@ export class Conversations {
         let state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
         if (state === undefined) {
             this.#store.patch(name, { step: `Making the shared machine ${c.sharedMachine}` });
-            const launched = await this.#vms.launch(name, memoryMb);
+            const launched = await this.#vms.launch(name, Number.isInteger(c.machineMb) ? c.machineMb : memoryMb);
             if (launched.code !== 0) return fail('The shared machine did not start', launched);
             const sharing = await this.#vms.execMachine(name, [...SHARING_STEP], { timeoutMs: STEP_MS });
             if (sharing.code !== 0) return fail('The shared machine could not be prepared for shared folders', sharing);

@@ -1,5 +1,5 @@
 /* WHERE A CONVERSATION LIVES (#221), at its creation: its own machine (the default, as always) or a shared one --
-   a machine name asked then, its files always kept here (that choice hidden); a name that is not one refused here. */
+   a machine name asked then (and, for a new one, its memory), its files always kept here (that choice hidden); a name that is not one refused here. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -22,6 +22,9 @@ test('the creation form: its own machine by default; a shared one asks its name 
     await me.page.locator('#newconv-create').click();
     await me.until('refused here', async () => /lower-case/.test(await me.page.locator('#newconv-machine-error').innerText().catch(() => '')));
     await me.page.fill('#newconv-machine', 'assistants');
+    /* A new machine: its memory asked, 4 GB unless changed. */
+    assert.equal(await me.page.locator('#newconv-machine-mb-row').isVisible(), true);
+    assert.equal(await me.page.locator('#newconv-machine-mb').inputValue(), '4096');
     if (process.env.WHERE_SHOTS) for (const [w, h, name] of [[1280, 900, 'desktop'], [900, 1200, 'tablet'], [390, 844, 'phone']]) {
         await me.page.setViewportSize({ width: w, height: h });
         for (const theme of ['dark', 'light']) {
