@@ -100,13 +100,24 @@ export function readTools(text) {
         if (t.instructions !== undefined && !INSTRUCTIONS.test(t.instructions)) throw new Error(`${t.id}: instructions is a relative path in the home, without ".."`);
         /* Where the tool keeps its own log, read when it ends (why it stopped): folders relative to the home. */
         if (t.logs !== undefined && (!Array.isArray(t.logs) || t.logs.some((d) => typeof d !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(d) || d.startsWith('/') || d.split('/').includes('..')))) throw new Error(`${t.id}: logs is a list of folders relative to the home, without ".."`);
+        /* Optional: WHERE IT KEEPS ITS STATE (11-11, #351), relative to the home -- its memory, its sessions, its
+           settings, what a conversation is beyond /work: `keep`, the paths to carry when the conversation is
+           exported, imported or moved; `skip`, paths inside them that are only cache. Clavarium carries them for
+           any tool, with no case of its own. */
+        let state;
+        if (t.state !== undefined) {
+            const rel = (list) => Array.isArray(list) && list.every((d) => typeof d === 'string' && /^[A-Za-z0-9._/-]+$/.test(d) && !d.startsWith('/') && !d.split('/').includes('..') && d !== '.');
+            if (!t.state || typeof t.state !== 'object' || !rel(t.state.keep) || t.state.keep.length === 0 || (t.state.skip !== undefined && !rel(t.state.skip))) throw new Error(`${t.id}: state needs "keep", paths relative to the home without "..", and may have "skip"`);
+            if ((t.state.skip ?? []).some((d) => !t.state.keep.some((k) => d === k || d.startsWith(`${k}/`)))) throw new Error(`${t.id}: state "skip" names paths inside "keep"`);
+            state = Object.freeze({ keep: Object.freeze([...t.state.keep]), skip: Object.freeze([...(t.state.skip ?? [])]) });
+        }
         /* Optional: ITS LAUNCHER, a script of config/launch shown at /tools/launch: run at each start,
            given the rights chosen (full, ask) then the command; it sets what the tool needs,
            then runs it. Clavarium knows nothing more of the tool. */
         if (t.launch !== undefined && !/^[a-z][a-z0-9-]{0,40}\.sh$/.test(t.launch)) throw new Error(`${t.id}: launch is the name of a script of config/launch, such as "${t.id}.sh"`);
         /* Repairs an existing machine is given once (see FIXES in conversations.mjs). */
         const fixups = t.install.includes('npm-writable') ? NPM_WRITABLE : [];
-        return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), ...(t.logs ? { logs: Object.freeze([...t.logs]) } : {}), command: Object.freeze([...t.command]), ...(t.launch ? { launch: t.launch } : {}), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, ...(rights ? { rights } : {}), steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
+        return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), ...(t.logs ? { logs: Object.freeze([...t.logs]) } : {}), ...(state ? { state } : {}), command: Object.freeze([...t.command]), ...(t.launch ? { launch: t.launch } : {}), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, ...(rights ? { rights } : {}), steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
     });
 }
 

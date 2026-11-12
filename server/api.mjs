@@ -6,6 +6,7 @@
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
+ *   GET  /api/conversations/<name>/export        its tool's state, one archive (#351)   POST .../import  put back (same tool)
  *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?, cpus?}: stopped, set, started again (202);
  *                                                asleep: checked and kept for its wake, as `sizeAtWake` (200)
  *   POST /api/conversations/<name>/machine       {action: start|stop|restart|sleep|force|force-now}: done on its machine,
@@ -19,6 +20,7 @@
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
  *   POST /api/conversations/<name>/exit-report   why its tool ended: { now (read in its machine, if it runs), last (kept at its end) }
+ *   POST /api/conversations/<name>/machine {machineMb}  in a shared machine: that machine's memory, all in it restarted
  *   POST /api/conversations/<name>/archive
  *   POST /api/binder/suggest                {id}: at most three quick actions for that card -> {actions: [{key, label, why, on, ask?}]}
  *   POST /api/mailboxes/<name>/live          {smtp, email?}: that mailbox connected live too (send, move...), its password reused
@@ -291,6 +293,20 @@ export async function handleApi(request, response, conversations, headers, resou
                 return send(403, { error: 'This request does not come from this site.' }), true;
             }
             return send(201, await importFile(attached('write'), query.get('p') ?? '', query.get('name') ?? '', request, { exists: query.get('exists') ?? 'keep', dir: query.get('dir') ?? '', batch: query.get('batch') ?? undefined })), true;
+        }
+        /* A CONVERSATION CARRIED ELSEWHERE (#351): its tool's state as one archive, streamed from its machine;
+           put back into a conversation of the same tool. Downloaded and sent by the person, from the page. */
+        const carry = /^\/api\/conversations\/([^/]+)\/(export|import)$/.exec(pathname);
+        if (carry && request.method === 'GET' && carry[2] === 'export') {
+            const out = await conversations.exportState(decodeURIComponent(carry[1]));
+            response.writeHead(200, { ...headers, 'content-type': 'application/gzip', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(out.name)}` });
+            out.stream.pipe(response);
+            response.on('close', () => { try { out.child?.kill(); } catch { /* ended */ } });
+            return true;
+        }
+        if (carry && request.method === 'POST' && carry[2] === 'import') {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
+            return send(200, await conversations.importState(decodeURIComponent(carry[1]), request)), true;
         }
         if (pathname.startsWith('/api/files/')) {
             if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' }), true;
@@ -943,6 +959,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (typeof body?.escalate === 'boolean') return send(200, conversations.setStopEscalate(conversation, body.escalate)), true;
             /* Its watchdog (watchdog.mjs): on or off, and how long it waits. */
             if (body?.watchdog && typeof body.watchdog === 'object') return send(200, conversations.setWatchdog(conversation, { on: typeof body.watchdog.on === 'boolean' ? body.watchdog.on : undefined, delayMin: body.watchdog.delayMin })), true;
+            /* Its shared machine's own memory (#221): the whole machine restarted, every conversation in it. */
+            if (body?.machineMb !== undefined) return send(200, await conversations.resizeShared(conversation, { machineMb: body.machineMb })), true;
             const resized = await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus });
             /* Asleep, nothing was started: the choice is only kept, for its wake. */
             return send(resized.phase === 'restarting' ? 202 : 200, resized), true;

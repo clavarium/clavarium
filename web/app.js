@@ -1987,7 +1987,7 @@
     let chosenTool = '';
     let newTools = [];
     const ID_SHAPE = /^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/;
-    const NEW_FIELDS = ['name', 'group', 'id', 'memory'];
+    const NEW_FIELDS = ['name', 'group', 'id', 'memory', 'machine'];
     function newError(field, text) {
         const at = field && NEW_FIELDS.includes(field) ? field : '';
         for (const f of NEW_FIELDS) {
@@ -2101,6 +2101,23 @@
         b.addEventListener('click', () => { for (const other of $('newconv-work').querySelectorAll('[data-work]')) other.setAttribute('aria-checked', String(other === b)); });
     }
     const newOnDisk = () => $('newconv-work').querySelector('[data-work="disk"]').getAttribute('aria-checked') === 'true';
+    /* WHERE IT LIVES (#221): its own machine, or a shared one -- an existing one offered, or a new name. In a shared
+       machine its files are always kept here: that choice is hidden. */
+    const newShared = () => $('newconv-where').querySelector('[data-where="shared"]').getAttribute('aria-checked') === 'true';
+    const paintWhere = () => {
+        const shared = newShared();
+        $('newconv-machine-row').hidden = !shared;
+        $('newconv-files-card').hidden = shared;
+        const names = [...new Set(conversations.map((c) => c.sharedMachine).filter(Boolean))].sort();
+        $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
+        if (shared && !$('newconv-machine').value && names.length) $('newconv-machine').value = names[0];
+        /* A new shared machine: its memory chosen here (12-11); one that is there keeps its own. */
+        $('newconv-machine-mb-row').hidden = !shared || names.includes($('newconv-machine').value.trim());
+    };
+    $('newconv-machine').addEventListener('input', () => paintWhere());
+    for (const b of $('newconv-where').querySelectorAll('[data-where]')) {
+        b.addEventListener('click', () => { for (const other of $('newconv-where').querySelectorAll('[data-where]')) other.setAttribute('aria-checked', String(other === b)); paintWhere(); });
+    }
     async function openNew({ push = true, group = null } = {}) {
         if (DEVICE) return;
         newError('', '');
@@ -2149,6 +2166,7 @@
         const group = $('newconv-group').value.trim();
         if (!title) { newError('name', 'Give a name.'); return; }
         if (id && !ID_SHAPE.test(id)) { newError('id', 'Lower-case letters, digits, hyphens'); return; }
+        if (newShared() && !ID_SHAPE.test($('newconv-machine').value.trim())) { newError('machine', 'A name: lower-case letters, digits, hyphens'); return; }
         const least = newTools.find((t) => t.id === chosenTool)?.memoryMb;
         const memoryMb = Number($('newconv-memory').value);
         const cpus = Number($('newconv-cpus').value); const diskGb = Number($('newconv-disk').value);
@@ -2156,9 +2174,9 @@
         creating = true; $('newconv-create').disabled = true;
         try {
             const opencode = await openCodeChoice();
-            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
+            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newShared() ? false : newOnDisk(), ...(newShared() ? { machine: $('newconv-machine').value.trim(), ...($('newconv-machine-mb-row').hidden ? {} : { machineMb: Number($('newconv-machine-mb').value) }) } : {}), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
-            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
+            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-where').querySelector('[data-where="own"]').click(); $('newconv-machine').value = ''; $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
             await refresh();
             /* The new one is selected: the page gives way to it, with no step of it left behind. */
             select(made.name);
@@ -2574,6 +2592,34 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; focusTerminal(); });
         };
+        /* In a shared machine (#221): its name and the others in it, said once -- stopping it stops them too. */
+        const sharedIn = here?.sharedMachine;
+        $('machine-shared').hidden = DEVICE || !sharedIn;
+        if (sharedIn) {
+            const others = conversations.filter((c) => c.sharedMachine === sharedIn && c.name !== current).map((c) => c.title ?? c.name);
+            $('machine-shared').textContent = others.length
+                ? uiSaid('set-mshared-with', 'Shared machine « {m} », with {others}. Stopping it stops them too.', { m: sharedIn, others: others.join(', ') })
+                : uiSaid('set-mshared-alone', 'Shared machine « {m} », alone in it for now.', { m: sharedIn });
+        }
+        /* Its tool's memory, exported as one file, or put back from one (#351): the person's own act, from here. */
+        $('carry-box').hidden = DEVICE || !here;
+        $('carry-export').href = `${API}/conversations/${encodeURIComponent(current)}/export`;
+        $('carry-import').onclick = () => $('carry-file').click();
+        $('carry-file').onchange = () => {
+            const file = $('carry-file').files?.[0]; $('carry-file').value = '';
+            if (!file) return;
+            const name = current;
+            leavePanel();
+            show(uiSaid('set-carry-ask', '« {file} » into « {name} »? Its memory is replaced.', { file: file.name, name }),
+                uiSaid('set-carry-go', 'Import'), async () => {
+                    try {
+                        const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/import`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                        const said = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(said.error ?? `HTTP ${r.status}`);
+                        show(uiSaid('set-carry-done', 'Imported from « {from} ».', { from: said.from?.name ?? file.name }), 'OK', () => { notice.hidden = true; focusTerminal(); });
+                    } catch (error) { show(error.message, 'Back to the terminal', enter); }
+                }, () => { notice.hidden = true; focusTerminal(); });
+        };
         void paintAnswerer(); paintWakeups(); void paintTalkBox(); void paintShareHere();
         paintMachine(here);
         void paintGuide(here);
@@ -2906,7 +2952,8 @@
             cores.replaceChildren(...Array.from({ length: most }, (_, i) => i + 1).map((n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = `${n}${n === (here.cpus ?? 1) ? ' (now)' : ''}${n === most && n > 1 ? ' (all of this server)' : ''}`; return o; }));
             cores.value = String(here.cpus ?? 1);
             const least = here.memoryMinMb ?? 512;
-            const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least), here.memoryMb])].sort((a, b) => a - b);
+            /* In a shared machine (#221): its limit there, up to the machine's own memory. */
+            const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least && (!here.sharedMachine || m <= (here.machineMb ?? m))), here.memoryMb])].sort((a, b) => a - b);
             memory.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = `${sizeWords(m)}${m === here.memoryMb ? ' (now)' : ''}${m === least ? ' (least for its tool)' : ''}`; return o; }));
             memory.value = String(here.memoryMb);
             const now = here.diskGb ?? 8;
@@ -2928,6 +2975,21 @@
         $('machine-later-text').textContent = here?.sizeAtWake ? `Will be applied when it wakes: ${laterWords(here.sizeAtWake)}` : '';
         $('machine-later').hidden = !here?.sizeAtWake;
         $('machine-size-apply').textContent = here?.asleep === true ? 'Keep for its wake' : 'Apply...';
+        /* In a shared machine (#221): its memory is its limit there (no restart), cores and disk the machine's; the
+           machine's own memory below, which restarts all in it. */
+        const sharedHere = Boolean(here?.sharedMachine) && !DEVICE;
+        for (const id of ['machine-cpus', 'machine-disk']) { $(id).hidden = sharedHere; $(id).previousElementSibling.hidden = sharedHere; }
+        $('machine-memory').previousElementSibling.textContent = sharedHere ? 'Its limit' : 'Memory';
+        $('machine-size-title').textContent = sharedHere ? 'Memory' : 'Memory, cores and disk';
+        if (sharedHere) { $('machine-size-hint').textContent = 'Its limit in the shared machine · from its next start'; $('machine-size-apply').textContent = 'Apply'; }
+        $('shared-size').hidden = !sharedHere || here.phase !== 'ready';
+        if (sharedHere && document.activeElement !== $('shared-memory')) {
+            const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine);
+            const floor = Math.max(1024, ...inIt.map((x) => x.memoryMb ?? 0)); const now = here.machineMb ?? floor;
+            const sizes = [...new Set([now, ...MEMORY_CHOICES.filter((m) => m >= floor)])].sort((a, b) => a - b);
+            $('shared-memory').replaceChildren(...sizes.map((m) => Object.assign(document.createElement('option'), { value: String(m), textContent: `${sizeWords(m)}${m === now ? ' (now)' : ''}` })));
+            $('shared-memory').value = String(now);
+        }
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
@@ -3008,6 +3070,15 @@
         if (!here) return;
         const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value); const cpus = Number($('machine-cpus').value) || (here.cpus ?? 1);
         if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8) && cpus === (here.cpus ?? 1)) { $('panel-error').textContent = 'Nothing to change: choose another memory, cores or disk first.'; $('panel-error').hidden = false; return; }
+        /* In a shared machine: its limit, set at once -- nothing stopped. */
+        if (here.sharedMachine) {
+            $('panel-error').hidden = true;
+            void (async () => {
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb }); await refresh(); paintMachine(conversations.find((x) => x.name === name)); }
+                catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+            })();
+            return;
+        }
         const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', cpus !== (here.cpus ?? 1) ? `${cpus} core${cpus > 1 ? 's' : ''} (now ${here.cpus ?? 1})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
         /* Asleep: kept for its wake, from Settings, where it is then said; nothing is stopped or woken now. */
         if (here.asleep === true) {
@@ -3024,6 +3095,25 @@
             'Change it', async () => {
                 disconnect(); say('restarting', 'connecting'); show('Changing its machine...'); $('notice-spin').hidden = false;
                 try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb, diskGb, cpus }); await refresh(); enter(); }
+                catch (error) { show(error.message, 'Back', enter); }
+            }, resume);
+    });
+
+    /* ITS SHARED MACHINE'S MEMORY (#221): asked first, naming every conversation it interrupts. */
+    $('shared-size').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = current;
+        const here = conversations.find((x) => x.name === name);
+        if (!here?.sharedMachine) return;
+        const machineMb = Number($('shared-memory').value);
+        if (machineMb === here.machineMb) { $('panel-error').textContent = 'Nothing to change: choose another memory first.'; $('panel-error').hidden = false; return; }
+        const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine).map((x) => x.title ?? x.name);
+        leavePanel();
+        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
+        show(`Give the shared machine « ${here.sharedMachine} » ${sizeWords(machineMb)} of memory (now ${sizeWords(here.machineMb ?? 0)})? IT IS STOPPED AND STARTED AGAIN: ${inIt.join(', ')} ${inIt.length > 1 ? 'are' : 'is'} interrupted.`,
+            'Change it', async () => {
+                disconnect(); say('restarting', 'connecting'); show('Changing the shared machine...'); $('notice-spin').hidden = false;
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { machineMb }); await refresh(); enter(); }
                 catch (error) { show(error.message, 'Back', enter); }
             }, resume);
     });

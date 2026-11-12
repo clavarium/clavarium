@@ -1097,6 +1097,9 @@ export async function handleExternal(request, response, { keys, status, chats = 
             try { id = keys.check(request.headers.authorization); } catch (error) { return refused(error, '/mcp'); }
             let text = '';
             for await (const piece of request) { text += piece; if (text.length > MCP_BODY_MAX) { note(id, 413, '/mcp'); return send(413, { error: 'Too long.' }); } }
+            /* A protocol version said in the header, and none spoken here: refused, as the spec asks (none said: the oldest assumed). */
+            const said = request.headers['mcp-protocol-version'];
+            if (typeof said === 'string' && said && !MCP_VERSIONS.includes(said)) { note(id, 400, '/mcp'); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: `Unsupported MCP-Protocol-Version: ${said.slice(0, 20)} (spoken: ${MCP_VERSIONS.join(', ')})` } }); }
             let msg;
             try { msg = JSON.parse(text); } catch { note(id, 400, '/mcp'); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
             if (!msg || typeof msg !== 'object' || Array.isArray(msg) || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
@@ -1174,6 +1177,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
                     if (!(error instanceof Refusal)) throw error;
                     /* Not given: refused as the API refuses it (too many, too). Anything else is the tool's own failure, said to the caller. */
                     if (error.status === 429) { note(id, 429, what); return send(429, { jsonrpc: '2.0', id: msg.id, error: { code: -32002, message: error.message } }, { 'retry-after': String(error.retry ?? 60) }); }
+                    /* (An HTTP 403 for a scope not given is what the MCP authorization spec says: kept, MCP review 11-11.) */
                     if (error.status === 403) { note(id, 403, what); return send(403, { jsonrpc: '2.0', id: msg.id, error: { code: -32001, message: error.message } }); }
                     note(id, error.status, what);
                     return send(200, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: error.message }], isError: true } });

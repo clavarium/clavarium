@@ -203,6 +203,8 @@
               <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>
               <div class="curves-row"></div>
             </div>
+            <!-- IN A SHARED MACHINE (#221): which, and who else lives in it -- its stop or restart stops them too. -->
+            <p id="machine-shared" class="hint machine-shared" hidden></p>
             <p id="machine-restarted" class="hint" role="status" hidden></p>
             <div id="resume-box" hidden>
             <div class="set-row"><div class="set-what"><b>When its tool starts</b><small id="resume-hint">After a wake or restart</small></div><div class="set-control"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div></div>
@@ -211,7 +213,7 @@
             <div class="set-row"><div class="set-what"><b data-said="set-mesc">If a stop hangs</b></div><div class="set-control"><div class="levels" id="m-escalate" role="group" aria-label="If a stop hangs"><button type="button" data-on="true" data-said="set-mesc-auto">Force it</button><button type="button" data-on="false" data-said="set-mesc-ask">Ask me</button></div></div></div>
             <!-- ITS WATCHDOG (server/watchdog.mjs): mute or full that long, forced off then started, once. -->
             <div class="set-row" id="m-dog-row"><div class="set-what"><b data-said="set-mdog">Watchdog</b><small data-said="set-mdog-what">Restarts it if stuck</small></div><div class="set-control"><div class="levels" id="m-dog" role="group" aria-label="Watchdog"><button type="button" data-min="0" data-said="set-mdog-off">Off</button><button type="button" data-min="30">30 min</button><button type="button" data-min="60">1 h</button><button type="button" data-min="120">2 h</button><button type="button" data-min="custom" data-said="set-mdog-custom">Custom</button></div><label class="m-dog-min" id="m-dog-custom" hidden><input type="number" id="m-dog-min" min="10" max="1440" step="5" inputmode="numeric" aria-label="Minutes"> min</label></div></div>
-            <div class="panel-top"><b>Memory, cores and disk</b></div>
+            <div class="panel-top"><b id="machine-size-title">Memory, cores and disk</b></div>
             <form id="machine-size" autocomplete="off">
               <label for="machine-memory">Memory</label>
               <select id="machine-memory"></select>
@@ -225,11 +227,25 @@
               <p class="hint" id="machine-later" role="status" hidden><span id="machine-later-text"></span> · <button type="button" id="machine-later-cancel" class="inline">cancel</button></p>
               <div class="row"><button type="submit" id="machine-size-apply">Apply...</button></div>
             </form>
+            <!-- ITS SHARED MACHINE'S OWN MEMORY (#221): the whole machine restarted, every conversation in it. -->
+            <form id="shared-size" autocomplete="off" hidden>
+              <label for="shared-memory">Shared machine memory</label>
+              <select id="shared-memory"></select>
+              <p class="hint" id="shared-size-hint">Restarts every conversation in it</p>
+              <div class="row"><button type="submit" id="shared-size-apply">Change...</button></div>
+            </form>
             <div id="work-box">
             <div class="panel-top"><b>Where the tool works</b></div>
             <p id="work-now" class="hint"><span><span id="work-now-text"></span></span><span id="work-now-why" class="tip" hidden></span></p>
             <p id="work-moved" class="hint" hidden></p>
             <button type="button" id="work-move"></button>
+            </div>
+            <!-- CARRIED ELSEWHERE (#351): its tool's state (memory, sessions, settings) as one file; put back here. -->
+            <div id="carry-box">
+            <div class="panel-top"><b data-said="set-carry">Its tool's memory</b></div>
+            <p class="hint" data-said="set-carry-hint">Memory, sessions, settings: to take elsewhere.</p>
+            <div class="row"><a id="carry-export" class="button" download data-said="set-carry-export">Export</a><button type="button" id="carry-import" data-said="set-carry-import">Import...</button><input type="file" id="carry-file" accept=".gz,application/gzip" hidden></div>
+            <p id="carry-said" class="hint" role="status" hidden></p>
             </div>
             <!-- WHEN ITS MACHINE IS SHORT (server/healthreact.mjs): you are told either way. -->
             <form id="react-box" autocomplete="off">
@@ -1425,7 +1441,17 @@
             </div>
             <small id="newconv-oc-raw" class="hint" hidden>Set it up yourself in its terminal.</small>
           </div>
-          <div class="nc-card">
+          <!-- WHERE IT LIVES (#221): a machine of its own, or a shared one (lighter, for assistants). -->
+          <div class="nc-card" id="newconv-where-card">
+            <span class="sub-head">Where it lives</span>
+            <div id="newconv-where" class="pick two" role="radiogroup" aria-label="Where it lives">
+              <button type="button" role="radio" data-where="own" aria-checked="true"><b>Its own machine</b><small>All to itself</small></button>
+              <button type="button" role="radio" data-where="shared" aria-checked="false"><b>A shared machine</b><small>Trial · lighter, for assistants</small></button>
+            </div>
+            <div class="set-row" id="newconv-machine-row" hidden><div class="set-what"><label for="newconv-machine">Machine</label><small>An existing one, or a new name</small><span id="newconv-machine-error" class="err" role="alert" hidden></span></div><div class="set-control"><input id="newconv-machine" maxlength="32" list="machine-names" placeholder="assistants" spellcheck="false" autocapitalize="off" autocomplete="off"><datalist id="machine-names"></datalist></div></div>
+            <div class="set-row" id="newconv-machine-mb-row" hidden><div class="set-what"><label for="newconv-machine-mb">Its memory</label><small>Shared by the conversations in it</small></div><div class="set-control"><select id="newconv-machine-mb"><option value="2048">2 GB</option><option value="4096" selected>4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option><option value="16384">16 GB</option></select></div></div>
+          </div>
+          <div class="nc-card" id="newconv-files-card">
             <span class="sub-head">Its files</span>
             <div id="newconv-work" class="pick two" role="radiogroup" aria-label="Its files">
               <button type="button" role="radio" data-work="kept" aria-checked="true"><b>Kept here</b><small>Seen in Files. Outlives the machine</small></button>

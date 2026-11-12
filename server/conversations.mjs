@@ -13,10 +13,19 @@ import { WORK, VM_USER, SHARING_STEP, stepLine } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { availableParallelism } from 'node:os';
+import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
+/* The door of a conversation in a shared machine (#221), put in the machine by the server. */
+export const DOOR = new URL('../config/machine/clavarium-enter', import.meta.url);
+/* The most programs one conversation may run in a shared machine. */
+export const SHARED_PROCS = 1024;
+/* A NEW SHARED MACHINE's memory (12-11, operator): chosen when it is made, 4 GB unless said; the conversations
+   that live in it share it, each within its own limit. */
+export const SHARED_MB = 4096;
 /* Moving a work folder: what must stay free after it, and how long a copy may take. */
 export const ROOM_MB = 1024;
 /* A file shown straight from a machine's disk: where, and how large at most. */
@@ -267,12 +276,15 @@ export class Conversations {
 
     /* Whether a new machine may be made for this request: what `create`
        checks, and the server's room (capacity.mjs). Asked before `create`. */
-    async admit({ name, title, tool, memoryMb } = {}) {
+    async admit({ name, title, tool, memoryMb, machine, machineMb } = {}) {
         if (!name && typeof title === 'string' && !titleProblem(title)) ({ name } = this.#naming({ title }));
+        /* Into a shared machine that is there already: no new machine, no room asked for it. */
+        if (typeof machine === 'string' && this.#machineMbOf(machine) !== undefined) return;
         const chosen = this.#tools.find((t) => t.id === tool);
         /* What `create` refuses anyway is said by `create`. */
         if (!chosen || !isConversationName(name) || this.#store.get(name)) return;
-        const memory = memoryMb ?? chosen.memoryMb;
+        /* A new shared machine: the room it takes is its own size, not the conversation's. */
+        const memory = typeof machine === 'string' ? (machineMb ?? SHARED_MB) : (memoryMb ?? chosen.memoryMb);
         if (!Number.isInteger(memory)) return;
         await this.room({ kind: 'create', memoryMb: memory });
     }
@@ -289,8 +301,19 @@ export class Conversations {
         return { name: id, title: title !== undefined && title !== id ? title : undefined };
     }
 
-    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group }) {
+    /* The size of a shared machine: what its first conversation made it with (each of its conversations carries
+       it); undefined while none lives in it. */
+    #machineMbOf(machine) {
+        const there = this.#store.all().filter((x) => x.sharedMachine === machine);
+        if (!there.length) return undefined;
+        return there.map((x) => x.machineMb).find(Number.isInteger) ?? Math.max(...there.map((x) => Number(x.memoryMb) || 0));
+    }
+
+    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group, machine, machineMb }) {
         const { name, title } = this.#naming({ name: given, title: read });
+        /* IN A SHARED MACHINE (#221), named: its work is always kept here (mounted into its place there). */
+        if (machine !== undefined && (typeof machine !== 'string' || !isConversationName(machine))) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
+        if (machine !== undefined && machine === given) throw new Refusal(400, 'A shared machine has a name of its own, not a conversation\'s.');
         if (group !== undefined) { const problem = groupProblem(group); if (problem) throw new Refusal(400, problem); }
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         const chosen = this.#tools.find((t) => t.id === tool);
@@ -304,9 +327,18 @@ export class Conversations {
         if (!Number.isInteger(cores) || cores < 1 || cores > availableParallelism()) throw new Refusal(400, `Cores are 1 to ${availableParallelism()} (what this server has).`);
         const disk = diskGb ?? DISK_GB;
         if (!Number.isInteger(disk) || disk < DISK_GB || disk > DISK_MAX_GB) throw new Refusal(400, `Disk is ${DISK_GB} to ${DISK_MAX_GB} GB.`);
+        /* Its shared machine's size: chosen when it is made (4 GB unless said), then the same for all in it; a
+           conversation never asks more than its machine has. */
+        let size;
+        if (machine !== undefined) {
+            const there = this.#machineMbOf(machine);
+            size = there ?? machineMb ?? SHARED_MB;
+            if (there === undefined && (!Number.isInteger(size) || size < 1024 || size > 16384)) throw new Refusal(400, 'A shared machine has 1024 to 16384 MB of memory.');
+            if (memory > size) throw new Refusal(400, `The machine ${machine} has ${size} MB of memory: this conversation cannot have more (${memory} MB).`);
+        }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, ...(machine ? { sharedMachine: machine, machineMb: size } : {}), work: workOnDisk === true && !machine ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         /* A new one comes first in its folder (or first of those in none). */
         const { order, groups } = this.#order();
         this.#store.put(conversation);
@@ -317,6 +349,7 @@ export class Conversations {
 
     /* `again`: a machine built anew for a conversation that had one. */
     async #build(name, tool, memoryMb, again = false) {
+        if (this.#store.get(name)?.sharedMachine) return this.#buildShared(name, tool, memoryMb);
         const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
         /* The size chosen at creation (stored by create, kept on a rebuild): launched with it, or, for a
            copy of a ready-made machine, brought to it while the copy is still stopped. */
@@ -403,6 +436,59 @@ export class Conversations {
         this.#mountAgain.add(name);
         this.ready(name);
         if (again) this.renewed(name, 'Its machine was built again: what was on its own disk is gone, its work folder and this chat are kept. The tool started again.', true);
+        return undefined;
+    }
+
+    /* A CONVERSATION IN A SHARED MACHINE (#221): the machine made by the first one that lives in it (its door
+       installed), started if it sleeps; then this one's place in it -- told to the host, its own user made by its
+       door, its work mounted there for that user, its tool installed (what runs as root for the machine, the rest
+       as its user). The same end as a machine of its own: ready, its tool started by the next opening. */
+    async #buildShared(name, tool, memoryMb) {
+        const c = this.#store.get(name);
+        const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`, buildingSince: undefined }); return undefined; };
+        let state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (state === undefined) {
+            this.#store.patch(name, { step: `Making the shared machine ${c.sharedMachine}` });
+            const launched = await this.#vms.launch(name, Number.isInteger(c.machineMb) ? c.machineMb : memoryMb);
+            if (launched.code !== 0) return fail('The shared machine did not start', launched);
+            const sharing = await this.#vms.execMachine(name, [...SHARING_STEP], { timeoutMs: STEP_MS });
+            if (sharing.code !== 0) return fail('The shared machine could not be prepared for shared folders', sharing);
+        } else if (state !== 'Running') {
+            const started = await this.#vms.start(name);
+            if (started.code !== 0) return fail('The shared machine did not start', started);
+        }
+        /* Its door, always the one of this version (put again: an older one is replaced). */
+        const door = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-m', '0755', '-o', 'root', '-g', 'root', '/dev/stdin', '/usr/local/sbin/clavarium-enter'], { input: readFileSync(DOOR, 'utf8'), timeoutMs: STEP_MS });
+        if (door.code !== 0) return fail('The door of the shared machine could not be put in place', door);
+        this.#store.patch(name, { step: 'Making its place in the shared machine' });
+        const told = await this.#vms.share(name);
+        if (told.code !== 0) return fail('The host did not take it into the shared machine', told);
+        const me = await this.#vms.execMachine(name, ['sudo', '-n', 'clavarium-enter', name, '--', 'sh', '-c', 'id -u; id -g'], { timeoutMs: STEP_MS });
+        const [uid, gid] = String(me.stdout ?? '').trim().split('\n').map(Number);
+        if (me.code !== 0 || !Number.isInteger(uid) || !Number.isInteger(gid)) return fail('Its own user could not be made', me);
+        this.#store.patch(name, { machineUser: { uid, gid } });
+        /* Its limits, read by its door at each entry: the memory chosen for it, and a bound on its programs -- one
+           conversation that runs away never takes the machine from the others. */
+        const limits = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-D', '-m', '0644', '-o', 'root', '-g', 'root', '/dev/stdin', `/etc/clavarium/limits/${name}`],
+            { input: `mem=${Number(c.memoryMb) || tool.memoryMb}\nprocs=${SHARED_PROCS}\n`, timeoutMs: STEP_MS });
+        if (limits.code !== 0) return fail('Its limits could not be set in the shared machine', limits);
+        const kept = await this.#vms.workMake(name);
+        const shown = kept.code === 0 ? await this.#vms.workMount(name, this.#uid, this.#gid) : kept;
+        if (shown.code !== 0) return fail('The work folder could not be shown in the shared machine', shown);
+        /* Its tool: there already (another conversation installed it), or installed -- a step as root for the
+           machine, any other as its own user (its settings, in its home). */
+        const there = tool.steps.length === 0 || (await this.#vms.exec(name, ['sh', '-c', `command -v ${tool.command[0]}`])).code === 0;
+        for (const [i, step] of (there ? [] : tool.steps).entries()) {
+            if (!this.#store.get(name)) return undefined;
+            this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${tool.steps.length})` });
+            const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
+            if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
+        }
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
+        this.#reach(name, 'folders');
+        this.#fresh.add(name);
+        this.#mountAgain.add(name);
+        this.ready(name);
         return undefined;
     }
 
@@ -825,6 +911,60 @@ export class Conversations {
         return true;
     }
 
+    /* CARRIED ELSEWHERE (11-11, #351): what the conversation is beyond /work -- its tool's state, where its
+       entry in config/tools.json says it is (`state.keep`, without `state.skip`) -- as one .tar.gz streamed
+       from its machine, a manifest first (clavarium-conversation.json: its tool, its name, its size). Nothing
+       of the tool is known here: any tool that says where its state is can be exported, imported, moved.
+       The machine must run (its home is in it). -> { name: the file's name, stream } */
+    async exportState(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: it cannot be exported.`);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        const manifest = JSON.stringify({ kind: 'clavarium-conversation', version: 1, tool: c.tool, name: c.name, ...(c.title ? { title: c.title } : {}), memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB, at: new Date().toISOString() });
+        /* In its machine: the manifest written aside, then one archive -- the manifest first, then what is kept
+           (a path it has not made yet left out), the cache left out. */
+        /* (Its paths are plain -- letters, digits, . _ / - -- checked by tools.mjs: given as words.) */
+        const script = 'set -e; m=$(mktemp -d); printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+            + 'ex=""; for a in $2; do ex="$ex --exclude=./$a"; done; ks=""; for a in $3; do if [ -e "$HOME/$a" ]; then ks="$ks ./$a"; fi; done; '
+            + 'tar -czf - -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks; rm -rf "$m"';
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' ')]);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'ignore'] });
+        return { name: `${name}-${new Date().toISOString().slice(0, 10)}.clavarium.tar.gz`, stream: child.stdout, child };
+    }
+
+    /* PUT BACK an exported state in this conversation (same tool): its tool stopped, the archive unpacked in
+       its home, its tool started again, taking up its last session. -> { tool, from } */
+    async importState(name, input) {
+        const c = this.#busyCheck(name);
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: nothing can be imported in it.`);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        this.drop(name);
+        await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+        /* Unpacked aside first: its manifest read, its tool checked; then moved into the home. */
+        /* Aside in the home itself (never /tmp, which may be memory): then each part moved in place of the old. */
+        const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; tar -xzf - -C "$m"; '
+            + 'grep -q "\\"kind\\":\\"clavarium-conversation\\"" "$m/clavarium-conversation.json" || { echo "not an exported conversation" >&2; exit 3; }; '
+            + 'grep -q "\\"tool\\":\\"$1\\"" "$m/clavarium-conversation.json" || { echo "another tool" >&2; exit 4; }; '
+            + 'cat "$m/clavarium-conversation.json"; rm -f "$m/clavarium-conversation.json"; '
+            + 'for e in "$m"/.[!.]* "$m"/*; do if [ ! -e "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', c.tool]);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
+        const out = []; const err = [];
+        child.stdout.on('data', (d) => out.push(d)); child.stderr.on('data', (d) => err.push(d));
+        input.pipe(child.stdin);
+        child.stdin.on('error', () => { /* it stopped reading: said below */ });
+        const code = await new Promise((ok) => child.on('close', ok));
+        this.ready(name);
+        if (code === 3) throw new Refusal(400, 'This is not an exported conversation.');
+        if (code === 4) throw new Refusal(400, `This export is of another tool: import it into a conversation with that tool.`);
+        if (code !== 0) throw new Refusal(502, `Not imported: ${firstLine(Buffer.concat(err).toString()) || `exit ${code}`}`);
+        let from = null; try { from = JSON.parse(Buffer.concat(out).toString()); } catch { /* said nothing */ }
+        return { tool: c.tool, from: from ? { name: from.name, at: from.at } : null };
+    }
+
     async #fixup(name, tool) {
         for (const step of tool.fixups) {
             const r = await this.#vms.exec(name, step.argv, { timeoutMs: 120_000 }).catch(() => ({ code: 1 }));
@@ -879,6 +1019,7 @@ export class Conversations {
     async resize(name, asked = {}) {
         const c = this.#busyCheck(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
+        if (c.sharedMachine) return this.#limitShared(name, c, tool, asked);
         const { memory, disk, cpus } = this.#sizeAsked(c, tool, asked);
         if (c.asleep === true) return this.#later(name, c, { memoryMb: memory, cpus, diskGb: disk });
         const act = this.#take(name, 'resize');
@@ -1112,7 +1253,7 @@ export class Conversations {
         const timer = setTimeout(() => {
             this.#timers.delete(name);
             /* Not under an action of its owner's (a restart, a sleep): that one decides. */
-            if (!this.#watching.has(name) && !this.#acts.has(name)) { this.drop(name); void this.#vms.stop(name); }
+            if (!this.#watching.has(name) && !this.#acts.has(name)) { this.drop(name); void this.#stopUnlessShared(name); }
         }, this.#stopDelayMs);
         timer.unref?.();
         this.#timers.set(name, timer);
@@ -1563,10 +1704,34 @@ export class Conversations {
         this.#cancelStop(name);
         this.drop(name);
         const kept = this.#store.get(name).work === 'kept';
-        this.#store.remove(name);
-        if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        if (this.#store.get(name).sharedMachine) await this.#leaveShared(name, { erase: false });
+        else {
+            this.#store.remove(name);
+            if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        }
         /* Its work is moved aside on the server, not erased. */
         if (kept) await this.#vms.workAside(name);
+    }
+
+    /* OUT OF A SHARED MACHINE (#221): its programs ended, its work taken out of its place there, the host told;
+       its user and home removed when it is erased (kept when archived). The machine itself goes only with the last
+       conversation that lived in it. The record is removed here, before the machine is looked at. */
+    async #leaveShared(name, { erase }) {
+        const shared = this.#store.get(name).sharedMachine;
+        const others = this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared);
+        const running = (await this.#vms.state(name, { fresh: true }).catch(() => undefined)) === 'Running';
+        if (running) {
+            await this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: 30_000 }).catch(() => {});
+            await this.#vms.workUnmount(name).catch(() => {});
+            if (erase) await this.#vms.execMachine(name, ['sudo', '-n', 'userdel', '--remove', `c-${name}`], { timeoutMs: 60_000 }).catch(() => {});
+            if (erase) await this.#vms.execMachine(name, ['sudo', '-n', 'rm', '-f', `/etc/clavarium/limits/${name}`], { timeoutMs: 30_000 }).catch(() => {});
+        }
+        await this.#vms.unshare(name).catch(() => {});
+        const last = others.length === 0;
+        const state = last ? await this.#vms.state(name, { fresh: true }).catch(() => undefined) : undefined;
+        this.#store.remove(name);
+        /* (Its name gone from the store, the VM manager is still reached through the machine's own name.) */
+        if (last && state !== undefined) await this.#vms.removeVm(`clv-${shared}`);
     }
 
     /* DELETED FOR GOOD (01-11, its owner's ask, confirmed by typing its name): as archived, but its work is
@@ -1576,12 +1741,74 @@ export class Conversations {
         this.#cancelStop(name);
         this.drop(name);
         const kept = this.#store.get(name).work === 'kept';
-        this.#store.remove(name);
-        if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        if (this.#store.get(name).sharedMachine) await this.#leaveShared(name, { erase: true });
+        else {
+            this.#store.remove(name);
+            if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        }
         if (kept) {
             const r = await this.#vms.workErase(name);
             if (r?.code) throw new Refusal(500, `Its machine is deleted, but its files could not be erased: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         }
+    }
+
+    /* ITS TOOL ENDED, ITS MACHINE STOPPED -- unless it is a shared machine (#221) where another conversation still
+       has its tool, a screen or an action: then only this one's programs end, the others go on. */
+    async #stopUnlessShared(name) {
+        const shared = this.#store.get(name)?.sharedMachine;
+        if (!shared) return this.#vms.stop(name);
+        for (const other of this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared)) {
+            if (this.#watching.has(other.name) || this.#acts.has(other.name) || this.#timers.has(other.name)) return this.#endShared(name);
+            const alive = await this.#vms.exec(other.name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`]).catch(() => ({ code: 1 }));
+            if (alive.code === 0) return this.#endShared(name);
+        }
+        return this.#vms.stop(name);
+    }
+    #endShared(name) { return this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: STEP_MS }).catch(() => undefined); }
+
+    /* ITS SHARE OF A SHARED MACHINE (#221): its memory there is its limit, at most the machine's; set without
+       stopping anything, read by its door when its tool starts again. Cores and disk are the machine's. */
+    async #limitShared(name, c, tool, { memoryMb, diskGb, cpus } = {}) {
+        if ((diskGb !== undefined && diskGb !== null && diskGb !== '' && Number(diskGb) !== (c.diskGb ?? DISK_GB)) || (cpus !== undefined && cpus !== null && cpus !== '' && Number(cpus) !== (c.cpus ?? 1))) throw new Refusal(400, `Cores and disk are those of the shared machine ${c.sharedMachine}.`);
+        const memory = Number(memoryMb);
+        const size = this.#machineMbOf(c.sharedMachine);
+        const least = tool?.memoryMb ?? 512;
+        if (!Number.isInteger(memory) || memory < least || memory > size) throw new Refusal(400, `Its memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${size} MB (its shared machine's).`);
+        if (memory === c.memoryMb) throw new Refusal(409, 'Nothing to change: it already has this.');
+        const r = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-D', '-m', '0644', '-o', 'root', '-g', 'root', '/dev/stdin', `/etc/clavarium/limits/${name}`], { input: `mem=${memory}\nprocs=${SHARED_PROCS}\n`, timeoutMs: STEP_MS });
+        if (r.code !== 0) throw new Refusal(502, `Its limit could not be set: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+        this.#store.patch(name, { memoryMb: memory, restarted: `Its limit is now ${memory} MB, from its tool's next start.` });
+        return this.#store.get(name);
+    }
+
+    /* A SHARED MACHINE GIVEN MORE OR LESS MEMORY (#221), from the settings of any conversation in it: never less than
+       the largest limit of those in it; stopped cleanly, set, started again -- every conversation in it is
+       interrupted, the page says so before. Each then finds its place again (its work mounted) at its next opening. */
+    async resizeShared(name, { machineMb } = {}) {
+        const c = this.#busyCheck(name);
+        if (!c.sharedMachine) throw new Refusal(400, 'Not in a shared machine.');
+        const all = this.#store.all().filter((x) => x.sharedMachine === c.sharedMachine);
+        const now = this.#machineMbOf(c.sharedMachine);
+        const size = Number(machineMb);
+        const largest = Math.max(...all.map((x) => Number(x.memoryMb) || 0));
+        if (!Number.isInteger(size) || size < Math.max(1024, largest) || size > 16384) throw new Refusal(400, `The machine ${c.sharedMachine} has ${Math.max(1024, largest)} to 16384 MB (no less than the largest of its conversations).`);
+        if (size === now) throw new Refusal(409, 'Nothing to change: it already has this.');
+        for (const x of all) if (this.#acts.has(x.name)) throw this.#busy(x.name);
+        const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (state === undefined) throw new Refusal(410, 'The shared machine no longer exists.');
+        await this.room({ kind: 'grow', name, memoryMb: state === 'Running' ? Math.max(0, size - now) : 0, diskMb: 0 });
+        for (const x of all) { this.#cancelStop(x.name); this.drop(x.name); }
+        const fail = (what, r) => new Refusal(502, `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`);
+        if (state !== 'Stopped') { const r = await this.#vms.stop(name); if (r.code !== 0) throw fail('The shared machine did not stop', r); }
+        const set = await this.#vms.setMemory(name, size);
+        if (set.code !== 0) { await this.#vms.start(name).catch(() => undefined); throw fail('Its memory could not be set', set); }
+        const started = await this.#vms.start(name);
+        for (const x of all) {
+            this.#store.patch(x.name, { machineMb: size, toolStarted: false, restarted: `Its shared machine was restarted with ${size} MB.` });
+            this.#mountAgain.add(x.name); this.#fresh.add(x.name);
+        }
+        if (started.code !== 0) throw fail('The shared machine did not start again', started);
+        return this.#store.get(name);
     }
 
     #cancelStop(name) {

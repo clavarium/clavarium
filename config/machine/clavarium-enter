@@ -1,0 +1,47 @@
+#!/bin/sh
+# THE DOOR OF A CONVERSATION IN A SHARED MACHINE (#221), run as root by Clavarium for everything it runs for
+# that conversation:   clavarium-enter NAME -- COMMAND [ARGS...]
+#
+# The command runs as the conversation's own user (c-NAME, no sudo), in a mount namespace of its own where
+#   /work         is THIS conversation's work (the host mounts it at /srv/clavarium/NAME/work),
+#   /resources/*  are only those given to it (/srv/clavarium/NAME/resources),
+#   /tools        is the machine's (the same for all, read-only),
+#   ~             is /home/c-NAME (closed to the others),
+#   /tmp          is its own,
+# within a slice of its own (memory, processes: /etc/clavarium/limits/NAME, set by Clavarium). Seen from inside,
+# a conversation is alone in its machine: no tool, no agent needs to know.
+set -eu
+[ "$(id -u)" -eq 0 ] || { echo "clavarium-enter: run as root" >&2; exit 77; }
+name="${1:-}"; shift || true
+[ "${1:-}" = "--" ] && shift
+printf '%s' "$name" | grep -Eq '^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$' || { echo "clavarium-enter: not a conversation name" >&2; exit 64; }
+[ $# -gt 0 ] || { echo "clavarium-enter: no command" >&2; exit 64; }
+user="c-$name"; base="/srv/clavarium/$name"
+# Its user, made at its first entry: a home of its own, closed to the others; no sudo, ever.
+if ! id "$user" >/dev/null 2>&1; then
+    useradd --create-home --home-dir "/home/$user" --shell /bin/bash --user-group "$user"
+fi
+chmod 700 "/home/$user"
+mkdir -p "$base/work" "$base/resources" "$base/tmp"
+chown "$user:$user" "$base/tmp"; chmod 700 "$base/tmp"
+# Its limits (memory in MB, processes), when Clavarium set them.
+mem=""; procs=""
+[ -r "/etc/clavarium/limits/$name" ] && . "/etc/clavarium/limits/$name"
+# Into its own mount namespace: its /work, its resources, its /tmp; then its user, in its slice.
+exec unshare --mount --propagation private -- sh -c '
+    set -eu
+    base="$1"; user="$2"; mem="$3"; procs="$4"; shift 4
+    mkdir -p /work /resources
+    mount --bind "$base/work" /work
+    mount -t tmpfs -o mode=755,size=1m none /resources
+    for r in "$base"/resources/*; do [ -e "$r" ] || continue; mkdir -p "/resources/$(basename "$r")"; mount --rbind "$r" "/resources/$(basename "$r")"; done
+    mount --bind "$base/tmp" /tmp
+    # The processes of the others hidden (a procfs of its own, Linux 5.8+): only its own are seen.
+    mount -t proc -o hidepid=invisible proc /proc 2>/dev/null || true
+    cd "/home/$user" 2>/dev/null || cd /
+    set -- setpriv --reuid="$user" --regid="$user" --init-groups --reset-env -- env HOME="/home/$user" USER="$user" LOGNAME="$user" SHELL=/bin/bash PATH=/usr/local/bin:/usr/bin:/bin "$@"
+    if [ -n "$mem$procs" ] && command -v systemd-run >/dev/null 2>&1; then
+        exec systemd-run --quiet --scope --slice="clavarium-$user" ${mem:+-p MemoryMax=${mem}M} ${procs:+-p TasksMax=$procs} -- "$@"
+    fi
+    exec "$@"
+' clavarium-enter "$base" "$user" "$mem" "$procs" "$@"

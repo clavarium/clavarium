@@ -205,3 +205,12 @@ test('screen-watch: a long link broken over full lines is put back in one; type 
     assert.equal(got[0].match, url, 'the whole link');
     assert.deepEqual(actionsOn('… Not logged in · Run /login', rules, new Set()).map((a) => [a.kind, a.value]), [['type', '/login']]);
 });
+
+test('where a tool keeps its state (#351): paths in its home, without "..", its cache inside them; every assistant says it', () => {
+    const one = (state) => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], memoryMb: 768, install: [], state }]));
+    assert.deepEqual(one({ keep: ['.x', '.x.json'], skip: ['.x/cache'] })[0].state, { keep: ['.x', '.x.json'], skip: ['.x/cache'] });
+    assert.deepEqual(one({ keep: ['.x'] })[0].state, { keep: ['.x'], skip: [] });
+    for (const bad of [{}, { keep: [] }, { keep: ['/etc'] }, { keep: ['../x'] }, { keep: ['.'] }, { keep: ['.x'], skip: ['.y/cache'] }, { keep: ['a b'] }]) assert.throws(() => one(bad), /state/, JSON.stringify(bad));
+    const tools = loadTools();
+    for (const id of ['claude-code', 'opencode', 'codex', 'vibe', 'gemini']) assert.ok(tools.find((t) => t.id === id)?.state?.keep.length, `${id} says where its state is`);
+});

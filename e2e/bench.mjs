@@ -40,7 +40,7 @@ const TOOLS = readTools(JSON.stringify([
        so does what its rights add to every start (RIGHTS=full, or ask): the
        arguments after the script are variables of the shell it becomes.
        Its own instruction file gets the line that points to its guide (guide.mjs). */
-    { id: 'shell', label: 'Shell', instructions: '.tool/RULES.md', command: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> '], resume: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> ', 'RESUMED=1'], rights: { full: ['RIGHTS=full'], ask: ['RIGHTS=ask'] }, memoryMb: 768, install: [] },
+    { id: 'shell', label: 'Shell', instructions: '.tool/RULES.md', state: { keep: ['.bash_history'] }, command: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> '], resume: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> ', 'RESUMED=1'], rights: { full: ['RIGHTS=full'], ask: ['RIGHTS=ask'] }, memoryMb: 768, install: [] },
     { id: 'other', label: 'Other tool', command: ['env', 'PS1=other> ', 'bash', '--norc', '--noprofile'], memoryMb: 768, install: [] },
 ]));
 

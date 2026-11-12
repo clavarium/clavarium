@@ -676,3 +676,25 @@ test('vm suspend of a FROZEN qemu is refused at once (it would hang the VM manag
     assert.match(r.err, /frozen: a suspend would hang the VM manager; use Force stop/);
     assert.deepEqual(b.calls(), [], 'nothing was asked of the VM manager');
 });
+
+/* A SHARED MACHINE (#221): its conversations listed by the host itself; a work folder or a resource goes only into
+   the place, in that machine, of a conversation that lives in it -- never another's, never a machine of its own. */
+test('a shared machine: share records who lives in it; smount only for one of them, into its own place', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'host-shared-'));
+    try {
+        mkdirSync(join(dir, 'shared')); mkdirSync(join(dir, 'work', 'mail'), { recursive: true }); mkdirSync(join(dir, 'resources', 'docs'), { recursive: true });
+        writeFileSync(join(dir, 'shared', 'clv-assist'), 'mail\n');
+        const say = (...args) => spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', dir, '--mnt', dir, ...args], { encoding: 'utf8' });
+        assert.equal(say('vm', 'smount', 'clv-assist', 'mail', 'work', 'mail', '1000', '1000', '1001', '1001').stdout.trim(), `multipass mount -u 1000:1001 -g 1000:1001 ${dir}/work/mail clv-assist:/srv/clavarium/mail/work`);
+        assert.equal(say('vm', 'smount', 'clv-assist', 'mail', 'folder', 'docs', '1000', '1000', '1001', '1001').stdout.trim(), `multipass mount -u 1000:1001 -g 1000:1001 ${dir}/resources/docs clv-assist:/srv/clavarium/mail/resources/docs`);
+        for (const [args, why] of [
+            [['vm', 'smount', 'clv-assist', 'diary', 'work', 'diary', '1000', '1000', '1001', '1001'], /diary does not live in clv-assist/],
+            [['vm', 'smount', 'clv-assist', 'mail', 'work', 'mail', '1000', '1000', '1000', '1000'], /not the machine's admin/],
+            [['vm', 'smount', 'clv-assist', 'mail', 'work', 'other', '1000', '1000', '1001', '1001'], /belongs to its own conversation/],
+            [['vm', 'smount', 'clv-assist', 'mail', 'tools', 'tools', '1000', '1000', '1001', '1001'], /a shared mount is of/],
+            [['vm', 'share', 'clv-mail', 'mail'], /of its own is not shared/],
+            [['vm', 'share', 'other', 'mail'], /not one of our VMs/],
+        ]) { const r = say(...args); assert.notEqual(r.status, 0, args.join(' ')); assert.match(r.stderr, why); }
+        assert.equal(say('vm', 'sumount', 'clv-assist', 'mail', 'work').stdout.trim(), 'multipass umount clv-assist:/srv/clavarium/mail/work');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+});
