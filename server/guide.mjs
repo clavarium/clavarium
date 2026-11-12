@@ -89,6 +89,8 @@ export function commonText() {
         '- To talk to the person, when their chat is on: parley guide says how (parley --help, every command).',
         /* Dictation into the terminal is marked once per message (app.js); in the chat, parley read says it. */
         '- A message in your terminal that starts with a microphone sign (U+1F3A4), or that parley read says was dictated, came by voice: a word may be misheard; when a key word seems wrong, ask rather than guess.',
+        /* The commands, the one path every assistant has, MCP or not (#352): MCP tools, where given, are the same. */
+        '- Commands installed (each with --help): parley (the chat), docket (what woke you, your reminders), binder (the lists you were given), tether (your accesses, alone: what you were given; a server of tools: tether mcp TARGET, then tether mcp TARGET TOOL \'{json}\'). The same may also be among your tools (MCP).',
         '- The rest is yours to explore (ls, --help).',
         '',
     ].join('\n');

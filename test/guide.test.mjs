@@ -278,3 +278,8 @@ test("each tool's own instruction file is a line of its configuration, checked",
     assert.equal(one('.x/RULES.md')[0].instructions, '.x/RULES.md');
     assert.ok(!existsSync('/nonexistent-guide-check'));
 });
+
+test('the common part names the commands every assistant has, MCP or not (#352)', () => {
+    const t = commonText();
+    for (const c of ['parley', 'docket', 'binder', 'tether mcp TARGET', 'tether mcp TARGET TOOL']) assert.ok(t.includes(c), c);
+});
