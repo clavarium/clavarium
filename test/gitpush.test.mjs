@@ -637,32 +637,53 @@ test('To send at once: what is known here is listed with no fetch and no read, a
     await assert.rejects(b.review.push('site', { head: moved }), (e) => e.kind === 'look');
 });
 
-test('To send in the background: a repository is fetched once and read once for all its branches', async (t) => {
+test('To send, lightly: nothing asked of the remote, the branches listed first, only those that moved compared again -- from a partial read', async (t) => {
     let fetches = 0; const reads = [];
     const b = bench(t, { reads, wrap: async (argv, options, real) => { if (argv.includes('fetch')) fetches += 1; return real(argv, options); } });
     b.commit('a.txt', 'a\n', 'one');
     b.review.setRemote('site', { url: b.remote });
     const names = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9'];
     for (const n of names) { git(b.work, 'checkout', '--quiet', '-b', n, 'main'); b.commit(`${n}.txt`, `${n}\n`, n); }
+    /* The first time: no reference yet, so it is made (one fetch); listed, then read whole (nothing is had yet). */
     const all = await b.review.outgoingAll('site');
-    assert.deepEqual([fetches, reads.length], [1, 1], 'one fetch, one read');
+    assert.deepEqual([fetches, reads], [1, ['site --tips', 'site']]);
     assert.equal(all.agentBranches.length, 10);
     assert.equal(all.rows.length, 8, 'the branch that moved last and 7 others');
-    assert.equal(all.more, 2, 'the others are counted, not hidden');
+    assert.deepEqual([all.more, all.checked], [2, 8], 'the others are counted, not hidden');
+    assert.ok(all.fetchedAt, 'the page can say when the remote was last asked');
     assert.ok(all.rows.every((x) => x.state === 'ahead' && x.diff && x.commits.length > 0), 'each row is a whole review');
     assert.deepEqual(readdirSync(b.workRoot), [], 'the workspace is gone');
-    /* Each row reviewed is sendable as its own review was. */
-    const one = all.rows[0];
+    /* Opened again, nothing moved: listed only -- no fetch, no read, each row its review of before, sendable. */
+    reads.length = 0;
+    const again = await b.review.outgoingAll('site');
+    assert.deepEqual([fetches, reads, again.checked], [1, ['site --tips'], 0]);
+    assert.deepEqual(again.rows.map((x) => [x.branch, x.head, x.state, x.count, x.diff]), all.rows.map((x) => [x.branch, x.head, x.state, x.count, x.diff]));
+    assert.deepEqual(again.agentBranches, all.agentBranches);
+    /* One branch moved: listed, then read partially (what is had is left out), that branch alone compared again. */
+    git(b.work, 'checkout', '--quiet', 'b4');
+    const moved = b.commit('b4-more.txt', 'more\n', 'b4 again');
+    reads.length = 0;
+    const third = await b.review.outgoingAll('site');
+    assert.deepEqual([fetches, reads, third.checked], [1, ['site --tips', 'site --have'], 1]);
+    assert.deepEqual([third.rows[0].branch, third.rows[0].head, third.rows[0].count], ['b4', moved, 3], 'it moved last: first (a new branch: its three commits)');
+    assert.deepEqual(readdirSync(b.workRoot), []);
+    /* A row given again is sendable as its own review was. */
+    const one = again.rows.find((x) => x.branch === 'b2');
     assert.equal((await b.review.push('site', { head: one.head, target: one.target })).ok, true);
-    /* A remote that does not answer: said for the repository, nothing shown of the read made meanwhile, and its workspace gone. */
+    /* Sent: the remote's tip moved (Send fetches), so that branch is compared again -- now up to date. */
+    reads.length = 0;
+    const after = await b.review.outgoingAll('site');
+    assert.deepEqual([after.checked, after.rows.find((x) => x.branch === 'b2').state], [1, 'up-to-date']);
+    /* Asked to fetch, a remote that does not answer: said for the repository, nothing read, no workspace left. */
     b.review.setRemote('site', { url: join(b.dir, 'gone.git') });
-    const down = await b.review.outgoingAll('site');
-    assert.deepEqual([down.state, down.rows], ['unreachable', []]);
+    reads.length = 0;
+    const down = await b.review.outgoingAll('site', { fetch: true });
+    assert.deepEqual([down.state, down.rows, reads], ['unreachable', [], []]);
     assert.match(down.message, /did not answer/);
-    assert.deepEqual(readdirSync(b.workRoot), [], 'the workspace of that read is gone too');
+    assert.deepEqual(readdirSync(b.workRoot), []);
 });
 
-test('To send: the fetch from the remote and the read of the agent\'s repository run at the same time, not one after the other', async (t) => {
+test('a review of one branch: the fetch from the remote and the read of the agent\'s repository run at the same time, not one after the other', async (t) => {
     /* A far remote: each fetch takes a while. The read must have started before it ends. */
     const reads = []; const seen = [];
     const b = bench(t, { reads, wrap: async (argv, options, real) => {
@@ -673,16 +694,14 @@ test('To send: the fetch from the remote and the read of the agent\'s repository
     } });
     b.commit('a.txt', 'a\n', 'one');
     b.review.setRemote('site', { url: b.remote });
-    for (const ask of [() => b.review.outgoingAll('site'), () => b.review.outgoing('site')]) {
-        reads.length = 0; seen.length = 0;
-        const out = await ask();
-        assert.equal(out.rows?.[0]?.state ?? out.state, 'ahead');
-        assert.deepEqual([seen, reads.length], [[1], 1], 'the read began while the fetch was on its way; still one of each');
-        assert.deepEqual(readdirSync(b.workRoot), []);
-    }
+    const out = await b.review.outgoing('site');
+    assert.equal(out.state, 'ahead');
+    assert.deepEqual([seen, reads.length], [[1], 1], 'the read began while the fetch was on its way; still one of each');
+    assert.deepEqual(readdirSync(b.workRoot), []);
     /* A read that fails while the remote answers: said as before. */
     rmSync(join(b.work, '.git'), { recursive: true, force: true });
     mkdirSync(join(b.work, '.git'));
+    await assert.rejects(b.review.outgoing('site'), (e) => e instanceof GitFailure);
     await assert.rejects(b.review.outgoingAll('site'), (e) => e instanceof GitFailure);
     assert.deepEqual(readdirSync(b.workRoot), []);
 });

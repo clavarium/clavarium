@@ -12,11 +12,12 @@ export const ENV = { PATH: process.env.PATH, HOME: '/nonexistent', GIT_CONFIG_NO
 export const git = (cwd, ...argv) => execFileSync('git', argv, { cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 /* `host git read <name>`, played: `folderOf(name)` is where the folder is.
-   `reads` (optional) counts them; `code` forces an exit code. */
+   `reads` (optional) records them; `code` forces an exit code. */
 export function standInRead(folderOf, { reads, code, env = {} } = {}) {
-    return (name) => {
-        reads?.push(name);
-        return spawn(process.execPath, [FAKE_READ, folderOf(name), name], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env, ...(code !== undefined ? { FAKE_GIT_READ_CODE: String(code) } : {}) } });
+    return (name, how = []) => {
+        /* A whole read is recorded by its name; a list-only or partial one with its way too. */
+        reads?.push(how.length ? `${name} ${how[0]}` : name);
+        return spawn(process.execPath, [FAKE_READ, folderOf(name), name, ...how], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env, ...(code !== undefined ? { FAKE_GIT_READ_CODE: String(code) } : {}) } });
     };
 }
 

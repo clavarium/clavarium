@@ -182,6 +182,12 @@ names of refs == loose files under .git/refs/heads (not *.lock, no part starting
   else "BROKEN OR CHANGING REFS", 66;  more than 1000 -> "MORE THAN 1000 BRANCHES", 66
 no refs: print "# v2 git bundle\n\n", exit 128
 print "# v2 git bundle\n<refs>\n\n"; ids of refs | g pack-objects --stdout --revs --delta-base-offset -q
+  --tips: after the same checks, the header alone, exit 0 (To send lists branches with it)
+  --have <id>... (1 to 256, full ids): the ids that are commits here go to pack-objects as ^<id>:
+    only what is new travels; the header is the same whole list. The server lends the
+    reference and its kept packs (git-kept/<name>, checked when they came) to the workspace
+    BEFORE index-pack --strict, which refuses a pack whose links lead nowhere; every tip is
+    then walked to its roots; any failure there: the read is made again whole
 git failing: 66 (a signal re-raised)
 ```
 

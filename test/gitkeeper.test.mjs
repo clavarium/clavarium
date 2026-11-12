@@ -543,7 +543,7 @@ test('the reference is never what is read, and the workspaces are gone after eve
     await b.review.readTips('site');
     assert.deepEqual(Object.keys(b.review.tips('site')), ['main']);
     await settle(b);
-    assert.deepEqual(b.reads.every((n) => n === 'site'), true, 'only the agent\'s folder is read, never site-origin');
+    assert.deepEqual(b.reads.every((n) => n.split(' ')[0] === 'site'), true, 'only the agent\'s folder is read, never site-origin');
     assert.deepEqual(readdirSync(b.runner.workRoot), []);
 });
 

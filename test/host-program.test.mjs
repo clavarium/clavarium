@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, lstatSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, lstatSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -268,6 +268,16 @@ test('git read refuses any name but a folder\'s, never reads a reference, and ta
         assert.equal(r.out, '', `nothing would run: ${args.join(' ')}`);
     }
     for (const args of [['git', 'read'], ['git', 'read', 'site', 'extra'], ['git', 'stop']]) assert.equal(withMnt(...args).code, 64, args.join(' '));
+    /* The two other ways, and only them: --tips alone; --have and 1 to 256 full object ids. */
+    const ID = 'a'.repeat(40);
+    assert.deepEqual(withMnt('git', 'read', 'site', '--tips').out.split('\n').slice(-3), ['/usr/lib/clavarium/git-read', 'site', '--tips']);
+    assert.deepEqual(withMnt('git', 'read', 'site', '--have', ID, 'b'.repeat(40)).out.split('\n').slice(-5), ['/usr/lib/clavarium/git-read', 'site', '--have', ID, 'b'.repeat(40)]);
+    assert.equal(withMnt('git', 'read', 'site', '--have', ...Array(256).fill(ID)).code, 0);
+    for (const args of [['--tips', 'x'], ['--have'], ['--have', ...Array(257).fill(ID)], ['--tips', '--have', ID], ['--pack']]) assert.equal(withMnt('git', 'read', 'site', ...args).code, 64, args.join(' ').slice(0, 60));
+    for (const bad of ['A'.repeat(40), 'a'.repeat(39), 'a'.repeat(41), `${'a'.repeat(39)};`, '-x', '']) {
+        const r = withMnt('git', 'read', 'site', '--have', ID, bad);
+        assert.deepEqual([r.code, r.out], [78, ''], `refused, nothing run: ${bad}`);
+    }
     /* MNT is a path of plain characters, honoured only in "say only". */
     for (const bad of ['relative', '/a b', '/a:b', '/a/../b']) assert.equal(spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/x', '--mnt', bad, 'net', 'taps']).status, 78, bad);
     assert.equal(spawnSync('/bin/bash', [PROGRAM, '--mnt', '/tmp', 'net', 'taps']).status, 78);
@@ -306,7 +316,7 @@ test('the reader script, with a real git: healthy shapes of refs are read, never
         writeFileSync(join(repo, 'c.txt'), 'c\n'); g(repo, 'add', 'c.txt'); g(repo, 'commit', '--quiet', '-m', 'three');
         return { repo, first, main: g(repo, 'rev-parse', 'main'), next: g(repo, 'rev-parse', 'next') };
     };
-    const read = (repo, name) => spawnSync('sh', [READER, name], { cwd: repo, env, encoding: 'latin1' });
+    const read = (repo, name, ...how) => spawnSync('sh', [READER, name, ...how], { cwd: repo, env, encoding: 'latin1' });
     const header = (r) => r.stdout.slice(0, r.stdout.indexOf('\n\nPACK'));
     try {
         /* Loose main and next; packed-refs holds its header line and a remote's branch only. */
@@ -330,6 +340,55 @@ test('the reader script, with a real git: healthy shapes of refs are read, never
         r = read(gregoire.repo, 'gregoire');
         assert.deepEqual([r.status, r.stderr], [0, ''], r.stderr);
         assert.equal(header(r), `# v2 git bundle\n${gregoire.main} refs/heads/main\n${gregoire.next} refs/heads/main-clean\n${gregoire.next} refs/heads/next`);
+        /* LIST ONLY: the header and nothing more, after the same checks. */
+        r = read(gregoire.repo, 'gregoire', '--tips');
+        assert.deepEqual([r.status, r.stdout], [0, `# v2 git bundle\n${gregoire.main} refs/heads/main\n${gregoire.next} refs/heads/main-clean\n${gregoire.next} refs/heads/next\n\n`], r.stderr);
+        /* PARTIAL: what the commits had reach is left out; the header is the same whole list. */
+        const all = read(docket.repo, 'docket');
+        const part = read(docket.repo, 'docket', '--have', docket.first, 'f'.repeat(40));
+        assert.equal(part.status, 0, part.stderr);
+        assert.equal(header(part), header(all), 'every branch listed, moved or not');
+        const objects = (bytes) => bytes.readUInt32BE(bytes.indexOf('PACK', 0, 'latin1') + 8);
+        const wholeCount = objects(Buffer.from(all.stdout, 'latin1')); const partCount = objects(Buffer.from(part.stdout, 'latin1'));
+        assert.ok(partCount < wholeCount, `fewer objects travel (${partCount} of ${wholeCount})`);
+        /* Into a repository that has what was left out, the partial pack is whole; into an empty one, it is refused. */
+        const into = (alternate) => {
+            const ws = join(dir, `ws-${Math.random().toString(16).slice(2)}`);
+            g(dir, 'init', '--quiet', '--bare', ws);
+            if (alternate) writeFileSync(join(ws, 'objects', 'info', 'alternates'), `${join(alternate, '.git', 'objects')}\n`);
+            const pack = Buffer.from(part.stdout, 'latin1'); const at = pack.indexOf('PACK', 0, 'latin1');
+            return spawnSync('git', ['index-pack', '--stdin', '--strict'], { cwd: ws, env: { ...env, GIT_DIR: ws }, input: pack.subarray(at) }).status;
+        };
+        const had = join(dir, 'had'); mkdirSync(had);
+        g(had, 'init', '--quiet'); g(had, 'fetch', '--quiet', docket.repo, `${docket.first}:refs/heads/had`);
+        assert.deepEqual([into(had), into(null)], [0, 128]);
+        /* Every have it does not know (another id, not a commit) is dropped, never an error: a pack of all. */
+        const tree = g(docket.repo, 'rev-parse', `${docket.first}^{tree}`);
+        const none = read(docket.repo, 'docket', '--have', 'f'.repeat(40), tree);
+        assert.deepEqual([none.status, objects(Buffer.from(none.stdout, 'latin1'))], [0, wholeCount]);
+        /* Its arguments, checked by the reader too; and its refusals are a read's. */
+        for (const args of [['--have'], ['--have', 'xyz'], ['--have', 'A'.repeat(40)], ['--tips', 'x'], ['--other'], ['--have', ...Array(257).fill(docket.first)]]) {
+            const bad = read(docket.repo, 'docket', ...args);
+            assert.deepEqual([bad.status, bad.stderr.trim(), bad.stdout], [66, 'BAD ARGUMENTS', ''], args.join(' ').slice(0, 60));
+        }
+        for (const how of [['--tips'], ['--have', docket.first]]) {
+            writeFileSync(join(docket.repo, '.git', 'refs', 'heads', 'broken'), 'not an id\n');
+            let bad = read(docket.repo, 'docket', ...how);
+            assert.deepEqual([bad.status, bad.stderr.trim().split('\n').pop(), bad.stdout], [66, 'BROKEN OR CHANGING REFS', ''], how[0]);
+            rmSync(join(docket.repo, '.git', 'refs', 'heads', 'broken'));
+            writeFileSync(join(docket.repo, '.git', 'shallow'), `${docket.first}\n`);
+            bad = read(docket.repo, 'docket', ...how);
+            assert.deepEqual([bad.status, bad.stderr.trim(), bad.stdout], [66, 'SHALLOW REPOSITORY', ''], how[0]);
+            rmSync(join(docket.repo, '.git', 'shallow'));
+            renameSync(join(docket.repo, '.git'), join(docket.repo, 'moved'));
+            writeFileSync(join(docket.repo, '.git'), 'gitdir: moved\n');
+            bad = read(docket.repo, 'docket', ...how);
+            assert.deepEqual([bad.status, bad.stderr.trim(), bad.stdout], [66, 'NOT A PLAIN .git DIRECTORY', ''], how[0]);
+            rmSync(join(docket.repo, '.git')); renameSync(join(docket.repo, 'moved'), join(docket.repo, '.git'));
+        }
+        /* No branch: listed as none, 128, the 17 bytes, in both ways. */
+        const bare = join(dir, 'bare'); mkdirSync(bare); g(bare, 'init', '--quiet');
+        for (const how of [['--tips'], ['--have', docket.first]]) assert.deepEqual([read(bare, 'bare', ...how).status, read(bare, 'bare', ...how).stdout], [128, '# v2 git bundle\n\n'], how[0]);
         /* A ref file replaced while still open, kept by a shared folder (FUSE) under a dot name, and a dot folder: no refs, for git either. */
         writeFileSync(join(gambeli.repo, '.git', 'refs', 'heads', '.fuse_hidden0000002a00000003'), `${gambeli.first}\n`);
         mkdirSync(join(gambeli.repo, '.git', 'refs', 'heads', '.hidden'));
