@@ -448,6 +448,14 @@ test('the reader script: a plain .git only, readable refs only, every ref git sk
         assert.equal(run().stderr.trim(), 'BROKEN OR CHANGING REFS');
         standIn(dir, { listing: `${ID} refs/heads/main\n${ID} refs/heads/side` });
         assert.equal(run().status, 0);
+        /* Nothing of coreutils needed: with a sort and a cut that crash (as the Rust ones did in the sandbox),
+           the same repository is read, its two branches compared and packed. */
+        mkdirSync(join(dir, 'crash'));
+        /* One call in two crashes: one list made, the other empty -- what refused healthy repositories. */
+        for (const tool of ['sort', 'cut', 'uniq', 'wc', 'head', 'tr']) { writeFileSync(join(dir, 'crash', tool), `#!/bin/sh\nn=$(cat "${join(dir, 'crash', 'count')}" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "${join(dir, 'crash', 'count')}"\nif [ $((n % 2)) -eq 0 ]; then echo "Aborted (core dumped)" >&2; exit 134; fi\nexec /usr/bin/${tool} "$@"\n`); chmodSync(join(dir, 'crash', tool), 0o755); }
+        r = spawnSync('sh', [join(dir, 'reader'), 'repo'], { cwd: join(dir, 'repo'), encoding: 'latin1', env: { ...process.env, PATH: `${join(dir, 'crash')}:${process.env.PATH}` } });
+        assert.equal(r.status, 0, r.stderr);
+        assert.ok(r.stdout.startsWith(`# v2 git bundle\n${ID} refs/heads/main\n${ID} refs/heads/side\n\nPACK`), r.stdout);
         rmSync(join(dir, 'repo', '.git', 'packed-refs'));
         /* No branch: exactly the 17 bytes of an empty bundle, and 128. */
         rmSync(join(dir, 'repo', '.git', 'refs', 'heads', 'main'));
