@@ -9,12 +9,14 @@
 import { isConversationName, identifierFrom, titleProblem, groupProblem } from './names.mjs';
 import { JsonFile } from './store.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
-import { WORK, VM_USER, SHARING_STEP, stepLine } from './vm.mjs';
+import { WORK, VM_USER, SHARING_STEP, stepLine, vmName } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { availableParallelism } from 'node:os';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -75,7 +77,7 @@ const DOWN = ['polite', 'force', 'term', 'kill', 'check'];
 const NEXT = Object.freeze({ polite: 'force', force: 'term', term: 'kill' });
 /* Each step in words, for the journal and the chat (the page has its own, web/app.js). */
 const STEP_WORDS = Object.freeze({ polite: 'polite stop', force: 'forced stop', term: 'SIGTERM', kill: 'SIGKILL', check: 'check', start: 'start', suspend: 'sleep', resleep: 'wake and sleep again', stop: 'clean stop' });
-const KIND_DOING = Object.freeze({ start: 'starting', stop: 'stopping', restart: 'restarting', sleep: 'going to sleep', force: 'being forced off', resize: 'being resized' });
+const KIND_DOING = Object.freeze({ start: 'starting', stop: 'stopping', restart: 'restarting', sleep: 'going to sleep', force: 'being forced off', resize: 'being resized', move: 'moving to a shared machine' });
 /* THE WATCHDOG of a machine (watchdog.mjs), as its owner set it: on, with how long it may stay mute or
    full before it is forced off and started again. The defaults, and what may be chosen (minutes). */
 export const WATCHDOG_DELAY_MIN = 60;
@@ -943,6 +945,12 @@ export class Conversations {
         if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
         this.drop(name);
         await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+        try { return { tool: c.tool, from: await this.#unpack(name, c.tool, input) }; } finally { this.ready(name); }
+    }
+
+    /* An exported state unpacked into its home (its tool stopped by the caller): its manifest checked, then each
+       part put in place of the old. -> the manifest's { name, at }, or null. */
+    async #unpack(name, toolId, input) {
         /* Unpacked aside first: its manifest read, its tool checked; then moved into the home. */
         /* Aside in the home itself (never /tmp, which may be memory): then each part moved in place of the old. */
         const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; tar -xzf - -C "$m"; '
@@ -950,19 +958,101 @@ export class Conversations {
             + 'grep -q "\\"tool\\":\\"$1\\"" "$m/clavarium-conversation.json" || { echo "another tool" >&2; exit 4; }; '
             + 'cat "$m/clavarium-conversation.json"; rm -f "$m/clavarium-conversation.json"; '
             + 'for e in "$m"/.[!.]* "$m"/*; do if [ ! -e "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
-        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', c.tool]);
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', toolId]);
         const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
         const out = []; const err = [];
         child.stdout.on('data', (d) => out.push(d)); child.stderr.on('data', (d) => err.push(d));
         input.pipe(child.stdin);
         child.stdin.on('error', () => { /* it stopped reading: said below */ });
         const code = await new Promise((ok) => child.on('close', ok));
-        this.ready(name);
         if (code === 3) throw new Refusal(400, 'This is not an exported conversation.');
         if (code === 4) throw new Refusal(400, `This export is of another tool: import it into a conversation with that tool.`);
         if (code !== 0) throw new Refusal(502, `Not imported: ${firstLine(Buffer.concat(err).toString()) || `exit ${code}`}`);
         let from = null; try { from = JSON.parse(Buffer.concat(out).toString()); } catch { /* said nothing */ }
-        return { tool: c.tool, from: from ? { name: from.name, at: from.at } : null };
+        return from ? { name: from.name, at: from.at } : null;
+    }
+
+    /* MOVED INTO A SHARED MACHINE (#221, 12-11, its owner's ask: put existing conversations together). From a
+       machine of its own: its tool's state carried (state.keep, as an export), its machine stopped -- kept until the
+       end, to go back to -- its place made in the shared machine as for a new one, the state put back in its home,
+       then its old machine deleted. Its work folder is kept by the server: it simply follows. One on its machine's
+       own disk is refused (its files would stay behind): kept first (its settings, Its files).
+       -> the record, at once; `this.built`: the end of it. */
+    async moveToShared(name, { machine, machineMb } = {}) {
+        const c = this.#busyCheck(name);
+        if (c.sharedMachine) throw new Refusal(409, `It lives in the shared machine ${c.sharedMachine} already.`);
+        if (typeof machine !== 'string' || !isConversationName(machine)) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
+        if (machine === name || this.#store.get(machine)) throw new Refusal(400, 'A shared machine has a name of its own, not a conversation\'s.');
+        if (c.work !== 'kept') throw new Refusal(409, 'Its work is on its own machine\'s disk: it would stay behind. Keep it here first (Its files), then move it.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
+        const there = this.#machineMbOf(machine);
+        const size = there ?? machineMb ?? SHARED_MB;
+        if (there === undefined && (!Number.isInteger(size) || size < 1024 || size > 16384)) throw new Refusal(400, 'A shared machine has 1024 to 16384 MB of memory.');
+        const memory = Math.max(tool.memoryMb, Math.min(Number(c.memoryMb) || tool.memoryMb, size));
+        if (memory > size) throw new Refusal(400, `The machine ${machine} has ${size} MB of memory: ${tool.label} needs ${tool.memoryMb} MB.`);
+        const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (tool.state && state !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first, so that its tool\'s state can come along.', { retry: false });
+        if (there === undefined) await this.room({ kind: 'create', memoryMb: size });
+        const act = this.#take(name, 'move');
+        this.#cancelStop(name);
+        const now = new Date().toISOString();
+        this.#store.patch(name, { phase: 'building', step: `Moving to the shared machine ${machine}`, buildingSince: now, progress: buildProgress(now) });
+        this.built = this.#moving(name, c, tool, machine, size, memory, state).finally(() => this.#give(name, act));
+        return this.#store.get(name);
+    }
+
+    async #moving(name, c, tool, machine, size, memory, state) {
+        const old = vmName(name);
+        const dir = mkdtempSync(join(tmpdir(), 'clv-move-'));
+        const carried = join(dir, 'state.tar.gz');
+        const back = (why) => {
+            /* Back to its own machine, as it was (stopped: the next opening wakes it). */
+            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined });
+            this.#fresh.add(name); this.#mountAgain.add(name);
+            try { this.renewed(name, `Not moved to the shared machine ${machine}: ${why} It stays in its own machine, as it was.`, false); } catch { /* told, nothing more */ }
+        };
+        try {
+            this.drop(name);
+            if (state === 'Running') await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+            if (tool.state) {
+                this.#store.patch(name, { step: `Taking ${tool.label}'s state along` });
+                const { stream, child } = await this.exportState(name);
+                const failed = new Promise((ok) => child.on('error', () => ok(-1)));
+                const file = createWriteStream(carried, { mode: 0o600 });
+                stream.pipe(file);
+                const code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]);
+                await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
+                if (code !== 0) return back(`its tool's state could not be taken (exit ${code}).`);
+            }
+            if (state !== undefined) {
+                this.#store.patch(name, { step: 'Stopping its own machine' });
+                const stopped = await this.#vms.stop(name);
+                if (stopped.code !== 0) return back(`its machine did not stop: ${firstLine(stopped.stderr) || `exit ${stopped.code}`}.`);
+            }
+            this.#store.patch(name, { sharedMachine: machine, machineMb: size, memoryMb: memory });
+            await this.#buildShared(name, tool, memory);
+            const now = this.#store.get(name);
+            if (!now) return undefined; /* archived meanwhile */
+            if (now.phase !== 'ready') {
+                const why = now.error ?? 'its place there could not be made.';
+                await this.#vms.unshare(name).catch(() => {});
+                return back(`${why.replace(/\.?$/, '.')}`);
+            }
+            if (tool.state) {
+                this.#store.patch(name, { step: `Putting ${tool.label}'s state back` });
+                this.drop(name);
+                try { await this.#unpack(name, c.tool, createReadStream(carried)); } catch (error) {
+                    this.ready(name);
+                    this.renewed(name, `Moved to the shared machine ${machine}, but ${tool.label}'s state did not come along (${error.message}): it starts afresh. Its old machine is kept, stopped.`, true);
+                    return undefined;
+                }
+                this.ready(name);
+            }
+            await this.#vms.removeVm(old).catch(() => {});
+            this.renewed(name, `Moved to the shared machine ${machine}: its work folder${tool.state ? `, ${tool.label}'s state` : ''} and this chat came along. Its own machine is deleted.`, true);
+            return undefined;
+        } finally { rmSync(dir, { recursive: true, force: true }); }
     }
 
     async #fixup(name, tool) {

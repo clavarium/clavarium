@@ -2983,6 +2983,14 @@
         $('machine-size-title').textContent = sharedHere ? 'Memory' : 'Memory, cores and disk';
         if (sharedHere) { $('machine-size-hint').textContent = 'Its limit in the shared machine · from its next start'; $('machine-size-apply').textContent = 'Apply'; }
         $('shared-size').hidden = !sharedHere || here.phase !== 'ready';
+        /* Into a shared machine (#221): offered to one in a machine of its own; a shared machine there is offered first. */
+        $('into-shared').hidden = sharedHere || DEVICE || !here || here.phase !== 'ready';
+        if (!$('into-shared').hidden && document.activeElement !== $('into-shared-name')) {
+            const names = [...new Set(conversations.map((x) => x.sharedMachine).filter(Boolean))].sort();
+            $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
+            if (!$('into-shared-name').value && names.length) $('into-shared-name').value = names[0];
+            paintIntoShared();
+        }
         if (sharedHere && document.activeElement !== $('shared-memory')) {
             const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine);
             const floor = Math.max(1024, ...inIt.map((x) => x.memoryMb ?? 0)); const now = here.machineMb ?? floor;
@@ -3100,6 +3108,35 @@
     });
 
     /* ITS SHARED MACHINE'S MEMORY (#221): asked first, naming every conversation it interrupts. */
+    /* A new shared machine: its memory chosen; one that is there keeps its own. Work on its own disk: kept here first. */
+    function paintIntoShared() {
+        const here = conversations.find((x) => x.name === current);
+        const names = new Set(conversations.map((x) => x.sharedMachine).filter(Boolean));
+        const known = names.has($('into-shared-name').value.trim());
+        $('into-shared-mb').hidden = known; $('into-shared-mb-label').hidden = known;
+        const onDisk = here?.work === 'disk';
+        $('into-shared-hint').textContent = onDisk ? 'Keep its files here first (Where the tool works)' : 'Trial · work and tool state come along';
+        $('into-shared-apply').disabled = onDisk;
+    }
+    $('into-shared-name').addEventListener('input', () => paintIntoShared());
+    $('into-shared').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = current;
+        const here = conversations.find((x) => x.name === name);
+        if (!here || here.sharedMachine) return;
+        const machine = $('into-shared-name').value.trim();
+        if (!machine) { $('panel-error').textContent = 'Name the shared machine first.'; $('panel-error').hidden = false; return; }
+        const known = conversations.some((x) => x.sharedMachine === machine);
+        const machineMb = known ? undefined : Number($('into-shared-mb').value);
+        leavePanel();
+        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
+        show(`Move ${here.title ?? here.name} into the shared machine « ${machine} »${known ? '' : ` (new, ${sizeWords(machineMb)})`}? Its tool stops, its work and its state come along, then ITS OWN MACHINE IS DELETED.`,
+            'Move it', async () => {
+                disconnect(); say('moving', 'connecting'); show('Moving...'); $('notice-spin').hidden = false;
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/into-machine`, { machine, ...(machineMb ? { machineMb } : {}) }); await refresh(); enter(); }
+                catch (error) { show(error.message, 'Back', enter); }
+            }, resume);
+    });
     $('shared-size').addEventListener('submit', (event) => {
         event.preventDefault();
         const name = current;

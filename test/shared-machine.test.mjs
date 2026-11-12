@@ -4,7 +4,7 @@
    programs ended, its work taken out; the machine goes only with the last one. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Conversations, Refusal } from '../server/conversations.mjs';
@@ -14,9 +14,10 @@ import { readTools } from '../server/tools.mjs';
 
 const TOOLS = readTools(JSON.stringify([
     { id: 'tool', label: 'Tool', command: ['tool'], memoryMb: 1024, install: [['sudo', '-n', 'npm', 'install', '-g', 'tool'], ['tool', '--init']] },
+    { id: 'kept', label: 'Kept', command: ['kept'], memoryMb: 1024, install: [], state: { keep: ['.kept'] } },
 ]));
 
-function bench(t, { stopDelayMs } = {}) {
+function bench(t, { stopDelayMs, prefix = ['vmm'], refuse = () => false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-shared-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = []; const vms = new Map(); let installed = false; let uid = 1000;
@@ -25,6 +26,7 @@ function bench(t, { stopDelayMs } = {}) {
         const line = argv.join(' ');
         calls.push(line);
         const [area, verb, vm] = argv;
+        if (refuse(line)) return { code: 1, stdout: '', stderr: 'refused here' };
         if (area === 'work') return { code: 0, stdout: '', stderr: '' };
         if (verb === 'launch') { vms.set(vm, 'Running'); return { code: 0, stdout: '', stderr: '' }; }
         if (verb === 'start') { vms.set(vm, 'Running'); return { code: 0, stdout: '', stderr: '' }; }
@@ -44,7 +46,7 @@ function bench(t, { stopDelayMs } = {}) {
         return { code: 0, stdout: '', stderr: '' };
     };
     const store = new Store(join(dir, 'conversations.json'));
-    const machines = new Vms(run, ['vmm'], { freshMs: 0,
+    const machines = new Vms(run, prefix, { freshMs: 0,
         machineOf: (n) => store.get(n)?.sharedMachine, userOf: (n) => store.get(n)?.machineUser });
     const all = new Conversations({ store, vms: machines, tools: TOOLS, uid: 1000, gid: 1000, ...(stopDelayMs !== undefined ? { stopDelayMs } : {}) });
     return { calls, vms, store, all, users, alive };
@@ -150,4 +152,74 @@ test('in a shared machine, its memory is its limit (set without a restart); the 
     await b.all.resizeShared('diary', { machineMb: 6144 });
     assert.match(b.calls.join('\n'), /^vm stop clv-assist[^\n]*\n(?:[^\n]*\n)*vm set clv-assist memory 6144\n(?:[^\n]*\n)*vm start clv-assist/m, 'stopped, set, started');
     assert.equal(b.store.get('mail').machineMb, 6144); assert.equal(b.store.get('diary').machineMb, 6144);
+});
+
+/* MOVED INTO A SHARED MACHINE (#221, 12-11): from a machine of its own, its work following, its tool's state carried. */
+test('moved into a shared machine: its own stopped, its place made there, its own machine deleted at the end', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool' }); await b.all.built;
+    assert.equal(b.vms.get('clv-mail'), 'Running');
+    b.calls.length = 0;
+    const r = await b.all.moveToShared('mail', { machine: 'assist' });
+    assert.equal(r.phase, 'building');
+    await assert.rejects(b.all.moveToShared('mail', { machine: 'assist' }), /not ready|busy/, 'one move at a time');
+    await b.all.built;
+    const out = b.calls.join('\n');
+    assert.match(out, /^vm stop clv-mail$/m, 'its own machine stopped first');
+    assert.match(out, /^vm launch clv-assist 4096$/m);
+    assert.match(out, /^vm share clv-assist mail$/m);
+    assert.match(out, /^vm smount clv-assist mail work mail 1000 1000 1001 1001$/m, 'its work follows, for its own user');
+    assert.match(out, /^vm delete clv-mail$/m, 'its own machine deleted, at the end');
+    assert.ok(out.indexOf('vm delete clv-mail') > out.indexOf('vm smount clv-assist mail'), 'deleted only once its place is made');
+    const c = b.store.get('mail');
+    assert.equal(c.phase, 'ready'); assert.equal(c.sharedMachine, 'assist'); assert.equal(c.machineMb, 4096);
+    assert.deepEqual([...b.vms.keys()], ['clv-assist']);
+    /* A second one joins the same machine; its size is the machine's. */
+    b.all.create({ name: 'diary', tool: 'tool' }); await b.all.built;
+    await b.all.moveToShared('diary', { machine: 'assist', machineMb: 8192 }); await b.all.built;
+    assert.equal(b.store.get('diary').machineMb, 4096);
+    assert.deepEqual([...b.vms.keys()], ['clv-assist']);
+});
+
+test('moved into a shared machine: what is refused, said before anything is done', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool' }); await b.all.built;
+    b.all.create({ name: 'code', tool: 'tool', workOnDisk: true }); await b.all.built;
+    b.all.create({ name: 'diary', tool: 'tool', machine: 'assist' }); await b.all.built;
+    await assert.rejects(b.all.moveToShared('mail', { machine: 'Bad Name' }), /lower-case/);
+    await assert.rejects(b.all.moveToShared('mail', { machine: 'diary' }), /name of its own/);
+    await assert.rejects(b.all.moveToShared('mail', { machine: 'small', machineMb: 512 }), /1024 to 16384/);
+    await assert.rejects(b.all.moveToShared('code', { machine: 'assist' }), /own machine's disk/);
+    await assert.rejects(b.all.moveToShared('diary', { machine: 'other' }), /shared machine assist already/);
+    assert.equal(b.store.get('mail').phase, 'ready'); assert.equal(b.store.get('mail').sharedMachine, undefined);
+});
+
+test('moved into a shared machine: its place not made there -> back in its own machine, as it was, kept', async (t) => {
+    const b = bench(t, { refuse: (line) => /^vm share /.test(line) });
+    b.all.create({ name: 'mail', tool: 'tool', memoryMb: 1536 }); await b.all.built;
+    const told = []; b.all.renewed = (n, text) => told.push(text);
+    await b.all.moveToShared('mail', { machine: 'assist' }); await b.all.built;
+    const c = b.store.get('mail');
+    assert.equal(c.phase, 'ready'); assert.equal(c.sharedMachine, undefined); assert.equal(c.machineMb, undefined); assert.equal(c.memoryMb, 1536);
+    assert.equal(b.vms.has('clv-mail'), true, 'its own machine kept');
+    assert.doesNotMatch(b.calls.join('\n'), /^vm delete clv-mail$/m);
+    assert.match(told.at(-1), /Not moved to the shared machine assist: .*It stays in its own machine/);
+    await b.all.moveToShared('mail', { machine: 'assist' }).then(() => b.all.built);   /* may be asked again */
+});
+
+test('moved into a shared machine: its tool\'s state taken from its own machine and put back in its new home', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-move-vmm-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    /* The VM manager as the server runs it for a stream: an export prints the archive, an import keeps what it reads. */
+    const fake = join(dir, 'vmm');
+    writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do case "$a" in *"tar -czf"*) printf 'ARCHIVE-OF %s' "$3"; exit 0;; *"tar -xzf"*) { printf '%s:' "$3"; cat; } > "${dir}/imported"; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+exit 0
+`, { mode: 0o755 });
+    const b = bench(t, { prefix: [fake] });
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    await b.all.moveToShared('mail', { machine: 'assist' }); await b.all.built;
+    assert.equal(b.store.get('mail').sharedMachine, 'assist');
+    assert.equal(readFileSync(join(dir, 'imported'), 'utf8'), 'clv-assist:ARCHIVE-OF clv-mail', 'taken from its own machine, put back in the shared one');
+    assert.equal(b.vms.has('clv-mail'), false);
 });

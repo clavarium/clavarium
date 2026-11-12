@@ -79,3 +79,48 @@ test('in a shared machine, its settings: its limit (no cores nor disk of its own
     assert.match(await me.page.locator('#notice').innerText(), /IT IS STOPPED AND STARTED AGAIN/);
     assert.deepEqual(me.errors, []);
 });
+
+test('in a machine of its own, its settings: moved into a shared machine -- one there offered, a new one asks its memory, asked first', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.page.setViewportSize({ width: 1280, height: 900 });
+    await me.create('mail', 'Shell', { chat: false });
+    /* Another one seen living in the shared machine assist (the fake host makes no shared machine). */
+    await me.page.route('**/api/conversations', async (route) => {
+        if (route.request().method() !== 'GET') return route.continue();
+        const list = await (await route.fetch()).json();
+        const mine = list.find((c) => c.name === 'mail');
+        if (mine) list.push({ ...mine, name: 'diary', title: 'Diary', sharedMachine: 'assist', machineMb: 4096 });
+        await route.fulfill({ json: list });
+    });
+    let asked = null;
+    await me.page.route('**/api/conversations/mail/into-machine', async (route) => { asked = route.request().postDataJSON(); await route.fulfill({ status: 409, json: { error: 'Stopped here by the test.' } }); });
+    await me.page.reload();
+    await me.until('in the list', async () => me.page.locator('[data-name="mail"], [data-conversation="mail"]').first().isVisible().catch(() => false), 20_000).catch(() => {});
+    await me.page.locator('#folders').click();
+    await me.chapter('machine');
+    await me.until('offered', async () => me.page.locator('#into-shared').isVisible());
+    assert.equal(await me.page.locator('#shared-size').isVisible(), false);
+    assert.equal(await me.page.locator('#into-shared-name').inputValue(), 'assist', 'the shared machine there, offered first');
+    assert.equal(await me.page.locator('#into-shared-mb').isVisible(), false, 'its memory is its own');
+    await me.page.fill('#into-shared-name', 'helpers');
+    assert.equal(await me.page.locator('#into-shared-mb').isVisible(), true, 'a new one: its memory asked');
+    if (process.env.WHERE_SHOTS) for (const [w, h, name] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
+        await me.page.setViewportSize({ width: w, height: h });
+        for (const theme of ['dark', 'light']) {
+            await me.page.evaluate((x) => { document.documentElement.dataset.theme = x; }, theme);
+            await me.page.locator('#into-shared').scrollIntoViewIfNeeded();
+            await me.page.screenshot({ path: join(process.env.WHERE_SHOTS, `into-shared-${name}-${theme}.png`) });
+        }
+    }
+    await me.page.setViewportSize({ width: 1280, height: 900 });
+    await me.page.fill('#into-shared-name', 'assist');
+    await me.page.locator('#into-shared-apply').click();
+    await me.until('asked first', async () => /ITS OWN MACHINE IS DELETED/.test(await me.page.locator('#notice').innerText().catch(() => '')));
+    assert.match(await me.page.locator('#notice').innerText(), /« assist »/);
+    await me.page.locator('#notice button', { hasText: 'Move it' }).click();
+    await me.until('sent', async () => asked !== null);
+    assert.deepEqual(asked, { machine: 'assist' });
+    await me.until('the refusal said', async () => /Stopped here by the test/.test(await me.page.locator('#notice').innerText().catch(() => '')));
+    assert.deepEqual(me.errors.filter((e) => !/409/.test(e)), []);
+});
