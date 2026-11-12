@@ -16,11 +16,11 @@ const TOOLS = readTools(JSON.stringify([
     { id: 'tool', label: 'Tool', command: ['tool'], memoryMb: 1024, install: [['sudo', '-n', 'npm', 'install', '-g', 'tool'], ['tool', '--init']] },
 ]));
 
-function bench(t) {
+function bench(t, { stopDelayMs } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-shared-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = []; const vms = new Map(); let installed = false; let uid = 1000;
-    const users = new Map();
+    const users = new Map(); const alive = new Set();
     const run = async (argv, options = {}) => {
         const line = argv.join(' ');
         calls.push(line);
@@ -36,17 +36,18 @@ function bench(t) {
             if (cmd.includes('npm') && cmd.includes('-g')) installed = true;
             if (/command -v tool/.test(cmd.join(' '))) return { code: installed ? 0 : 1, stdout: '', stderr: '' };
             const door = cmd[2] === 'clavarium-enter' ? cmd[3] : null;
+            if (cmd.includes('has-session')) return { code: alive.has(door) ? 0 : 1, stdout: '', stderr: '' };
             if (door && cmd.includes('id -u; id -g')) { if (!users.has(door)) users.set(door, ++uid); return { code: 0, stdout: `${users.get(door)}\n${users.get(door)}\n`, stderr: '' }; }
             if (cmd.includes('/usr/local/sbin/clavarium-enter')) assert.match(options.input ?? '', /THE DOOR OF A CONVERSATION/);
-            if (cmd.some((x) => String(x).startsWith('/etc/clavarium/limits/'))) assert.equal(options.input, 'mem=1024\nprocs=1024\n');
+            if (cmd.some((x) => String(x).startsWith('/etc/clavarium/limits/'))) assert.match(options.input, /^mem=\d+\nprocs=1024\n$/);
         }
         return { code: 0, stdout: '', stderr: '' };
     };
     const store = new Store(join(dir, 'conversations.json'));
     const machines = new Vms(run, ['vmm'], { freshMs: 0,
         machineOf: (n) => store.get(n)?.sharedMachine, userOf: (n) => store.get(n)?.machineUser });
-    const all = new Conversations({ store, vms: machines, tools: TOOLS, uid: 1000, gid: 1000 });
-    return { calls, vms, store, all, users };
+    const all = new Conversations({ store, vms: machines, tools: TOOLS, uid: 1000, gid: 1000, ...(stopDelayMs !== undefined ? { stopDelayMs } : {}) });
+    return { calls, vms, store, all, users, alive };
 }
 
 test('two conversations in one shared machine: made once, a place each, its tool once for all, each its own user', async (t) => {
@@ -116,4 +117,37 @@ test('leaving a shared machine: its programs ended, its work taken out, the host
     assert.match(last, /userdel --remove c-diary/, 'erased: its user and home go');
     assert.match(last, /^vm delete clv-assist$/m, 'the last one gone: the machine goes');
     assert.equal(b.vms.size, 0);
+});
+
+test('one tool ends in a shared machine: its programs only, while another one there still has its tool; the machine stops with the last', async (t) => {
+    const b = bench(t, { stopDelayMs: 0 });
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist' }); await b.all.built;
+    b.all.create({ name: 'diary', tool: 'tool', machine: 'assist' }); await b.all.built;
+    const settle = () => new Promise((r) => setTimeout(r, 30));
+    b.alive.add('diary'); b.calls.length = 0;
+    assert.equal(await b.all.ended('mail'), false, 'its tool exited');
+    await settle();
+    assert.match(b.calls.join('\n'), /exec clv-assist -- sudo -n pkill -KILL -u c-mail/, 'its own programs ended');
+    assert.doesNotMatch(b.calls.join('\n'), /^vm stop/m, 'diary goes on');
+    b.alive.clear(); b.calls.length = 0;
+    await b.all.ended('diary'); await settle();
+    assert.match(b.calls.join('\n'), /^vm stop clv-assist/m, 'none left: the machine stops');
+});
+
+test('in a shared machine, its memory is its limit (set without a restart); the machine\'s own memory restarts it, for all', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist', machineMb: 4096 }); await b.all.built;
+    b.all.create({ name: 'diary', tool: 'tool', machine: 'assist' }); await b.all.built;
+    b.calls.length = 0;
+    await b.all.resize('mail', { memoryMb: 2048 });
+    assert.equal(b.store.get('mail').memoryMb, 2048);
+    assert.match(b.calls.join('\n'), /install -D -m 0644 -o root -g root \/dev\/stdin \/etc\/clavarium\/limits\/mail/);
+    assert.doesNotMatch(b.calls.join('\n'), /^vm (stop|set)/m, 'nothing stopped');
+    await assert.rejects(b.all.resize('mail', { memoryMb: 8192 }), /and 4096 MB/);
+    await assert.rejects(b.all.resize('mail', { memoryMb: 2048, diskGb: 20 }), /those of the shared machine/);
+    await assert.rejects(b.all.resizeShared('diary', { machineMb: 1024 }), /no less than the largest/);
+    b.calls.length = 0;
+    await b.all.resizeShared('diary', { machineMb: 6144 });
+    assert.match(b.calls.join('\n'), /^vm stop clv-assist[^\n]*\n(?:[^\n]*\n)*vm set clv-assist memory 6144\n(?:[^\n]*\n)*vm start clv-assist/m, 'stopped, set, started');
+    assert.equal(b.store.get('mail').machineMb, 6144); assert.equal(b.store.get('diary').machineMb, 6144);
 });

@@ -20,6 +20,7 @@
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
  *   POST /api/conversations/<name>/exit-report   why its tool ended: { now (read in its machine, if it runs), last (kept at its end) }
+ *   POST /api/conversations/<name>/machine {machineMb}  in a shared machine: that machine's memory, all in it restarted
  *   POST /api/conversations/<name>/archive
  *   POST /api/binder/suggest                {id}: at most three quick actions for that card -> {actions: [{key, label, why, on, ask?}]}
  *   POST /api/mailboxes/<name>/live          {smtp, email?}: that mailbox connected live too (send, move...), its password reused
@@ -958,6 +959,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (typeof body?.escalate === 'boolean') return send(200, conversations.setStopEscalate(conversation, body.escalate)), true;
             /* Its watchdog (watchdog.mjs): on or off, and how long it waits. */
             if (body?.watchdog && typeof body.watchdog === 'object') return send(200, conversations.setWatchdog(conversation, { on: typeof body.watchdog.on === 'boolean' ? body.watchdog.on : undefined, delayMin: body.watchdog.delayMin })), true;
+            /* Its shared machine's own memory (#221): the whole machine restarted, every conversation in it. */
+            if (body?.machineMb !== undefined) return send(200, await conversations.resizeShared(conversation, { machineMb: body.machineMb })), true;
             const resized = await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus });
             /* Asleep, nothing was started: the choice is only kept, for its wake. */
             return send(resized.phase === 'restarting' ? 202 : 200, resized), true;

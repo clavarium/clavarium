@@ -2952,7 +2952,8 @@
             cores.replaceChildren(...Array.from({ length: most }, (_, i) => i + 1).map((n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = `${n}${n === (here.cpus ?? 1) ? ' (now)' : ''}${n === most && n > 1 ? ' (all of this server)' : ''}`; return o; }));
             cores.value = String(here.cpus ?? 1);
             const least = here.memoryMinMb ?? 512;
-            const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least), here.memoryMb])].sort((a, b) => a - b);
+            /* In a shared machine (#221): its limit there, up to the machine's own memory. */
+            const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least && (!here.sharedMachine || m <= (here.machineMb ?? m))), here.memoryMb])].sort((a, b) => a - b);
             memory.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = `${sizeWords(m)}${m === here.memoryMb ? ' (now)' : ''}${m === least ? ' (least for its tool)' : ''}`; return o; }));
             memory.value = String(here.memoryMb);
             const now = here.diskGb ?? 8;
@@ -2974,6 +2975,21 @@
         $('machine-later-text').textContent = here?.sizeAtWake ? `Will be applied when it wakes: ${laterWords(here.sizeAtWake)}` : '';
         $('machine-later').hidden = !here?.sizeAtWake;
         $('machine-size-apply').textContent = here?.asleep === true ? 'Keep for its wake' : 'Apply...';
+        /* In a shared machine (#221): its memory is its limit there (no restart), cores and disk the machine's; the
+           machine's own memory below, which restarts all in it. */
+        const sharedHere = Boolean(here?.sharedMachine) && !DEVICE;
+        for (const id of ['machine-cpus', 'machine-disk']) { $(id).hidden = sharedHere; $(id).previousElementSibling.hidden = sharedHere; }
+        $('machine-memory').previousElementSibling.textContent = sharedHere ? 'Its limit' : 'Memory';
+        $('machine-size-title').textContent = sharedHere ? 'Memory' : 'Memory, cores and disk';
+        if (sharedHere) { $('machine-size-hint').textContent = 'Its limit in the shared machine · from its next start'; $('machine-size-apply').textContent = 'Apply'; }
+        $('shared-size').hidden = !sharedHere || here.phase !== 'ready';
+        if (sharedHere && document.activeElement !== $('shared-memory')) {
+            const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine);
+            const floor = Math.max(1024, ...inIt.map((x) => x.memoryMb ?? 0)); const now = here.machineMb ?? floor;
+            const sizes = [...new Set([now, ...MEMORY_CHOICES.filter((m) => m >= floor)])].sort((a, b) => a - b);
+            $('shared-memory').replaceChildren(...sizes.map((m) => Object.assign(document.createElement('option'), { value: String(m), textContent: `${sizeWords(m)}${m === now ? ' (now)' : ''}` })));
+            $('shared-memory').value = String(now);
+        }
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
@@ -3054,6 +3070,15 @@
         if (!here) return;
         const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value); const cpus = Number($('machine-cpus').value) || (here.cpus ?? 1);
         if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8) && cpus === (here.cpus ?? 1)) { $('panel-error').textContent = 'Nothing to change: choose another memory, cores or disk first.'; $('panel-error').hidden = false; return; }
+        /* In a shared machine: its limit, set at once -- nothing stopped. */
+        if (here.sharedMachine) {
+            $('panel-error').hidden = true;
+            void (async () => {
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb }); await refresh(); paintMachine(conversations.find((x) => x.name === name)); }
+                catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+            })();
+            return;
+        }
         const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', cpus !== (here.cpus ?? 1) ? `${cpus} core${cpus > 1 ? 's' : ''} (now ${here.cpus ?? 1})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
         /* Asleep: kept for its wake, from Settings, where it is then said; nothing is stopped or woken now. */
         if (here.asleep === true) {
@@ -3070,6 +3095,25 @@
             'Change it', async () => {
                 disconnect(); say('restarting', 'connecting'); show('Changing its machine...'); $('notice-spin').hidden = false;
                 try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb, diskGb, cpus }); await refresh(); enter(); }
+                catch (error) { show(error.message, 'Back', enter); }
+            }, resume);
+    });
+
+    /* ITS SHARED MACHINE'S MEMORY (#221): asked first, naming every conversation it interrupts. */
+    $('shared-size').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = current;
+        const here = conversations.find((x) => x.name === name);
+        if (!here?.sharedMachine) return;
+        const machineMb = Number($('shared-memory').value);
+        if (machineMb === here.machineMb) { $('panel-error').textContent = 'Nothing to change: choose another memory first.'; $('panel-error').hidden = false; return; }
+        const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine).map((x) => x.title ?? x.name);
+        leavePanel();
+        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
+        show(`Give the shared machine « ${here.sharedMachine} » ${sizeWords(machineMb)} of memory (now ${sizeWords(here.machineMb ?? 0)})? IT IS STOPPED AND STARTED AGAIN: ${inIt.join(', ')} ${inIt.length > 1 ? 'are' : 'is'} interrupted.`,
+            'Change it', async () => {
+                disconnect(); say('restarting', 'connecting'); show('Changing the shared machine...'); $('notice-spin').hidden = false;
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { machineMb }); await refresh(); enter(); }
                 catch (error) { show(error.message, 'Back', enter); }
             }, resume);
     });

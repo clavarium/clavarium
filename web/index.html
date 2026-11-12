@@ -213,7 +213,7 @@
             <div class="set-row"><div class="set-what"><b data-said="set-mesc">If a stop hangs</b></div><div class="set-control"><div class="levels" id="m-escalate" role="group" aria-label="If a stop hangs"><button type="button" data-on="true" data-said="set-mesc-auto">Force it</button><button type="button" data-on="false" data-said="set-mesc-ask">Ask me</button></div></div></div>
             <!-- ITS WATCHDOG (server/watchdog.mjs): mute or full that long, forced off then started, once. -->
             <div class="set-row" id="m-dog-row"><div class="set-what"><b data-said="set-mdog">Watchdog</b><small data-said="set-mdog-what">Restarts it if stuck</small></div><div class="set-control"><div class="levels" id="m-dog" role="group" aria-label="Watchdog"><button type="button" data-min="0" data-said="set-mdog-off">Off</button><button type="button" data-min="30">30 min</button><button type="button" data-min="60">1 h</button><button type="button" data-min="120">2 h</button><button type="button" data-min="custom" data-said="set-mdog-custom">Custom</button></div><label class="m-dog-min" id="m-dog-custom" hidden><input type="number" id="m-dog-min" min="10" max="1440" step="5" inputmode="numeric" aria-label="Minutes"> min</label></div></div>
-            <div class="panel-top"><b>Memory, cores and disk</b></div>
+            <div class="panel-top"><b id="machine-size-title">Memory, cores and disk</b></div>
             <form id="machine-size" autocomplete="off">
               <label for="machine-memory">Memory</label>
               <select id="machine-memory"></select>
@@ -226,6 +226,13 @@
               <!-- CHOSEN WHILE IT SLEEPS: kept, and applied when it wakes (server/conversations.mjs, #wakeResized). -->
               <p class="hint" id="machine-later" role="status" hidden><span id="machine-later-text"></span> · <button type="button" id="machine-later-cancel" class="inline">cancel</button></p>
               <div class="row"><button type="submit" id="machine-size-apply">Apply...</button></div>
+            </form>
+            <!-- ITS SHARED MACHINE'S OWN MEMORY (#221): the whole machine restarted, every conversation in it. -->
+            <form id="shared-size" autocomplete="off" hidden>
+              <label for="shared-memory">Shared machine memory</label>
+              <select id="shared-memory"></select>
+              <p class="hint" id="shared-size-hint">Restarts every conversation in it</p>
+              <div class="row"><button type="submit" id="shared-size-apply">Change...</button></div>
             </form>
             <div id="work-box">
             <div class="panel-top"><b>Where the tool works</b></div>

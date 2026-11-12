@@ -1019,6 +1019,7 @@ export class Conversations {
     async resize(name, asked = {}) {
         const c = this.#busyCheck(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
+        if (c.sharedMachine) return this.#limitShared(name, c, tool, asked);
         const { memory, disk, cpus } = this.#sizeAsked(c, tool, asked);
         if (c.asleep === true) return this.#later(name, c, { memoryMb: memory, cpus, diskGb: disk });
         const act = this.#take(name, 'resize');
@@ -1252,7 +1253,7 @@ export class Conversations {
         const timer = setTimeout(() => {
             this.#timers.delete(name);
             /* Not under an action of its owner's (a restart, a sleep): that one decides. */
-            if (!this.#watching.has(name) && !this.#acts.has(name)) { this.drop(name); void this.#vms.stop(name); }
+            if (!this.#watching.has(name) && !this.#acts.has(name)) { this.drop(name); void this.#stopUnlessShared(name); }
         }, this.#stopDelayMs);
         timer.unref?.();
         this.#timers.set(name, timer);
@@ -1749,6 +1750,65 @@ export class Conversations {
             const r = await this.#vms.workErase(name);
             if (r?.code) throw new Refusal(500, `Its machine is deleted, but its files could not be erased: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         }
+    }
+
+    /* ITS TOOL ENDED, ITS MACHINE STOPPED -- unless it is a shared machine (#221) where another conversation still
+       has its tool, a screen or an action: then only this one's programs end, the others go on. */
+    async #stopUnlessShared(name) {
+        const shared = this.#store.get(name)?.sharedMachine;
+        if (!shared) return this.#vms.stop(name);
+        for (const other of this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared)) {
+            if (this.#watching.has(other.name) || this.#acts.has(other.name) || this.#timers.has(other.name)) return this.#endShared(name);
+            const alive = await this.#vms.exec(other.name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`]).catch(() => ({ code: 1 }));
+            if (alive.code === 0) return this.#endShared(name);
+        }
+        return this.#vms.stop(name);
+    }
+    #endShared(name) { return this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: STEP_MS }).catch(() => undefined); }
+
+    /* ITS SHARE OF A SHARED MACHINE (#221): its memory there is its limit, at most the machine's; set without
+       stopping anything, read by its door when its tool starts again. Cores and disk are the machine's. */
+    async #limitShared(name, c, tool, { memoryMb, diskGb, cpus } = {}) {
+        if ((diskGb !== undefined && diskGb !== null && diskGb !== '' && Number(diskGb) !== (c.diskGb ?? DISK_GB)) || (cpus !== undefined && cpus !== null && cpus !== '' && Number(cpus) !== (c.cpus ?? 1))) throw new Refusal(400, `Cores and disk are those of the shared machine ${c.sharedMachine}.`);
+        const memory = Number(memoryMb);
+        const size = this.#machineMbOf(c.sharedMachine);
+        const least = tool?.memoryMb ?? 512;
+        if (!Number.isInteger(memory) || memory < least || memory > size) throw new Refusal(400, `Its memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${size} MB (its shared machine's).`);
+        if (memory === c.memoryMb) throw new Refusal(409, 'Nothing to change: it already has this.');
+        const r = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-D', '-m', '0644', '-o', 'root', '-g', 'root', '/dev/stdin', `/etc/clavarium/limits/${name}`], { input: `mem=${memory}\nprocs=${SHARED_PROCS}\n`, timeoutMs: STEP_MS });
+        if (r.code !== 0) throw new Refusal(502, `Its limit could not be set: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+        this.#store.patch(name, { memoryMb: memory, restarted: `Its limit is now ${memory} MB, from its tool's next start.` });
+        return this.#store.get(name);
+    }
+
+    /* A SHARED MACHINE GIVEN MORE OR LESS MEMORY (#221), from the settings of any conversation in it: never less than
+       the largest limit of those in it; stopped cleanly, set, started again -- every conversation in it is
+       interrupted, the page says so before. Each then finds its place again (its work mounted) at its next opening. */
+    async resizeShared(name, { machineMb } = {}) {
+        const c = this.#busyCheck(name);
+        if (!c.sharedMachine) throw new Refusal(400, 'Not in a shared machine.');
+        const all = this.#store.all().filter((x) => x.sharedMachine === c.sharedMachine);
+        const now = this.#machineMbOf(c.sharedMachine);
+        const size = Number(machineMb);
+        const largest = Math.max(...all.map((x) => Number(x.memoryMb) || 0));
+        if (!Number.isInteger(size) || size < Math.max(1024, largest) || size > 16384) throw new Refusal(400, `The machine ${c.sharedMachine} has ${Math.max(1024, largest)} to 16384 MB (no less than the largest of its conversations).`);
+        if (size === now) throw new Refusal(409, 'Nothing to change: it already has this.');
+        for (const x of all) if (this.#acts.has(x.name)) throw this.#busy(x.name);
+        const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (state === undefined) throw new Refusal(410, 'The shared machine no longer exists.');
+        await this.room({ kind: 'grow', name, memoryMb: state === 'Running' ? Math.max(0, size - now) : 0, diskMb: 0 });
+        for (const x of all) { this.#cancelStop(x.name); this.drop(x.name); }
+        const fail = (what, r) => new Refusal(502, `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`);
+        if (state !== 'Stopped') { const r = await this.#vms.stop(name); if (r.code !== 0) throw fail('The shared machine did not stop', r); }
+        const set = await this.#vms.setMemory(name, size);
+        if (set.code !== 0) { await this.#vms.start(name).catch(() => undefined); throw fail('Its memory could not be set', set); }
+        const started = await this.#vms.start(name);
+        for (const x of all) {
+            this.#store.patch(x.name, { machineMb: size, toolStarted: false, restarted: `Its shared machine was restarted with ${size} MB.` });
+            this.#mountAgain.add(x.name); this.#fresh.add(x.name);
+        }
+        if (started.code !== 0) throw fail('The shared machine did not start again', started);
+        return this.#store.get(name);
     }
 
     #cancelStop(name) {
