@@ -288,6 +288,64 @@ test('how a read ended is said from what systemd recorded: fixed codes only', ()
     for (const [result, how, status] of [['resources', '0', '0'], ['', '', ''], ['start-limit-hit', '0', '0'], ['exit-code', '2', '9'], ['exit-code', '1', 'x']]) assert.equal(code(result, how, status), '79', `${result}/${how}/${status}`);
 });
 
+test('the reader script, with a real git: healthy shapes of refs are read, never said to be broken', () => {
+    const READER = fileURLToPath(new URL('../deploy/git-read', import.meta.url));
+    const env = { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0', GIT_NO_REPLACE_OBJECTS: '1',
+        GIT_AUTHOR_NAME: 'Tool', GIT_AUTHOR_EMAIL: 'tool@example.com', GIT_COMMITTER_NAME: 'Tool', GIT_COMMITTER_EMAIL: 'tool@example.com' };
+    const dir = mkdtempSync(join(tmpdir(), 'clv-reader-real-'));
+    const g = (cwd, ...argv) => { const r = spawnSync('git', argv, { cwd, env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+    /* A repository with main and next as loose refs, as an agent leaves it. */
+    const made = (name) => {
+        const repo = join(dir, name); mkdirSync(repo);
+        g(repo, 'init', '--quiet', '--initial-branch=main');
+        writeFileSync(join(repo, 'a.txt'), 'a\n'); g(repo, 'add', 'a.txt'); g(repo, 'commit', '--quiet', '-m', 'one');
+        const first = g(repo, 'rev-parse', 'HEAD');
+        g(repo, 'switch', '--quiet', '-c', 'next');
+        writeFileSync(join(repo, 'b.txt'), 'b\n'); g(repo, 'add', 'b.txt'); g(repo, 'commit', '--quiet', '-m', 'two');
+        g(repo, 'switch', '--quiet', 'main');
+        writeFileSync(join(repo, 'c.txt'), 'c\n'); g(repo, 'add', 'c.txt'); g(repo, 'commit', '--quiet', '-m', 'three');
+        return { repo, first, main: g(repo, 'rev-parse', 'main'), next: g(repo, 'rev-parse', 'next') };
+    };
+    const read = (repo, name) => spawnSync('sh', [READER, name], { cwd: repo, env, encoding: 'latin1' });
+    const header = (r) => r.stdout.slice(0, r.stdout.indexOf('\n\nPACK'));
+    try {
+        /* Loose main and next; packed-refs holds its header line and a remote's branch only. */
+        const docket = made('docket');
+        writeFileSync(join(docket.repo, '.git', 'packed-refs'), `# pack-refs with: peeled fully-peeled sorted \n${docket.first} refs/remotes/origin/main\n`);
+        let r = read(docket.repo, 'docket');
+        assert.deepEqual([r.status, r.stderr], [0, ''], r.stderr);
+        assert.equal(header(r), `# v2 git bundle\n${docket.main} refs/heads/main\n${docket.next} refs/heads/next`);
+        /* Loose main and next, and an older main in packed-refs: the loose one wins, for git and here. */
+        const gambeli = made('gambeli');
+        writeFileSync(join(gambeli.repo, '.git', 'packed-refs'), `# pack-refs with: peeled fully-peeled sorted \n${gambeli.first} refs/heads/main\n`);
+        r = read(gambeli.repo, 'gambeli');
+        assert.deepEqual([r.status, r.stderr], [0, ''], r.stderr);
+        assert.equal(header(r), `# v2 git bundle\n${gambeli.main} refs/heads/main\n${gambeli.next} refs/heads/next`);
+        /* Loose main and main-clean; packed-refs holds main and next, next nowhere else (HEAD on it): next is read. */
+        const gregoire = made('gregoire');
+        g(gregoire.repo, 'branch', 'main-clean', gregoire.next);
+        writeFileSync(join(gregoire.repo, '.git', 'packed-refs'), `# pack-refs with: peeled fully-peeled sorted \n${gregoire.next} refs/heads/main\n${gregoire.next} refs/heads/next\n`);
+        rmSync(join(gregoire.repo, '.git', 'refs', 'heads', 'next'));
+        writeFileSync(join(gregoire.repo, '.git', 'HEAD'), 'ref: refs/heads/next\n');
+        r = read(gregoire.repo, 'gregoire');
+        assert.deepEqual([r.status, r.stderr], [0, ''], r.stderr);
+        assert.equal(header(r), `# v2 git bundle\n${gregoire.main} refs/heads/main\n${gregoire.next} refs/heads/main-clean\n${gregoire.next} refs/heads/next`);
+        /* A ref file replaced while still open, kept by a shared folder (FUSE) under a dot name, and a dot folder: no refs, for git either. */
+        writeFileSync(join(gambeli.repo, '.git', 'refs', 'heads', '.fuse_hidden0000002a00000003'), `${gambeli.first}\n`);
+        mkdirSync(join(gambeli.repo, '.git', 'refs', 'heads', '.hidden'));
+        writeFileSync(join(gambeli.repo, '.git', 'refs', 'heads', '.hidden', 'x'), `${gambeli.first}\n`);
+        r = read(gambeli.repo, 'gambeli');
+        assert.deepEqual([r.status, header(r)], [0, `# v2 git bundle\n${gambeli.main} refs/heads/main\n${gambeli.next} refs/heads/next`], r.stderr);
+        /* What git does skip is still refused: a broken file, a symbolic ref pointing nowhere. */
+        for (const [file, text] of [['broken', 'not an id\n'], ['nowhere', 'ref: refs/heads/gone\n']]) {
+            writeFileSync(join(gambeli.repo, '.git', 'refs', 'heads', file), text);
+            r = read(gambeli.repo, 'gambeli');
+            assert.deepEqual([r.status, r.stderr.trim().split('\n').pop(), r.stdout], [66, 'BROKEN OR CHANGING REFS', ''], file);
+            rmSync(join(gambeli.repo, '.git', 'refs', 'heads', file));
+        }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('the reader script: a plain .git only, readable refs only, every ref git skips refused, and git\'s own codes folded into the fixed ones', () => {
     const READER = fileURLToPath(new URL('../deploy/git-read', import.meta.url));
     const text = readFileSync(READER, 'utf8');

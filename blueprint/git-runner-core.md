@@ -178,7 +178,7 @@ g() { /usr/bin/git -c safe.directory=/resources/$NAME -c safe.bareRepository=exp
   -c pack.windowMemory=256m -c pack.useBitmaps=false "$@"; }
 g rev-parse --show-object-format = sha1, else "NOT SHA-1", 66
 refs = g for-each-ref --format='%(objectname) %(refname)' refs/heads/
-names of refs == loose files under .git/refs/heads (not *.lock) + refs/heads lines of packed-refs,
+names of refs == loose files under .git/refs/heads (not *.lock, no part starting with ".") + refs/heads lines of packed-refs,
   else "BROKEN OR CHANGING REFS", 66;  more than 1000 -> "MORE THAN 1000 BRANCHES", 66
 no refs: print "# v2 git bundle\n\n", exit 128
 print "# v2 git bundle\n<refs>\n\n"; ids of refs | g pack-objects --stdout --revs --delta-base-offset -q

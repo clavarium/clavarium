@@ -654,11 +654,37 @@ test('To send in the background: a repository is fetched once and read once for 
     /* Each row reviewed is sendable as its own review was. */
     const one = all.rows[0];
     assert.equal((await b.review.push('site', { head: one.head, target: one.target })).ok, true);
-    /* A remote that does not answer: said for the repository, nothing read. */
+    /* A remote that does not answer: said for the repository, nothing shown of the read made meanwhile, and its workspace gone. */
     b.review.setRemote('site', { url: join(b.dir, 'gone.git') });
     const down = await b.review.outgoingAll('site');
     assert.deepEqual([down.state, down.rows], ['unreachable', []]);
     assert.match(down.message, /did not answer/);
+    assert.deepEqual(readdirSync(b.workRoot), [], 'the workspace of that read is gone too');
+});
+
+test('To send: the fetch from the remote and the read of the agent\'s repository run at the same time, not one after the other', async (t) => {
+    /* A far remote: each fetch takes a while. The read must have started before it ends. */
+    const reads = []; const seen = [];
+    const b = bench(t, { reads, wrap: async (argv, options, real) => {
+        if (!argv.includes('fetch')) return real(argv, options);
+        await new Promise((resolve) => { setTimeout(resolve, 400); });
+        seen.push(reads.length);
+        return real(argv, options);
+    } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    for (const ask of [() => b.review.outgoingAll('site'), () => b.review.outgoing('site')]) {
+        reads.length = 0; seen.length = 0;
+        const out = await ask();
+        assert.equal(out.rows?.[0]?.state ?? out.state, 'ahead');
+        assert.deepEqual([seen, reads.length], [[1], 1], 'the read began while the fetch was on its way; still one of each');
+        assert.deepEqual(readdirSync(b.workRoot), []);
+    }
+    /* A read that fails while the remote answers: said as before. */
+    rmSync(join(b.work, '.git'), { recursive: true, force: true });
+    mkdirSync(join(b.work, '.git'));
+    await assert.rejects(b.review.outgoingAll('site'), (e) => e instanceof GitFailure);
+    assert.deepEqual(readdirSync(b.workRoot), []);
 });
 
 test('the list known at once changes nothing of Send: it fetches afresh and refuses what moved since the review', async (t) => {

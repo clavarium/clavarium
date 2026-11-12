@@ -67,8 +67,15 @@ format=$(g rev-parse --show-object-format) || failed $? "GIT COULD NOT OPEN THE 
 
 refs=$(g for-each-ref --format='%(objectname) %(refname)' refs/heads/) || failed $? "GIT COULD NOT LIST THE BRANCHES"
 listed=$(printf '%s\n' "$refs" | sed -n 's|^[0-9a-f]\{40\} ||p' | sort -u)
+# A file or folder whose name starts with a dot is no ref, for git either: no
+# ref name may have a part that starts with one (check-ref-format), so git
+# can never make it and never lists it. Such files do appear on their own:
+# a folder shared into a machine (sshfs, FUSE) keeps a ref file that was
+# replaced while something still had it open as .fuse_hidden<number>, beside
+# the new one, until it is closed. Counted, it refused healthy repositories
+# as "broken or changing".
 on_disk=$( {
-  [ -d .git/refs/heads ] && find -L .git/refs/heads -type f ! -name '*.lock' -printf 'refs/heads/%P\n'
+  [ -d .git/refs/heads ] && find -L .git/refs/heads -mindepth 1 -name '.*' -prune -o -type f ! -name '*.lock' -printf 'refs/heads/%P\n'
   [ -f .git/packed-refs ] && sed -n 's|^[0-9a-f]\{40\} \(refs/heads/.*\)$|\1|p' .git/packed-refs
 } | sort -u)
 [ "$listed" = "$on_disk" ] || { echo "BROKEN OR CHANGING REFS" >&2; exit 66; }
