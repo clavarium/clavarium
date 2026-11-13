@@ -755,12 +755,14 @@ test('vm halt ended by the server ("Force now"): its step ends at once, not at i
     const { dir, vm } = b;
     const child = spawn('/bin/bash', [PROGRAM, '--test', dir, 'vm', 'halt', vm], { env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin` } });
     let out = ''; child.stdout.on('data', (d) => { out += d; });
+    /* Ended once its polite step has begun -- not after a fixed time, which a loaded machine may not reach (12-11). */
+    const closed = new Promise((r) => child.on('close', (c, sig) => r(c ?? sig)));
+    for (let i = 0; i < 300 && !out.includes('step polite start'); i += 1) await new Promise((r) => setTimeout(r, 50));
     const started = Date.now();
-    await new Promise((r) => setTimeout(r, 700));
     child.kill('SIGTERM');
-    const code = await new Promise((r) => child.on('close', (c, sig) => r(c ?? sig)));
+    const code = await closed;
     assert.equal(code, 143);
-    assert.ok(Date.now() - started < 1800, 'ended before its two seconds');
+    assert.ok(Date.now() - started < 1800, 'ended at once, not at its two seconds');
     assert.equal(out.trim(), 'step polite start');
 });
 

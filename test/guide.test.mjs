@@ -278,3 +278,21 @@ test("each tool's own instruction file is a line of its configuration, checked",
     assert.equal(one('.x/RULES.md')[0].instructions, '.x/RULES.md');
     assert.ok(!existsSync('/nonexistent-guide-check'));
 });
+
+test('the common part names the commands every assistant has, MCP or not (#352)', () => {
+    const t = commonText();
+    for (const c of ['parley', 'docket', 'binder', 'tether mcp TARGET', 'tether mcp TARGET TOOL']) assert.ok(t.includes(c), c);
+});
+
+test('in a shared machine its own part goes to its own file, which its door shows at the usual place (#221)', async (t) => {
+    const b = bench(t, { conversations: { writer: { name: 'writer', tool: 'claude-code', work: 'kept', phase: 'ready' }, other: { name: 'other', tool: 'claude-code', work: 'kept', phase: 'ready' } } });
+    b.vms.shared = (name) => name === 'writer';
+    await b.guide.prepared('writer', true);
+    await b.guide.prepared('other', true);
+    const mine = b.sent.find((s) => s.name === 'writer' && s.argv.includes('install'));
+    assert.deepEqual(mine.argv, ['sudo', '-n', 'install', '-D', '-m', '0440', '-o', 'root', '-g', 'c-writer', '/dev/stdin', '/etc/clavarium/own/writer.md'], 'its own file, for its own user: never the machine-wide one another would overwrite');
+    assert.equal(readFileSync(join(b.root('writer'), '/etc/clavarium/own/writer.md'), 'utf8'), b.guide.own('writer'));
+    assert.equal(b.sent.find((s) => s.name === 'other' && s.argv.includes('install')).argv.at(-1), OWN_PATH, 'a machine of its own: as always');
+    assert.match(b.guide.own('writer'), /you are its user c-writer, NOT root \(no sudo\)/, 'told it has no sudo there');
+    assert.ok(!b.guide.own('other').includes('NOT root'));
+});
