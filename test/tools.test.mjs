@@ -7,7 +7,7 @@ test('the shipped catalogue loads, and no step of it is a shell line', () => {
     assert.ok(tools.length >= 2);
     for (const t of tools) {
         for (const step of t.steps) {
-            assert.ok(!step.argv.includes('-c') || step.argv[0] === 'sha256sum', `${t.id}: ${step.argv.join(' ')}`);
+            assert.ok(!step.argv.includes('-c') || step.argv.slice(0, 3).join(' ') === 'sudo -n sha256sum', `${t.id}: ${step.argv.join(' ')}`);
             assert.ok(!step.argv.some((a) => /[|;&`$]/.test(a) && !a.startsWith('https://')), `${t.id}: a step looks like shell`);
         }
     }
@@ -18,9 +18,9 @@ test('the runtime is checked BEFORE it is unpacked, with a checksum that comes f
     const program = (argv) => (argv[0] === 'sudo' ? argv[2] : argv[0]);
     const order = NODE_STEPS.map((s) => program(s.argv)).filter((p) => ['curl', 'sha256sum', 'tar'].includes(p));
     assert.deepEqual(order, ['curl', 'sha256sum', 'tar'], 'download, then check, then unpack');
-    const check = NODE_STEPS.find((s) => s.argv[0] === 'sha256sum');
+    const check = NODE_STEPS.find((s) => program(s.argv) === 'sha256sum');
     assert.ok(check.input.startsWith(NODE_SHA256));
-    const download = NODE_STEPS.find((s) => s.argv[0] === 'curl');
+    const download = NODE_STEPS.find((s) => program(s.argv) === 'curl');
     assert.ok(download.argv.includes('=https'), 'never anything but HTTPS');
 });
 
@@ -72,4 +72,8 @@ test('every tool but the shell is started with every right in its own machine, b
     assert.deepEqual(JSON.parse(claude.ask[1]), { permissions: { allow: ['Bash(parley:*)'] } });
     for (const id of ['codex', 'gemini', 'opencode']) assert.deepEqual(rights[id].ask, [], `${id}: asks as it does by itself`);
     assert.equal(rights.shell, undefined);
+});
+
+test('the runtime is fetched, checked, unpacked and removed by root alike: in a shared machine a step without sudo is its user\'s, with its own /tmp (#221)', () => {
+    for (const step of NODE_STEPS) assert.deepEqual(step.argv.slice(0, 2), ['sudo', '-n'], step.argv.join(' '));
 });

@@ -18,14 +18,16 @@ const ARCHIVE = `node-${NODE_VERSION}-linux-x64.tar.xz`;
 const TMP = `/tmp/${ARCHIVE}`;
 const APT = ['sudo', '-n', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get'];
 
-/* A step is { argv, input? }: `input` goes to standard input. */
+/* A step is { argv, input? }: `input` goes to standard input. Every one as root (sudo): in a shared machine a
+   step without sudo runs as the conversation's own user, behind its door, with its own /tmp -- the archive
+   fetched there would not be the one root unpacks (#221, 13-11: "tar: Error is not recoverable"). */
 export const NODE_STEPS = [
     { argv: [...APT, 'update', '-q'] },
     { argv: [...APT, 'install', '-y', '-q', '--no-install-recommends', 'curl', 'xz-utils', 'ca-certificates'] },
-    { argv: ['curl', '--proto', '=https', '--tlsv1.2', '-fsSL', '--max-time', '600', '-o', TMP, `https://nodejs.org/dist/${NODE_VERSION}/${ARCHIVE}`] },
-    { argv: ['sha256sum', '-c', '-'], input: `${NODE_SHA256}  ${TMP}\n` },
+    { argv: ['sudo', '-n', 'curl', '--proto', '=https', '--tlsv1.2', '-fsSL', '--max-time', '600', '-o', TMP, `https://nodejs.org/dist/${NODE_VERSION}/${ARCHIVE}`] },
+    { argv: ['sudo', '-n', 'sha256sum', '-c', '-'], input: `${NODE_SHA256}  ${TMP}\n` },
     { argv: ['sudo', '-n', 'tar', '-xJf', TMP, '-C', '/usr/local', '--strip-components=1', '--no-same-owner'] },
-    { argv: ['rm', '-f', TMP] },
+    { argv: ['sudo', '-n', 'rm', '-f', TMP] },
 ];
 
 /* "npm-writable": what npm installs globally becomes the machine user's, so
