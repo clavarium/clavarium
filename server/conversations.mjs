@@ -486,9 +486,11 @@ export class Conversations {
         /* Its tool: there already (another conversation installed it), or installed -- a step as root for the
            machine, any other as its own user (its settings, in its home). */
         const there = tool.steps.length === 0 || (await this.#vms.exec(name, ['sh', '-c', `command -v ${tool.command[0]}`])).code === 0;
-        for (const [i, step] of (there ? [] : tool.steps).entries()) {
+        /* There already: its own steps still (its settings, in its own home), the machine's not. */
+        const steps = there ? tool.steps.filter((s) => s.argv[0] !== 'sudo') : tool.steps;
+        for (const [i, step] of steps.entries()) {
             if (!this.#store.get(name)) return undefined;
-            this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${tool.steps.length})` });
+            this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${steps.length})` });
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }

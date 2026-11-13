@@ -46,13 +46,17 @@
         "@anthropic-ai/claude-code"
       ],
       "npm-writable",
+      [
+        "install",
+        "-D",
+        "-m",
+        "0600",
+        "/dev/null",
+        ".claude/settings.json"
+      ],
       {
         "argv": [
-          "install",
-          "-D",
-          "-m",
-          "0600",
-          "/dev/stdin",
+          "tee",
           ".claude/settings.json"
         ],
         "input": "{\n  \"theme\": \"dark-ansi\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(parley:*)\"\n    ]\n  }\n}\n"
@@ -137,13 +141,17 @@
         "@anthropic-ai/claude-code"
       ],
       "npm-writable",
+      [
+        "install",
+        "-D",
+        "-m",
+        "0600",
+        "/dev/null",
+        ".claude/settings.json"
+      ],
       {
         "argv": [
-          "install",
-          "-D",
-          "-m",
-          "0600",
-          "/dev/stdin",
+          "tee",
           ".claude/settings.json"
         ],
         "input": "{\n  \"theme\": \"dark-ansi\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(parley:*)\"\n    ]\n  }\n}\n"

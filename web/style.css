@@ -3049,3 +3049,11 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .list-item.machine-item > .set-what > small.status-line { font-size: .75rem; margin: 0; }
 #manager-row .status-line { margin: 2px 0 0; font-size: .75rem; }
 #machines-confirm { margin: 8px 16px; }
+/* A phone (13-11): the bar's five buttons tighter, so that all stay on the screen -- its name gives way, never the bar. */
+@media (max-width: 480px) {
+  html:not([data-door="device"]) #room > header #name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html:not([data-door="device"]) #room > header :is(.bar-right, .views) { flex: none; }
+  html:not([data-door="device"]) #room > header .views { gap: 0; padding: 2px; }
+  html:not([data-door="device"]) #room > header .views button { gap: 4px; padding-inline: 7px; }
+  html:not([data-door="device"]) #room > header .views .count { min-width: 1.2em; padding: 1px 4px; }
+}
