@@ -77,6 +77,7 @@ test('two conversations in one shared machine: made once, a place each, its tool
     assert.doesNotMatch(second, /vm launch/, 'the machine is there: not made again');
     assert.match(second, /^vm smount clv-assist diary work diary 1000 1000 1002 1002$/m, 'its own user, not the first one\'s');
     assert.doesNotMatch(second, /npm install -g tool/, 'the tool is there already');
+    assert.match(second, /exec clv-assist -- sudo -n clavarium-enter diary -- tool --init/, 'its own settings still, in its own home');
     assert.equal(b.store.get('diary').phase, 'ready');
     assert.equal(b.vms.size, 1, 'one machine for both');
     assert.throws(() => b.all.create({ name: 'x', tool: 'tool', machine: 'Bad Name' }), Refusal);

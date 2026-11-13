@@ -37,7 +37,7 @@ test('a malformed catalogue is refused with the name of what is wrong', () => {
 
 test('Claude Code is set to take its colours from the terminal, so that the page decides light or dark; and may run parley without asking', () => {
     const steps = loadTools().find((t) => t.id === 'claude-code').steps;
-    const settings = steps.find((s) => s.argv.at(-1) === '.claude/settings.json');
+    const settings = steps.find((s) => s.input && s.argv.at(-1) === '.claude/settings.json');
     assert.ok(settings, 'a step writes its settings');
     /* parley only writes in its own folder: asking each time would stop the chat on a question only the terminal shows. */
     assert.deepEqual(JSON.parse(settings.input), { theme: 'dark-ansi', permissions: { allow: ['Bash(parley:*)'] } });
@@ -76,4 +76,12 @@ test('every tool but the shell is started with every right in its own machine, b
 
 test('the runtime is fetched, checked, unpacked and removed by root alike: in a shared machine a step without sudo is its user\'s, with its own /tmp (#221)', () => {
     for (const step of NODE_STEPS) assert.deepEqual(step.argv.slice(0, 2), ['sudo', '-n'], step.argv.join(' '));
+});
+
+test('a step run as the machine\'s user never opens /dev/stdin: behind a shared machine\'s door its own user may not reopen the pipe (#221); tee reads it as it is', () => {
+    for (const t of loadTools()) {
+        for (const step of t.steps) {
+            if (step.argv[0] !== 'sudo') assert.ok(!step.argv.includes('/dev/stdin'), `${t.id}: ${step.argv.join(' ')}`);
+        }
+    }
 });
