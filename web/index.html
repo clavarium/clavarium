@@ -243,6 +243,17 @@
               <p class="hint" id="into-shared-hint">Trial · work and tool state come along</p>
               <div class="row"><button type="submit" id="into-shared-apply">Move...</button></div>
             </form>
+            <!-- A COPY OF IT (#221): its work, its AI's memory, its accesses; the original untouched. -->
+            <form id="copy-it" autocomplete="off" hidden>
+              <label for="copy-title">A copy of it</label>
+              <input id="copy-title" maxlength="60">
+              <label for="copy-where">Its machine</label>
+              <select id="copy-where"><option value="">Its own</option><option value="shared">A shared machine</option></select>
+              <input id="copy-machine" maxlength="32" list="machine-names" placeholder="assistants" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Shared machine" hidden>
+              <select id="copy-mb" aria-label="Its memory" hidden><option value="2048">2 GB</option><option value="4096" selected>4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option><option value="16384">16 GB</option></select>
+              <p class="hint" id="copy-hint">Work, AI memory and accesses · the original untouched</p>
+              <div class="row"><button type="submit" id="copy-apply">Copy...</button></div>
+            </form>
             <div id="work-box">
             <div class="panel-top"><b>Where the tool works</b></div>
             <p id="work-now" class="hint"><span><span id="work-now-text"></span></span><span id="work-now-why" class="tip" hidden></span></p>

@@ -2991,6 +2991,14 @@
             if (!$('into-shared-name').value && names.length) $('into-shared-name').value = names[0];
             paintIntoShared();
         }
+        /* A copy of it (#221): offered to any that is ready. */
+        $('copy-it').hidden = DEVICE || !here || here.phase !== 'ready';
+        if (!$('copy-it').hidden && ![$('copy-title'), $('copy-machine')].includes(document.activeElement)) {
+            if ($('copy-it').dataset.of !== here.name) { $('copy-it').dataset.of = here.name; $('copy-title').value = `${here.title ?? here.name} (copy)`; $('copy-where').value = ''; $('copy-machine').value = ''; }
+            const names = [...new Set(conversations.map((x) => x.sharedMachine).filter(Boolean))].sort();
+            $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
+            paintCopy();
+        }
         if (sharedHere && document.activeElement !== $('shared-memory')) {
             const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine);
             const floor = Math.max(1024, ...inIt.map((x) => x.memoryMb ?? 0)); const now = here.machineMb ?? floor;
@@ -3134,6 +3142,38 @@
             'Move it', async () => {
                 disconnect(); say('moving', 'connecting'); show('Moving...'); $('notice-spin').hidden = false;
                 try { await post(`${API}/conversations/${encodeURIComponent(name)}/into-machine`, { machine, ...(machineMb ? { machineMb } : {}) }); await refresh(); enter(); }
+                catch (error) { show(error.message, 'Back', enter); }
+            }, resume);
+    });
+    /* A COPY: in its own machine, or a shared one (there already, or new: its memory chosen). Work on its own disk: kept here first. */
+    function paintCopy() {
+        const here = conversations.find((x) => x.name === current);
+        const shared = $('copy-where').value === 'shared';
+        const known = conversations.some((x) => x.sharedMachine && x.sharedMachine === $('copy-machine').value.trim());
+        $('copy-machine').hidden = !shared; $('copy-mb').hidden = !shared || known;
+        const onDisk = here?.work === 'disk';
+        $('copy-hint').textContent = onDisk ? 'Keep its files here first (Where the tool works)' : 'Work, AI memory and accesses · the original untouched';
+        $('copy-apply').disabled = onDisk;
+    }
+    $('copy-where').addEventListener('change', () => { if ($('copy-where').value === 'shared' && !$('copy-machine').value) $('copy-machine').value = [...new Set(conversations.map((x) => x.sharedMachine).filter(Boolean))].sort()[0] ?? ''; paintCopy(); });
+    $('copy-machine').addEventListener('input', () => paintCopy());
+    $('copy-it').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = current;
+        const here = conversations.find((x) => x.name === name);
+        if (!here) return;
+        const title = $('copy-title').value.trim() || `${here.title ?? here.name} (copy)`;
+        const shared = $('copy-where').value === 'shared';
+        const machine = shared ? $('copy-machine').value.trim() : '';
+        if (shared && !machine) { $('panel-error').textContent = 'Name the shared machine first.'; $('panel-error').hidden = false; return; }
+        const known = shared && conversations.some((x) => x.sharedMachine === machine);
+        const machineMb = shared && !known ? Number($('copy-mb').value) : undefined;
+        leavePanel();
+        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
+        show(`Make « ${title} », a copy of ${here.title ?? here.name}${shared ? ` in the shared machine « ${machine} »${known ? '' : ` (new, ${sizeWords(machineMb)})`}` : ' in a machine of its own'}? Its work, its AI's memory and its accesses are copied; not its devices nor its reminders. The original is untouched.`,
+            'Copy it', async () => {
+                show('Copying...'); $('notice-spin').hidden = false;
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/copy`, { title, ...(machine ? { machine } : {}), ...(machineMb ? { machineMb } : {}) }); await refresh(); resume(); }
                 catch (error) { show(error.message, 'Back', enter); }
             }, resume);
     });

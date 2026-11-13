@@ -102,7 +102,7 @@ const sizeSaid = (c, asked = {}) => {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #uid; #gid;
+    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #holding = new Set(); #uid; #gid;
     /* THE ONE ACTION RUNNING ON EACH MACHINE (machineAction), by name: a start, a stop, a restart, a
        sleep, a resize, a force stop. A second one is refused while it runs; Force stop ends it and
        takes its place. */
@@ -147,6 +147,10 @@ export class Conversations {
        or growing a machine would leave this server less than its reserve
        (capacity.mjs). `{ kind: 'create'|'start'|'grow', name, memoryMb, diskMb }`. */
     room = async () => {};
+    /* Set by the server: a COPY's work folder made from its original's (host side, its own files only), and the
+       accesses of the original given to the copy (copy, below). */
+    copyWork = async () => {};
+    copyRights = async () => {};
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
@@ -428,6 +432,8 @@ export class Conversations {
         }
         /* A new disk holds no session of the tool: its first start is a plain
            one (`false`: known, as opposed to a record made before this was kept). */
+        /* A copy being made (copy): built, but not usable until its work and its state are in. */
+        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', toolStarted: false }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
         this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
         this.#reach(name, 'folders');
         /* A machine that has just been built holds nothing of what was put
@@ -486,6 +492,7 @@ export class Conversations {
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
+        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', toolStarted: false }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
         this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
         this.#reach(name, 'folders');
         this.#fresh.add(name);
@@ -970,6 +977,83 @@ export class Conversations {
         if (code !== 0) throw new Refusal(502, `Not imported: ${firstLine(Buffer.concat(err).toString()) || `exit ${code}`}`);
         let from = null; try { from = JSON.parse(Buffer.concat(out).toString()); } catch { /* said nothing */ }
         return from ? { name: from.name, at: from.at } : null;
+    }
+
+    /* A COPY OF A CONVERSATION (#221, 13-11, its owner's ask: safer than a move -- nothing is destroyed). A new
+       conversation, in a machine of its own or a shared one, with what its original has: its work folder (its
+       chat with it), its tool's state (the AI's memory), its settings, and the accesses it was given. Its devices,
+       its reminders and its pending asks are NOT copied: one of the two answers them, the original. Its original is
+       not touched; asleep, its machine is woken the time to read its tool's state, then put to sleep again.
+       -> the copy's record, at once; `this.copied`: the end of it. */
+    async copy(name, { title, machine, machineMb } = {}) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (c.phase !== 'ready') throw new Refusal(409, 'It is busy: copy it once it is ready.');
+        if (c.work !== 'kept') throw new Refusal(409, 'Its work is on its own machine\'s disk: it cannot be copied from here. Keep it here first (Its files), then copy it.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
+        const shared = machine !== undefined && machine !== null && machine !== '';
+        const size = shared ? this.#machineMbOf(machine) ?? machineMb ?? SHARED_MB : undefined;
+        const memory = shared ? Math.max(tool.memoryMb, Math.min(Number(c.memoryMb) || tool.memoryMb, Number(size) || SHARED_MB)) : Number(c.memoryMb) || tool.memoryMb;
+        const label = typeof title === 'string' && title.trim() ? title.trim() : `${c.title ?? c.name} (copy)`;
+        await this.admit({ title: label, tool: c.tool, memoryMb: memory, ...(shared ? { machine, machineMb } : {}) });
+        const made = this.create({ title: label, tool: c.tool, memoryMb: memory, ...(shared ? { machine, machineMb } : { cpus: c.cpus, diskGb: c.diskGb }), ...(c.group ? { group: c.group } : {}) });
+        /* Before its build can end (it awaits first): held, never usable half made. */
+        this.#holding.add(made.name);
+        this.#store.patch(made.name, { copyOf: name });
+        const building = this.built;
+        this.copied = this.#copying(name, made.name, c, tool, building);
+        return this.#store.get(made.name);
+    }
+
+    async #copying(from, to, c, tool, building) {
+        const dir = mkdtempSync(join(tmpdir(), 'clv-copy-'));
+        const carried = join(dir, 'state.tar.gz');
+        let woke = false;
+        try {
+            await building;
+            const built = this.#store.get(to);
+            if (!built) return undefined;   /* erased meanwhile */
+            if (built.phase === 'failed') throw new Error(built.error ?? 'its machine could not be made.');
+            this.#store.patch(to, { step: 'Copying its work' });
+            await this.copyWork(from, to);
+            if (tool.state) {
+                this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
+                const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
+                if (state !== 'Running') {
+                    await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
+                    const started = await this.#vms.start(from);
+                    if (started.code !== 0) throw new Error(`its original's machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
+                    woke = true;
+                }
+                const { stream, child } = await this.exportState(from);
+                const failed = new Promise((ok) => child.on('error', () => ok(-1)));
+                const file = createWriteStream(carried, { mode: 0o600 });
+                stream.pipe(file);
+                const code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]);
+                await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
+                if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}).`);
+                if ((await this.#vms.state(to, { fresh: true }).catch(() => undefined)) !== 'Running') {
+                    const started = await this.#vms.start(to);
+                    if (started.code !== 0) throw new Error(`its machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
+                }
+                await this.#unpack(to, c.tool, createReadStream(carried));
+            }
+            this.#store.patch(to, { step: 'Giving it the same accesses' });
+            await this.copyRights(from, to);
+            this.#holding.delete(to);
+            if (!this.#store.get(to)) return undefined;
+            this.#store.patch(to, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined });
+            this.ready(to);
+            return undefined;
+        } catch (error) {
+            this.#holding.delete(to);
+            if (this.#store.get(to)) this.#store.patch(to, { phase: 'failed', step: undefined, progress: undefined, buildingSince: undefined, error: `Not copied: ${String(error?.message ?? error).replace(/\.?$/, '.')} Its original is untouched; erase this copy.` });
+            return undefined;
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+            if (woke) await this.sleep(from).catch(() => {});
+        }
     }
 
     /* MOVED INTO A SHARED MACHINE (#221, 12-11, its owner's ask: put existing conversations together). From a

@@ -498,9 +498,9 @@ details.chapter.reached { outline: 2px solid var(--brass); outline-offset: 2px; 
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
 .facts dt { color: var(--ink2); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
-#machine-size, #shared-size, #into-shared { display: flex; flex-direction: column; gap: 6px; max-width: 30rem; }
-#machine-size label, #shared-size label, #into-shared label { font-size: .8125rem; color: var(--ink2); }
-#machine-size select, #shared-size select, #into-shared :is(select, input) { width: 100%; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
+#machine-size, #shared-size, #into-shared, #copy-it { display: flex; flex-direction: column; gap: 6px; max-width: 30rem; }
+#machine-size label, #shared-size label, #into-shared label, #copy-it label { font-size: .8125rem; color: var(--ink2); }
+#machine-size select, #shared-size select, #into-shared :is(select, input), #copy-it :is(select, input) { width: 100%; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
 .health-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .health-lines li { padding-left: 1.3em; position: relative; }
 .health-lines li::before { content: ""; position: absolute; left: .2em; top: .45em; width: .55em; height: .55em; border-radius: 50%; background: var(--ok); }
@@ -1909,12 +1909,13 @@ button.tip-btn:hover, button.tip-btn[aria-expanded="true"] { color: var(--brass-
 :is(#settings, #panel) .chapter-body .panel-top { border: 0; }
 :is(#settings, #panel) .chapter-body .panel-top > b { font-size: .6875rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
 /* The machine's size: each a row, its name on the left, its choice on the right. */
-#panel :is(#machine-size, #shared-size, #into-shared) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 16rem); gap: 10px 16px; align-items: center; max-width: none; }
-#panel :is(#machine-size, #shared-size, #into-shared) > label { font-size: .875rem; font-weight: 600; color: var(--ink); }
-#panel :is(#machine-size, #shared-size, #into-shared) > :is(p, .row) { grid-column: 1 / -1; }
-#panel :is(#machine-size, #shared-size, #into-shared) > .row { justify-content: flex-end; }
-#shared-size[hidden], #into-shared[hidden], #into-shared [hidden] { display: none; }
-@media (max-width: 560px) { #panel :is(#machine-size, #into-shared) { grid-template-columns: minmax(0, 1fr); } }
+#panel :is(#machine-size, #shared-size, #into-shared, #copy-it) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 16rem); gap: 10px 16px; align-items: center; max-width: none; }
+#panel :is(#machine-size, #shared-size, #into-shared, #copy-it) > label { font-size: .875rem; font-weight: 600; color: var(--ink); }
+#panel :is(#machine-size, #shared-size, #into-shared, #copy-it) > :is(p, .row) { grid-column: 1 / -1; }
+#panel :is(#machine-size, #shared-size, #into-shared, #copy-it) > .row { justify-content: flex-end; }
+#shared-size[hidden], #into-shared[hidden], #into-shared [hidden], #copy-it[hidden], #copy-it [hidden] { display: none; }
+#panel #copy-it > :is(#copy-machine, #copy-mb) { grid-column: 2; }
+@media (max-width: 560px) { #panel :is(#machine-size, #into-shared, #copy-it) > :is(#copy-machine, #copy-mb) { grid-column: 1; } #panel :is(#machine-size, #into-shared, #copy-it) { grid-template-columns: minmax(0, 1fr); } }
 /* A chapter whose body is one block (Updates, Network): its pieces are the rows, not the block. */
 :is(#settings, #panel) .chapter-body > :is(#updates, #wifi) { padding: 0; }
 :is(#updates, #wifi) > * { margin: 0; padding: 12px 16px; }

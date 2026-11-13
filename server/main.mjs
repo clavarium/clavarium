@@ -92,6 +92,7 @@ import { Features, handleFeatures, cached } from './features.mjs';
 import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs';
 import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
+import { copyWorkFolder } from './copywork.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MAINTENANCE = 'deploy/maintenance.html';
@@ -666,6 +667,21 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         reclaim: (name) => { events.add({ kind: 'machine', text: `Machine of ${name}: memory reclaimed (it was asleep but still held RAM)`, conversation: name }); return vms.reclaim(name).then((r) => (r.stdout || '').trim()); },
         say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
     all.room = (ask) => capacity.check(ask);
+    /* A COPY (conversations.copy): its work folder from its original's, host side -- what is its alone left out
+       (its reminders, its pending asks to the keepers, its devices, its chat's live files) -- then the same accesses. */
+    all.copyWork = (from, to) => copyWorkFolder(folders.workFolder(from), folders.workFolder(to));
+    all.copyRights = async (from, to) => {
+        for (const r of folders.of(from)) {
+            if (r.access === 'write') gitKeeper?.beforeWriter(r.name, to, true);
+            await folders.attach(to, r.name, r.access);
+        }
+        for (const s of secrets.of(from)) secrets.attach(to, s, true);
+        tethers?.copyGrants(from, to);
+        binders?.copyGrants(from, to);
+        if (talk.isOn(from)) await talk.set(to, true).catch(() => {});
+        const lines = guide.lines(from);
+        if (lines.length) await guide.setLines(to, lines).catch(() => {});
+    };
     /* A tool that ended cut for lack of memory: said in the events, to the owner, and in its chat. */
     all.onToolExit = (name, report) => {
         if (!report?.oom?.length) return;
