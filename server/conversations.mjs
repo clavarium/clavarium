@@ -102,7 +102,7 @@ const sizeSaid = (c, asked = {}) => {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #holding = new Set(); #uid; #gid;
+    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #holding = new Set(); #borrowed = new Set(); #uid; #gid;
     /* THE ONE ACTION RUNNING ON EACH MACHINE (machineAction), by name: a start, a stop, a restart, a
        sleep, a resize, a force stop. A second one is refused while it runs; Force stop ends it and
        takes its place. */
@@ -1033,6 +1033,10 @@ export class Conversations {
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
                 if (state !== 'Running') {
                     await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
+                    /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
+                       holding memory (capacity.mjs, reclaimSleepers) does not put it back to sleep while it is read --
+                       the reading would end cut (13-11: exit 255). */
+                    this.#borrowed.add(from);
                     const started = await this.#vms.start(from);
                     if (started.code !== 0) throw new Error(`its original's machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
                     woke = true;
@@ -1073,6 +1077,7 @@ export class Conversations {
         } finally {
             rmSync(dir, { recursive: true, force: true });
             if (woke) await this.sleep(from).catch(() => {});
+            this.#borrowed.delete(from);
         }
     }
 
@@ -1634,7 +1639,8 @@ export class Conversations {
     awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true && c.stopped !== true).map((c) => c.name); }
     /* Put to sleep, and nothing else: not one being built (02-11: a reset machine was taken for a sleeper and
        suspended mid-build), not a failed one. */
-    asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true).map((c) => c.name); }
+    /* (One woken the time a copy reads it -- #borrowed -- is not asleep then: its memory is never "reclaimed" under it.) */
+    asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true && !this.#borrowed.has(c.name)).map((c) => c.name); }
 
     /* Whether the machine of a conversation runs right now. */
     async running(name) { return (await this.#vms.state(name)) === 'Running'; }
