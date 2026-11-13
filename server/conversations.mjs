@@ -102,7 +102,7 @@ const sizeSaid = (c, asked = {}) => {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #holding = new Set(); #uid; #gid;
+    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #holding = new Set(); #borrowed = new Set(); #uid; #gid;
     /* THE ONE ACTION RUNNING ON EACH MACHINE (machineAction), by name: a start, a stop, a restart, a
        sleep, a resize, a force stop. A second one is refused while it runs; Force stop ends it and
        takes its place. */
@@ -462,10 +462,14 @@ export class Conversations {
             const sharing = await this.#vms.execMachine(name, [...SHARING_STEP], { timeoutMs: STEP_MS });
             if (sharing.code !== 0) return fail('The shared machine could not be prepared for shared folders', sharing);
         } else if (state !== 'Running') {
+            this.#store.patch(name, { step: `Starting the shared machine ${c.sharedMachine}` });
             const started = await this.#vms.start(name);
             if (started.code !== 0) return fail('The shared machine did not start', started);
         }
-        /* Its door, always the one of this version (put again: an older one is replaced). */
+        /* Its door, always the one of this version (put again: an older one is replaced). The page's steps follow
+           (preparing, installing): a new shared machine takes minutes, never one frozen "Starting". */
+        this.#reach(name, 'preparing');
+        this.#store.patch(name, { step: `Opening its door in the shared machine ${c.sharedMachine}` });
         const door = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-m', '0755', '-o', 'root', '-g', 'root', '/dev/stdin', '/usr/local/sbin/clavarium-enter'], { input: readFileSync(DOOR, 'utf8'), timeoutMs: STEP_MS });
         if (door.code !== 0) return fail('The door of the shared machine could not be put in place', door);
         this.#store.patch(name, { step: 'Making its place in the shared machine' });
@@ -488,9 +492,11 @@ export class Conversations {
         const there = tool.steps.length === 0 || (await this.#vms.exec(name, ['sh', '-c', `command -v ${tool.command[0]}`])).code === 0;
         /* There already: its own steps still (its settings, in its own home), the machine's not. */
         const steps = there ? tool.steps.filter((s) => s.argv[0] !== 'sudo') : tool.steps;
+        this.#reach(name, 'installing', there ? 'came' : undefined);
         for (const [i, step] of steps.entries()) {
             if (!this.#store.get(name)) return undefined;
             this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${steps.length})` });
+            this.#reach(name, 'installing', `${i + 1}/${steps.length}`);
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
@@ -941,7 +947,10 @@ export class Conversations {
             + 'ex=""; for a in $2; do ex="$ex --exclude=./$a"; done; ks=""; for a in $3; do if [ -e "$HOME/$a" ]; then ks="$ks ./$a"; fi; done; '
             + 'tar -czf - -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks; rm -rf "$m"';
         const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' ')]);
-        const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'ignore'] });
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
+        /* What it said when it failed: kept short, for the message that says why (a copy, a move). */
+        child.said = '';
+        child.stderr.on('data', (d) => { child.said = (child.said + d).slice(-2000); });
         return { name: `${name}-${new Date().toISOString().slice(0, 10)}.clavarium.tar.gz`, stream: child.stdout, child };
     }
 
@@ -1024,17 +1033,30 @@ export class Conversations {
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
                 if (state !== 'Running') {
                     await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
+                    /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
+                       holding memory (capacity.mjs, reclaimSleepers) does not put it back to sleep while it is read --
+                       the reading would end cut (13-11: exit 255). */
+                    this.#borrowed.add(from);
                     const started = await this.#vms.start(from);
                     if (started.code !== 0) throw new Error(`its original's machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
                     woke = true;
+                    /* Started is not yet reachable: its commands wait for it, two minutes at most. */
+                    for (let i = 0; i < 24 && (await this.#vms.exec(from, ['true'], { timeoutMs: 20_000 }).catch(() => ({ code: 1 }))).code !== 0; i++) await new Promise((ok) => setTimeout(ok, 5000));
                 }
-                const { stream, child } = await this.exportState(from);
-                const failed = new Promise((ok) => child.on('error', () => ok(-1)));
-                const file = createWriteStream(carried, { mode: 0o600 });
-                stream.pipe(file);
-                const code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]);
-                await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
-                if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}).`);
+                /* Read once more if the VM manager could not reach it (255): a machine just woken may still be settling. */
+                let code; let child;
+                for (let attempt = 0; attempt < 2 && code !== 0; attempt++) {
+                    if (attempt) await new Promise((ok) => setTimeout(ok, 10_000));
+                    const out = await this.exportState(from);
+                    child = out.child;
+                    const failed = new Promise((ok) => child.on('error', () => ok(-1)));
+                    const file = createWriteStream(carried, { mode: 0o600 });
+                    out.stream.pipe(file);
+                    code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]);
+                    await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
+                    if (code !== 255) break;
+                }
+                if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
                 if ((await this.#vms.state(to, { fresh: true }).catch(() => undefined)) !== 'Running') {
                     const started = await this.#vms.start(to);
                     if (started.code !== 0) throw new Error(`its machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
@@ -1055,6 +1077,7 @@ export class Conversations {
         } finally {
             rmSync(dir, { recursive: true, force: true });
             if (woke) await this.sleep(from).catch(() => {});
+            this.#borrowed.delete(from);
         }
     }
 
@@ -1110,7 +1133,7 @@ export class Conversations {
                 stream.pipe(file);
                 const code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]);
                 await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
-                if (code !== 0) return back(`its tool's state could not be taken (exit ${code}).`);
+                if (code !== 0) return back(`its tool's state could not be taken (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
             }
             if (state !== undefined) {
                 this.#store.patch(name, { step: 'Stopping its own machine' });
@@ -1616,7 +1639,8 @@ export class Conversations {
     awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true && c.stopped !== true).map((c) => c.name); }
     /* Put to sleep, and nothing else: not one being built (02-11: a reset machine was taken for a sleeper and
        suspended mid-build), not a failed one. */
-    asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true).map((c) => c.name); }
+    /* (One woken the time a copy reads it -- #borrowed -- is not asleep then: its memory is never "reclaimed" under it.) */
+    asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true && !this.#borrowed.has(c.name)).map((c) => c.name); }
 
     /* Whether the machine of a conversation runs right now. */
     async running(name) { return (await this.#vms.state(name)) === 'Running'; }

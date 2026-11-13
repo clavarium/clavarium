@@ -119,3 +119,25 @@ test('its work folder copied as it is, but never what belongs to its original al
     for (const f of ['.parley/pulse.json', '.parley/speakers.json', '.parley/restart-asked', '.docket', '.tether', '.binder']) assert.equal(existsSync(join(to, f)), false, f);
     assert.equal(copied('.docketing'), true, 'only those names');
 });
+
+test('a copy: its original, woken the time it is read, is not "asleep" meanwhile -- the server\'s sweep of sleepers never puts it back to sleep under the reading (13-11: exit 255)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-copy-vmm-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const fake = join(dir, 'vmm');
+    writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do case "$a" in *"tar -czf"*) sleep 1; printf 'ARCHIVE'; exit 0;; *"tar -xzf"*) cat > /dev/null; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+exit 0
+`, { mode: 0o755 });
+    const b = bench(t, { prefix: [fake] });
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    b.vms.set('clv-mail', 'Suspended');
+    b.store.patch('mail', { asleep: true });
+    assert.deepEqual(b.all.asleep(), ['mail']);
+    const seen = [];
+    const watch = setInterval(() => seen.push(b.all.asleep().includes('mail')), 20);
+    await b.all.copy('mail', { title: 'Copy' });
+    await b.all.copied;
+    clearInterval(watch);
+    assert.ok(seen.includes(false), 'not asleep while it is read');
+    assert.deepEqual(b.all.asleep(), ['mail'], 'asleep again after');
+});
