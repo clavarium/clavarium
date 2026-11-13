@@ -36,6 +36,7 @@ import { Refusal } from './conversations.mjs';
 import { isConversationName } from './names.mjs';
 import { originFolder } from './resources.mjs';
 import { TOOLS_PATH, NOTES } from './toolbox.mjs';
+import { ownGuideFile } from './vm.mjs';
 
 export const COMMON_PATH = `${TOOLS_PATH}/${NOTES}`;
 export const OWN_PATH = '/etc/clavarium/conversation.md';
@@ -245,7 +246,9 @@ export class Guide {
     /* ---- into the machine ---- */
     async #writeOwn(name) {
         const text = this.own(name);
-        const r = await this.#vms.exec(name, ['sudo', '-n', 'install', '-D', '-m', '0444', '-o', 'root', '-g', 'root', '/dev/stdin', OWN_PATH], { input: text, timeoutMs: 30_000 });
+        /* In a shared machine, its own file: its door shows it at OWN_PATH (#221). */
+        const path = this.#vms.shared?.(name) === true ? ownGuideFile(name) : OWN_PATH;
+        const r = await this.#vms.exec(name, ['sudo', '-n', 'install', '-D', '-m', '0444', '-o', 'root', '-g', 'root', '/dev/stdin', path], { input: text, timeoutMs: 30_000 });
         if (r.code !== 0) throw new Error(`its guide could not be written: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         this.#written.set(name, text);
     }

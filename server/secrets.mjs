@@ -25,7 +25,7 @@ import { randomBytes } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
 import { Grants, conversationSubject } from './grants.mjs';
 import { isConversationName } from './names.mjs';
-import { VM_USER } from './vm.mjs';
+import { VM_USER, ownSecretsDir, sharedUser } from './vm.mjs';
 
 export const SECRETS_DIR = '/run/secrets';
 export const RUNNER = '/usr/local/bin/clv-run';
@@ -286,10 +286,14 @@ export class Secrets {
             if (r.code !== 0) throw new Refusal(502, `The machine could not be prepared: ${firstLine(r.stderr)}`);
         };
         await run(['sudo', '-n', 'install', '-m', '0755', '/dev/stdin', RUNNER], RUNNER_SCRIPT);
-        await run(['sudo', '-n', 'install', '-d', '-m', '0755', SECRETS_DIR]);
-        await run(['sudo', '-n', 'find', SECRETS_DIR, '-mindepth', '1', '-delete']);
+        /* In a shared machine, its own folder (its door shows it as /run/secrets), its own user: never the others'. */
+        const shared = this.#vms.shared?.(conversation) === true;
+        const dir = shared ? ownSecretsDir(conversation) : SECRETS_DIR;
+        const user = shared ? sharedUser(conversation) : VM_USER;
+        await run(['sudo', '-n', 'install', '-d', '-m', shared ? '0700' : '0755', ...(shared ? ['-o', user, '-g', user] : []), dir]);
+        await run(['sudo', '-n', 'find', dir, '-mindepth', '1', '-delete']);
         for (const secret of this.#given(conversation)) {
-            await run(['sudo', '-n', 'install', '-m', '0600', '-o', VM_USER, '-g', VM_USER, '/dev/stdin', `${SECRETS_DIR}/${secret.name}`], this.#vault.open(secret.sealed));
+            await run(['sudo', '-n', 'install', '-m', '0600', '-o', user, '-g', user, '/dev/stdin', `${dir}/${secret.name}`], this.#vault.open(secret.sealed));
         }
     }
 }

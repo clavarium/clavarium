@@ -392,3 +392,21 @@ test('the guard: a machine missing a secret, holding one too many, or holding an
     const down = new Secrets({ store: new Store(join(b.dir, 'g.json')), vault: new Vault(join(b.dir, 'g.key')), vms: { exec: async () => { throw new Error('asleep'); } }, grants: new Grants(), now: () => b.clock.at });
     assert.equal(await down.reconcile('alpha', last), null);
 });
+
+test('in a shared machine its secrets go to its own folder, for its own user: never the others\' (#221)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-sec-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const calls = [];
+    const vms = new Vms(async (argv, options) => { calls.push({ argv: argv.slice(1).join(' '), input: options?.input }); return { code: 0, stdout: '', stderr: '' }; }, ['vmm'], { machineOf: (n) => (n === 'mail' ? 'assist' : undefined) });
+    const secrets = new Secrets({ store: new Store(join(dir, 'secrets.json')), vault: new Vault(join(dir, 'vault.key')), vms, grants: new Grants(), now: () => new Date(2026, 9, 24, 12, 0) });
+    secrets.set({ name: 'MODEL_KEY', value: 'sk-very-secret-value' });
+    secrets.attach('mail', 'MODEL_KEY', true);
+    await secrets.deliver('mail');
+    assert.deepEqual(calls.map((c) => c.argv), [
+        `exec clv-assist -- sudo -n install -m 0755 /dev/stdin ${RUNNER}`,
+        'exec clv-assist -- sudo -n install -d -m 0700 -o c-mail -g c-mail /run/clavarium/own/mail/secrets',
+        'exec clv-assist -- sudo -n find /run/clavarium/own/mail/secrets -mindepth 1 -delete',
+        'exec clv-assist -- sudo -n install -m 0600 -o c-mail -g c-mail /dev/stdin /run/clavarium/own/mail/secrets/MODEL_KEY',
+    ]);
+    assert.ok(!calls.some((c) => c.argv.includes(` ${SECRETS_DIR} `) || c.argv.endsWith(` ${SECRETS_DIR}`)), 'the machine-wide folder untouched');
+});

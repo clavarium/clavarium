@@ -14,6 +14,11 @@ import { isConversationName } from './names.mjs';
    directory: the path then names nobody, and sits next to /resources. */
 export const WORK = '/work';
 export const VM_USER = 'ubuntu';
+/* In a shared machine (#221), what is a conversation's own though machine-wide in a machine of its own: written
+   by the server here, shown by its door at the usual place (/run/secrets, /etc/clavarium/conversation.md). */
+export const ownSecretsDir = (conversation) => `/run/clavarium/own/${conversation}/secrets`;
+export const ownGuideFile = (conversation) => `/etc/clavarium/own/${conversation}.md`;
+export const sharedUser = (conversation) => `c-${conversation}`;
 /* What sharing a folder needs inside a machine (see conversations.mjs). */
 export const SHARING_STEP = Object.freeze(['sudo', '-n', 'snap', 'install', 'multipass-sshfs']);
 /* Attached folders appear in every VM under /resources/<name>: the host
