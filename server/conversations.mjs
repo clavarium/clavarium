@@ -993,7 +993,8 @@ export class Conversations {
         if (memory > size) throw new Refusal(400, `The machine ${machine} has ${size} MB of memory: ${tool.label} needs ${tool.memoryMb} MB.`);
         const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
         if (tool.state && state !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first, so that its tool\'s state can come along.', { retry: false });
-        if (there === undefined) await this.room({ kind: 'create', memoryMb: size });
+        /* A new shared machine takes its size; its own, running, is stopped before it starts: that memory is given back. */
+        if (there === undefined) await this.room({ kind: 'create', memoryMb: Math.max(0, size - (state === 'Running' ? Number(c.memoryMb) || 0 : 0)) });
         const act = this.#take(name, 'move');
         this.#cancelStop(name);
         const now = new Date().toISOString();
@@ -1040,13 +1041,16 @@ export class Conversations {
                 return back(`${why.replace(/\.?$/, '.')}`);
             }
             if (tool.state) {
-                this.#store.patch(name, { step: `Putting ${tool.label}'s state back` });
+                /* Not opened while its state is put back: building still, to the end. */
+                this.#store.patch(name, { phase: 'building', step: `Putting ${tool.label}'s state back` });
                 this.drop(name);
                 try { await this.#unpack(name, c.tool, createReadStream(carried)); } catch (error) {
+                    this.#store.patch(name, { phase: 'ready', step: undefined });
                     this.ready(name);
                     this.renewed(name, `Moved to the shared machine ${machine}, but ${tool.label}'s state did not come along (${error.message}): it starts afresh. Its old machine is kept, stopped.`, true);
                     return undefined;
                 }
+                this.#store.patch(name, { phase: 'ready', step: undefined });
                 this.ready(name);
             }
             await this.#vms.removeVm(old).catch(() => {});
@@ -1213,7 +1217,8 @@ export class Conversations {
 
     /* What the VM manager says the machine has, written in its record. */
     async reconcile(name) {
-        if (!this.#store.get(name)) return;
+        /* In a shared machine (#221): what the machine has is the machine's; its memory is its own limit there. */
+        if (!this.#store.get(name) || this.#store.get(name).sharedMachine) return;
         const real = await this.#vms.size(name).catch(() => ({}));
         const patch = {};
         if (real.memoryMb !== undefined && real.memoryMb !== this.#store.get(name).memoryMb) patch.memoryMb = real.memoryMb;

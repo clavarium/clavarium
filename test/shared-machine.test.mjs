@@ -174,11 +174,17 @@ test('moved into a shared machine: its own stopped, its place made there, its ow
     const c = b.store.get('mail');
     assert.equal(c.phase, 'ready'); assert.equal(c.sharedMachine, 'assist'); assert.equal(c.machineMb, 4096);
     assert.deepEqual([...b.vms.keys()], ['clv-assist']);
+    /* The room asked for a new shared machine: its size, less what its own machine (running) gives back. */
+    const asked = []; b.all.room = async (x) => { asked.push(x.memoryMb); };
+    b.all.create({ name: 'notes', tool: 'tool', memoryMb: 1536 }); await b.all.built;
+    asked.length = 0;
+    await b.all.moveToShared('notes', { machine: 'other', machineMb: 4096 }); await b.all.built;
+    assert.deepEqual(asked, [4096 - 1536]);
     /* A second one joins the same machine; its size is the machine's. */
     b.all.create({ name: 'diary', tool: 'tool' }); await b.all.built;
     await b.all.moveToShared('diary', { machine: 'assist', machineMb: 8192 }); await b.all.built;
     assert.equal(b.store.get('diary').machineMb, 4096);
-    assert.deepEqual([...b.vms.keys()], ['clv-assist']);
+    assert.deepEqual([...b.vms.keys()].sort(), ['clv-assist', 'clv-other']);
 });
 
 test('moved into a shared machine: what is refused, said before anything is done', async (t) => {
@@ -220,6 +226,16 @@ exit 0
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
     await b.all.moveToShared('mail', { machine: 'assist' }); await b.all.built;
     assert.equal(b.store.get('mail').sharedMachine, 'assist');
+    assert.equal(b.store.get('mail').phase, 'ready'); assert.equal(b.store.get('mail').step, undefined, 'nothing left said as running');
     assert.equal(readFileSync(join(dir, 'imported'), 'utf8'), 'clv-assist:ARCHIVE-OF clv-mail', 'taken from its own machine, put back in the shared one');
     assert.equal(b.vms.has('clv-mail'), false);
+});
+
+test('in a shared machine, the machine\'s own size is never written as its limit (the server starting again)', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist', machineMb: 4096 }); await b.all.built;
+    assert.equal(b.store.get('mail').memoryMb, 1024);
+    await b.all.reconcileAll();
+    assert.equal(b.store.get('mail').memoryMb, 1024, 'its limit kept');
+    assert.doesNotMatch(b.calls.join('\n'), /^vm size/m, 'not even asked');
 });
