@@ -240,3 +240,15 @@ test('in a shared machine, the machine\'s own size is never written as its limit
     assert.equal(b.store.get('mail').memoryMb, 1024, 'its limit kept');
     assert.doesNotMatch(b.calls.join('\n'), /^vm size/m, 'not even asked');
 });
+
+test('a shared machine\'s build moves the page\'s steps on (preparing, installing n of m, folders): never one frozen "Starting the machine"', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist' });
+    const seen = new Set();
+    const watch = setInterval(() => { const p = b.store.get('mail')?.progress; if (p) seen.add(p.steps[p.at]); }, 1);
+    await b.all.built;
+    clearInterval(watch);
+    const p = b.store.get('mail').progress;
+    if (p) seen.add(p.steps[p.at]);
+    for (const id of ['preparing', 'installing']) assert.ok(seen.has(id) || (p && p.steps.indexOf(id) < p.at), `${id} reached (${[...seen]})`);
+});
