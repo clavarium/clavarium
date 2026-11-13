@@ -16,13 +16,18 @@ export function copied(path) {
     return !NOT_COPIED.some((x) => p === x || p.startsWith(`${x}/`));
 }
 
-export async function copyWorkFolder(from, to) {
+/* `onProgress({ files, bytes })`: how far, as it goes (each file as it is taken) -- a long copy says so. */
+export async function copyWorkFolder(from, to, onProgress) {
+    const done = { files: 0, bytes: 0 };
     await cp(from, to, {
         recursive: true, force: true, preserveTimestamps: true, verbatimSymlinks: true, errorOnExist: false,
         filter: async (source) => {
             if (!copied(relative(from, source))) return false;
             const s = await lstat(source).catch(() => null);
-            return Boolean(s && (s.isFile() || s.isDirectory() || s.isSymbolicLink()));
+            const ok = Boolean(s && (s.isFile() || s.isDirectory() || s.isSymbolicLink()));
+            if (ok && s.isFile()) { done.files += 1; done.bytes += s.size; onProgress?.({ ...done }); }
+            return ok;
         },
     });
+    return done;
 }
