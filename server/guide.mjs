@@ -36,7 +36,7 @@ import { Refusal } from './conversations.mjs';
 import { isConversationName } from './names.mjs';
 import { originFolder } from './resources.mjs';
 import { TOOLS_PATH, NOTES } from './toolbox.mjs';
-import { ownGuideFile } from './vm.mjs';
+import { ownGuideFile, sharedUser } from './vm.mjs';
 
 export const COMMON_PATH = `${TOOLS_PATH}/${NOTES}`;
 export const OWN_PATH = '/etc/clavarium/conversation.md';
@@ -80,7 +80,7 @@ export function commonText() {
     return [
         '# Where you are (Clavarium)',
         '',
-        '- A throw-away machine, yours alone: you are root (sudo works). Install what you need.',
+        '- A throw-away machine, yours alone: you are root (sudo works). Install what you need. (In a shared machine, not so: ' + OWN_PATH + ' says it.)',
         '- /work: where you work. /resources/<name>: folders and repositories you were given, read-only or read-write. /tools: tools offered, read-only (/tools/index.json says what each is).',
         `- What this conversation has, and what its owner asks of you: ${OWN_PATH} (read-only; written again by the server when your setup changes).`,
         '- Git: commit your work. The person reviews it and sends it from their screen, or the server sends it by itself where they allowed it. You have no push key: never push.',
@@ -102,9 +102,11 @@ const list = (items) => items.join(', ');
 /* THE PART OF ONE CONVERSATION, from its facts:
    { name, tool, workKept, resources: [{ name, access, type, origin }], chat, online, secrets: [names], lines, reread }
    `reread`: the command that reads the end of its chat after a restart (the owner's choice, talk.mjs). */
-export function ownText({ name, tool, workKept, resources = [], chat, online, secrets = [], lines = [], reread }) {
+export function ownText({ name, tool, shared, workKept, resources = [], chat, online, secrets = [], lines = [], reread }) {
     const out = [`# This conversation: ${plain(name, 40)}`, ''];
     if (tool) out.push(`- Tool running here: ${plain(tool, 40)}.`);
+    /* #221: in a shared machine, its own user without sudo -- not what /tools/CLAVARIUM.md says of a machine of its own. */
+    if (shared) out.push(`- A machine shared with other conversations: you are its user c-${plain(name, 40)}, NOT root (no sudo). Install in your home (npm --prefix ~/.local, pip install --user); what needs root, ask the person.`);
     out.push(workKept ? '- /work is kept by the server: the person sees it in Files, and it outlives the machine.' : '- /work is on this machine\'s own disk: it goes with the machine.');
     const where = (r) => `/resources/${plain(r.name, 40)}${r.type === 'mailbox' ? ' (mail)' : r.type === 'git' ? ' (git)' : ''}`;
     const write = resources.filter((r) => r.access === 'write');
@@ -225,7 +227,7 @@ export class Guide {
             const type = this.#resources.get(r.name)?.type ?? 'folder';
             return { name: r.name, access: r.access, type, origin: type === 'git' && this.#resources.hasOrigin?.(r.name) ? originFolder(r.name) : undefined };
         });
-        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: (this.#secrets?.given ?? this.#secrets?.of)?.call(this.#secrets, name) ?? [], lines: this.lines(name), reread: this.#reread() });
+        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, shared: this.#vms.shared?.(name) === true, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: (this.#secrets?.given ?? this.#secrets?.of)?.call(this.#secrets, name) ?? [], lines: this.lines(name), reread: this.#reread() });
     }
 
     /* What the page shows: the exact texts, where each is, and the line in the tool's own file. */
@@ -246,9 +248,9 @@ export class Guide {
     /* ---- into the machine ---- */
     async #writeOwn(name) {
         const text = this.own(name);
-        /* In a shared machine, its own file: its door shows it at OWN_PATH (#221). */
-        const path = this.#vms.shared?.(name) === true ? ownGuideFile(name) : OWN_PATH;
-        const r = await this.#vms.exec(name, ['sudo', '-n', 'install', '-D', '-m', '0444', '-o', 'root', '-g', 'root', '/dev/stdin', path], { input: text, timeoutMs: 30_000 });
+        /* In a shared machine, its own file, readable by its own user only: its door shows it at OWN_PATH (#221). */
+        const shared = this.#vms.shared?.(name) === true;
+        const r = await this.#vms.exec(name, ['sudo', '-n', 'install', '-D', '-m', shared ? '0440' : '0444', '-o', 'root', '-g', shared ? sharedUser(name) : 'root', '/dev/stdin', shared ? ownGuideFile(name) : OWN_PATH], { input: text, timeoutMs: 30_000 });
         if (r.code !== 0) throw new Error(`its guide could not be written: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         this.#written.set(name, text);
     }

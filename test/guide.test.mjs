@@ -290,7 +290,9 @@ test('in a shared machine its own part goes to its own file, which its door show
     await b.guide.prepared('writer', true);
     await b.guide.prepared('other', true);
     const mine = b.sent.find((s) => s.name === 'writer' && s.argv.includes('install'));
-    assert.equal(mine.argv.at(-1), '/etc/clavarium/own/writer.md', 'never the machine-wide file another would overwrite');
+    assert.deepEqual(mine.argv, ['sudo', '-n', 'install', '-D', '-m', '0440', '-o', 'root', '-g', 'c-writer', '/dev/stdin', '/etc/clavarium/own/writer.md'], 'its own file, for its own user: never the machine-wide one another would overwrite');
     assert.equal(readFileSync(join(b.root('writer'), '/etc/clavarium/own/writer.md'), 'utf8'), b.guide.own('writer'));
     assert.equal(b.sent.find((s) => s.name === 'other' && s.argv.includes('install')).argv.at(-1), OWN_PATH, 'a machine of its own: as always');
+    assert.match(b.guide.own('writer'), /you are its user c-writer, NOT root \(no sudo\)/, 'told it has no sudo there');
+    assert.ok(!b.guide.own('other').includes('NOT root'));
 });

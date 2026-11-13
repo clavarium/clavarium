@@ -7,7 +7,7 @@
 #   /resources/*  are only those given to it (/srv/clavarium/NAME/resources),
 #   /tools        is the machine's (the same for all, read-only),
 #   ~             is /home/c-NAME (closed to the others),
-#   /tmp          is its own,
+#   /tmp, /var/tmp and /dev/shm are its own,
 #   /run/secrets and /etc/clavarium/conversation.md are its own (/run/clavarium/own/NAME, /etc/clavarium/own/NAME.md),
 # within a slice of its own (memory, processes: /etc/clavarium/limits/NAME, set by Clavarium). Seen from inside,
 # a conversation is alone in its machine: no tool, no agent needs to know.
@@ -23,12 +23,15 @@ if ! id "$user" >/dev/null 2>&1; then
     useradd --create-home --home-dir "/home/$user" --shell /bin/bash --user-group "$user"
 fi
 chmod 700 "/home/$user"
-mkdir -p "$base/work" "$base/resources" "$base/tmp"
-chown "$user:$user" "$base/tmp"; chmod 700 "$base/tmp"
+mkdir -p "$base/work" "$base/resources" "$base/tmp" "$base/vartmp"
+# Its place closed to the others (its own views of it are made below, as root): never another's /work by its path.
+chown root:root /srv/clavarium "$base"; chmod 711 /srv/clavarium; chmod 700 "$base"
+chown "$user:$user" "$base/tmp" "$base/vartmp"; chmod 700 "$base/tmp" "$base/vartmp"
 # Its secrets and its guide: its own, written by Clavarium, shown at the usual places (never the others').
 own="/run/clavarium/own/$name"; mkdir -p "$own/secrets"; chmod 711 /run/clavarium /run/clavarium/own
 chown "$user:$user" "$own/secrets"; chmod 700 "$own/secrets"
-mkdir -p /etc/clavarium/own /run/secrets; [ -e "/etc/clavarium/own/$name.md" ] || install -m 0444 /dev/null "/etc/clavarium/own/$name.md"
+mkdir -p /etc/clavarium/own /run/secrets; chmod 711 /etc/clavarium/own
+[ -e "/etc/clavarium/own/$name.md" ] || install -m 0440 -o root -g "$user" /dev/null "/etc/clavarium/own/$name.md"
 [ -e /etc/clavarium/conversation.md ] || install -m 0444 /dev/null /etc/clavarium/conversation.md
 # Its limits (memory in MB, processes), when Clavarium set them.
 mem=""; procs=""
@@ -42,6 +45,8 @@ exec unshare --mount --propagation private -- sh -c '
     mount -t tmpfs -o mode=755,size=1m none /resources
     for r in "$base"/resources/*; do [ -e "$r" ] || continue; mkdir -p "/resources/$(basename "$r")"; mount --rbind "$r" "/resources/$(basename "$r")"; done
     mount --bind "$base/tmp" /tmp
+    mount --bind "$base/vartmp" /var/tmp
+    mount -t tmpfs -o mode=1777,size=64m none /dev/shm
     mount --bind "/run/clavarium/own/$name/secrets" /run/secrets
     mount --bind "/etc/clavarium/own/$name.md" /etc/clavarium/conversation.md
     # The processes of the others hidden (a procfs of its own, Linux 5.8+): only its own are seen.
