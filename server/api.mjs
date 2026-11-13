@@ -26,6 +26,7 @@
  *   POST /api/mailboxes/<name>/live          {smtp, email?}: that mailbox connected live too (send, move...), its password reused
  *   POST /api/conversations/<name>/erase         {confirm: <its name>}: deleted for good -- its machine and its work files
  *   POST /api/conversations/<name>/into-machine  {machine, machineMb?}: moved into a shared machine (#221), its tool's state along (202)
+ *   POST /api/conversations/<name>/copy          {title?, machine?, machineMb?}: a copy -- its work, its tool's state, its accesses; it untouched (202)
  *   POST /api/conversations/<name>/rebuild       {reset?, confirm?}: built again; reset (confirm: its name) for a working one too
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
@@ -1002,6 +1003,13 @@ export async function handleApi(request, response, conversations, headers, resou
         if (moving) {
             const machineMb = body?.machineMb === undefined ? undefined : Number(body.machineMb);
             return send(202, await conversations.moveToShared(decodeURIComponent(moving[1]), { machine: body?.machine, machineMb })), true;
+        }
+        /* A copy of it (#221): a new conversation with its work, its tool's memory and its accesses; it untouched. */
+        const copying = /^\/api\/conversations\/([^/]+)\/copy$/.exec(pathname);
+        if (copying) {
+            const machineMb = body?.machineMb === undefined ? undefined : Number(body.machineMb);
+            const machine = typeof body?.machine === 'string' && body.machine ? body.machine : undefined;
+            return send(202, await conversations.copy(decodeURIComponent(copying[1]), { title: body?.title, machine, machineMb })), true;
         }
         const again = /^\/api\/conversations\/([^/]+)\/rebuild$/.exec(pathname);
         if (again) {

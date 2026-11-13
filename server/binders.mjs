@@ -130,6 +130,15 @@ export class Binders {
         }
         return out;
     }
+    /* A COPY of a conversation (#221) is given the lists its original was given, with the same access. */
+    copyGrants(from, to) {
+        const keeper = { id: 'person:keeper', kind: 'person', name: 'keeper' };
+        for (const l of this.#keeper.store.lists(keeper)) {
+            const given = l.grants?.[`${AGENT}${from}`];
+            const level = typeof given === 'string' ? given : given?.access ?? given?.level;
+            if (level === 'read' || level === 'write') this.#keeper.store.grant(l.id, `${AGENT}${to}`, level, keeper);
+        }
+    }
     /* FOR API KEYS (apikeys.mjs): every list with who was given it, as a person sees them; a key given a list, or
        taken back, on the list's own access -- as a conversation is. `identity`: the person, as its history says. */
     lists() { return this.#keeper.store.lists({ id: 'person:keeper', kind: 'person', name: 'keeper' }).map((l) => ({ id: l.id, title: l.title, archived: Boolean(l.archived), grants: { ...(l.grants ?? {}) } })); }

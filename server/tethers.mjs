@@ -309,6 +309,19 @@ export class Tethers {
         await conn.run(verb, target, {}, { agent: 'person:owner', secret: async () => password });
     }
 
+    /* A COPY of a conversation (#221) is given what its original was given: each target at the same level, with
+       the same allow rules. Not a device or a voice box: those are offered with the original itself. */
+    copyGrants(from, to) {
+        const store = this.#keeper.store;
+        for (const t of store.targets()) {
+            if (t.kind === 'device' || t.kind === 'voicebox') continue;
+            const g = t.grants?.[`${AGENT}${from}`];
+            if (!g?.level) continue;
+            store.grant(t.id, `${AGENT}${to}`, g.level);
+            for (const rule of g.rules ?? []) { try { store.allow(t.id, `${AGENT}${to}`, rule); } catch { /* a rule no longer valid: left out */ } }
+        }
+    }
+
     /* What each conversation was given: { name: count } -- the targets it may use. */
     given() {
         const out = {};

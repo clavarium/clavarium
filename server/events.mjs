@@ -33,6 +33,7 @@ const SAID = [
     [/^\/api\/conversations\/([^/]+)\/machine\/cancel$/, 'machine', (m) => `Machine of ${m[1]}: the size kept for its wake given up`],
     [/^\/api\/conversations\/([^/]+)\/sleep$/, 'machine', (m) => `Machine of ${m[1]} put to sleep`],
     [/^\/api\/conversations\/([^/]+)\/rebuild$/, 'machine', (m) => `Machine of ${m[1]} built again`],
+    [/^\/api\/conversations\/([^/]+)\/copy$/, 'conversation', (m, b) => `${m[1]} copied${b?.machine ? ` into the shared machine ${clip(String(b.machine), 32)}` : ''}`],
     [/^\/api\/conversations\/([^/]+)\/into-machine$/, 'machine', (m, b) => `${m[1]} moved into the shared machine ${clip(String(b?.machine ?? '?'), 32)}`],
     [/^\/api\/conversations\/([^/]+)\/network$/, 'machine', (m, b) => `${m[1]} ${b.online ? 'put online' : 'put offline'}`],
     [/^\/api\/conversations\/([^/]+)\/share$/, 'access', (m) => `A pairing code made for ${m[1]}`],
