@@ -370,6 +370,7 @@
         const mline = mstepLine(owner?.machine);
         /* A copy or a move, past its machine's build: what it does now (its work, its tool's memory), said as the server says it. */
         const carrying = owner?.phase === 'building' && /^(Copying|Taking|Putting|Giving)\b/.test(owner.step ?? '') ? owner.step : '';
+        if (carrying) $('notice-title').textContent = owner.copyOf ? 'Copying it' : 'Moving it';
         $('notice-text').textContent = mline || (carrying ? `${carrying}\u2026` : `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`);
         return true;
     };

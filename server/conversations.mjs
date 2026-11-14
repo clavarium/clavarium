@@ -1032,8 +1032,8 @@ export class Conversations {
             let said = 0;
             const say = (step) => { const now = Date.now(); if (now - said < 1000) return; said = now; if (this.#store.get(to)) this.#store.patch(to, { step }); };
             this.#store.patch(to, { step: 'Copying its work' });
-            const work = await this.copyWork(from, to, (p) => say(`Copying its work: ${p.files} files, ${sizeWords(p.bytes)}`));
-            if (work?.files !== undefined) this.#store.patch(to, { step: `Copying its work: ${work.files} files, ${sizeWords(work.bytes)}, done` });
+            const work = await this.copyWork(from, to, (p) => say(`Copying its work: ${p.files} file${p.files === 1 ? '' : 's'}, ${sizeWords(p.bytes)}`));
+            if (work?.files !== undefined) this.#store.patch(to, { step: `Copying its work: ${work.files} file${work.files === 1 ? '' : 's'}, ${sizeWords(work.bytes)}, done` });
             if (tool.state) {
                 this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
