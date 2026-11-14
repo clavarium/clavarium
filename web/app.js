@@ -590,7 +590,7 @@
     if (listPinned) listFolded = false;
     const paintPin = () => {
         $('list-pin').setAttribute('aria-pressed', String(listPinned));
-        const label = listPinned ? 'The list stays open: click to let it fold when a conversation is opened' : 'Keep the list open: it no longer folds when a conversation is opened';
+        const label = listPinned ? 'The list stays open: click to let it fold when something is opened' : 'Keep the list open: it no longer folds when something is opened';
         $('list-pin').title = label; $('list-pin').setAttribute('aria-label', listPinned ? 'Unpin the list' : 'Keep the list open');
     };
     const pin = (on) => {
@@ -1274,7 +1274,9 @@
     }
     /* Opening a conversation or a room gets the list out of the way, so it has the room;
        the "»" button brings the list back. Only on a real pick by the owner, never on a
-       device or when deselecting. */
+       device or when deselecting. The same for any pick in the list column that changes
+       the right pane (Settings, Assets, Access, New, the server gauge): called from those
+       clicks, never from showPlace/enterPlace (they also run on reload, address, Back). */
     function foldOnOpen() {
         if (DEVICE || listFolded || listPinned) return;
         listFolded = true;
@@ -2213,7 +2215,7 @@
         if (!nav.close('create')) leavePlace();
     }
     $('hidden-toggle').addEventListener('click', () => { showHidden = !showHidden; paint(); });
-    $('new').addEventListener('click', () => { void openNew(); });
+    $('new').addEventListener('click', () => { foldOnOpen(); void openNew(); });
     $('newconv-cancel').addEventListener('click', closeNew);
     $('newconv-close').addEventListener('click', closeNew);
     /* From the map's "+" of Conversations: the same page. */
@@ -7040,15 +7042,15 @@
     }
     nav.outside = () => { if (!DEVICE) void followAddress(); };
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
-    $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
-    $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
+    $('nav-access').addEventListener('click', () => { foldOnOpen(); if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
+    $('nav-assets').addEventListener('click', () => { foldOnOpen(); if (place !== 'assets') void openAssetsPlace(); });
     $('map-new-device').addEventListener('click', () => newDevice(accessFor));
     /* Every device and what each was given, by device or by thing: a step over the map. */
     $('map-all-devices').addEventListener('click', () => { void openAccessPage('devices'); });
     /* Voice boxes are on the page of all devices: opened there, at them. */
     $('map-voice-boxes').addEventListener('click', async () => { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); });
     $('share-manage-close').addEventListener('click', () => { if (!nav.close('sub')) void openAccessPage('map', { push: false }); });
-    $('nav-settings').addEventListener('click', () => { if (place !== 'settings') void openSettings(); });
+    $('nav-settings').addEventListener('click', () => { foldOnOpen(); if (place !== 'settings') void openSettings(); });
     $('access-close').addEventListener('click', () => leavePlace());
     $('access-for-clear').addEventListener('click', () => { accessFor = ''; void openAccessPage(accessTab, { push: false }); });
     for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.addEventListener('click', () => { if (b.dataset.mode !== mapMode || accessTab !== 'map') void openAccessPage('map', { mode: b.dataset.mode }); });
@@ -8871,6 +8873,7 @@
         g.hidden = false;
     }
     $('server-gauge').addEventListener('click', async () => {
+        foldOnOpen();
         if (place !== 'settings') await openSettings(); else await paintServer();
         const top = openChapter('s-resources');
         top.scrollIntoView({ block: 'start' });
