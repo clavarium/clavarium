@@ -156,12 +156,13 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     /* Its review, in the place: the header of Assets and the conversations stay; "< site" goes back. */
     await page.locator('#assets-detail button[data-act="review"]').click();
     await me.until('the review in Assets', async () => /would be sent to/.test(await page.locator('#gitview-state').innerText()), 20_000);
-    /* The header of Assets: the one top bar of every page (kit TopBar, 06-11), in place of its .panel-top. */
-    for (const kept of ['#list', '#assets > .kit-topbar', '#assets #gitview']) assert.equal(await page.locator(kept).isVisible(), true, kept);
+    /* The header of Assets: the one top bar of every page (kit TopBar, 06-11), in place of its .panel-top.
+       The list of conversations was folded by the click on Assets (14-11: foldOnOpen), and stays so. */
+    for (const kept of ['#assets > .kit-topbar', '#assets #gitview']) assert.equal(await page.locator(kept).isVisible(), true, kept);
     assert.equal(await page.locator('#gitview-back').innerText(), 'site');
     await page.locator('#gitview-close').click();
     await me.until('the repository again', async () => !(await page.locator('#gitview').isVisible()) && await page.locator('#assets-detail').isVisible());
-    await page.locator('#nav-access').click();
+    await me.nav('access');
     await me.until('the map', async () => await page.locator('#links').isVisible());
     for (const gone of ['#tab-devices', '#tab-assets', '#flows-export']) assert.equal(await page.locator(gone).isVisible(), false, gone);
     assert.equal(await page.locator('#map-new-device').isVisible(), true);

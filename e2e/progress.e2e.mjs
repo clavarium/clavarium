@@ -107,6 +107,8 @@ test('a build, a restart, a wake: the same steps panel, in order, all the way to
     await me.page.locator('#folders').click();
     await me.page.locator('#sleep').click();
     await me.until('asleep', async () => (await me.state()) === 'asleep');
+    /* What was seen since the last wake (its panel fading out after « live ») is not of this one. */
+    await taken(me.page);
     await me.page.locator('#notice-action', { hasText: 'Wake it' }).click();
     await me.until('it wakes', async () => (await me.page.locator('#notice-steps li[data-state="now"]').innerText().catch(() => '')) === 'Waking the machine');
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);

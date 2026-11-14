@@ -5,7 +5,8 @@ import { bench, SKIP } from './bench.mjs';
 test('two tools work together: one leaves a request in a folder they share, the other is told and gets to it', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('painter', 'Other tool');
+    /* Its chat off: a wake-up is typed in its terminal (with its chat on, now the default, it goes to its docket). */
+    await me.create('painter', 'Other tool', { chat: false });
     await me.create('writer');
     await me.api('/api/resources', { name: 'handoff' });
     await me.api('/api/conversations/writer/resources', { resource: 'handoff', access: 'write' });

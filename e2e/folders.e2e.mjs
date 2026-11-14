@@ -39,7 +39,8 @@ test('folders: made at creation and in General, folded on this device only, rena
     await me.page.fill('#newconv-group', 'Clients');
     await me.page.locator('#newconv-create').click();
     await me.until('in its folder, first', async () => (await me.page.locator('.group[data-group="Clients"] .item').first().getAttribute('data-name')) === 'quote');
-    /* Folded: kept on this device after a reload, not on another. */
+    /* Folded: kept on this device after a reload, not on another. The list itself, folded by « + » (14-11), opened first. */
+    await me.unfold();
     await me.page.locator('.group[data-group="Perso"] .group-head').click();
     await me.until('folded', async () => (await me.page.locator('.group[data-group="Perso"] .item').count()) === 0);
     assert.equal(await me.page.locator('.group[data-group="Perso"] .group-head').getAttribute('aria-expanded'), 'false');
@@ -55,7 +56,8 @@ test('folders: made at creation and in General, folded on this device only, rena
         await route.fulfill({ response: r, json: list });
     });
     await me.page.reload();
-    await me.until('the folded folder says one needs you', async () => (await me.page.locator('.group[data-group="Perso"] .group-head .state-sum .state-dot[data-state="need"]').count()) === 1);
+    /* The kit names that state « wait » now (kit.js STATES, one vocabulary): « need » was its old name. */
+    await me.until('the folded folder says one needs you', async () => (await me.page.locator('.group[data-group="Perso"] .group-head .state-sum .state-dot[data-state="wait"]').count()) === 1);
     await me.page.unroute('**/api/conversations');
     /* In General: moved to another folder; the folder renamed for all its conversations. */
     await me.page.locator('#items .item[data-name="site-web"]').click();
@@ -68,6 +70,8 @@ test('folders: made at creation and in General, folded on this device only, rena
     await me.page.fill('#group-rename', 'Customers <b>');
     await me.page.locator('#group-rename-form button[type=submit]').click();
     await me.until('renamed for all three', async () => (await me.api('/api/conversations')).body.filter((c) => c.group === 'Customers <b>').length === 3);
+    /* Opening site-web folded the list (14-11): opened again, to read it. */
+    await me.unfold();
     await me.until('the list says it, as text', async () => (await me.page.locator('.group[data-group="Customers <b>"] .group-name').innerText()) === 'Customers <b>');
     assert.equal(await me.page.locator('.group-name b').count(), 0, 'never markup');
     assert.equal((await me.api('/api/conversations/site-web/group', { group: 'two\nlines' })).status, 400);
@@ -92,7 +96,8 @@ test('the order: Move up and down in General, dragged with a mouse, held then dr
     await me.until('one moved up', async () => (await names(me.page)).join() === 'three,one,two,four');
     await me.page.locator('#move-down').click();
     await me.until('and down', async () => (await names(me.page)).join() === 'three,two,one,four');
-    /* The keyboard: Alt and an arrow. */
+    /* The keyboard: Alt and an arrow, in the list opened again (opening « one » folded it, 14-11). */
+    await me.unfold();
     await me.page.locator('#items .item[data-name="one"]').focus();
     await me.page.keyboard.press('Alt+ArrowUp');
     await me.until('Alt+Up moved it', async () => (await names(me.page)).join() === 'three,one,two,four');
@@ -223,6 +228,8 @@ test('the name of this Clavarium: in Settings, in the tab, above the list, in th
         await me.page.fill('#instance-name', 'Atelier "<i>"');
         await me.page.locator('#instance-form button[type=submit]').click();
         await me.until('the tab says it', async () => (await me.page.title()) === 'Atelier "<i>"');
+        /* Above the list, once it is opened again (Settings folded it, 14-11). */
+        await me.unfold();
         assert.equal(await me.page.locator('#list-title').innerText(), 'Atelier "<i>"');
         assert.equal(await me.page.locator('#list-title i').count(), 0, 'text only');
         await shot(me.page, 'tablet-settings-instance-name');
@@ -243,26 +250,31 @@ test('Recent above the groups: the last used first, with when; never a hidden on
     await me.api('/api/conversations/secret/hidden', { on: true });
     await me.api('/api/conversations/first/sleep', {});
     await me.page.reload();
-    await me.until('Recent is there', async () => (await me.page.locator('#recent .item').count()) === 3);
-    const recent = await me.page.locator('#recent .item').evaluateAll((all) => all.map((x) => x.dataset.name));
-    assert.deepEqual(recent, ['third', 'second', 'first'], 'the newest first; the hidden one never');
-    assert.match(await me.page.locator('#recent .item[data-name="third"] .when').innerText(), /^\d{1,2}:\d{2}/);
+    /* The awake ones in sight; one asleep under the arrow (03-11: up to seven awake, the rest behind « Show more »). */
+    await me.until('Recent is there', async () => (await me.page.locator('#recent .item').count()) === 2);
+    const names = () => me.page.locator('#recent .item').evaluateAll((all) => all.map((x) => x.dataset.name));
+    assert.deepEqual(await names(), ['third', 'second'], 'the newest first; the hidden one never');
+    /* Today, how long ago (26-10: « now », « 2 min »), not the clock. */
+    assert.match(await me.page.locator('#recent .item[data-name="third"] .when').innerText(), /^(now|\d+ (min|h))$/);
     assert.match(await me.page.locator('#recent .list-head').first().innerText(), /recent/i);
+    assert.equal(await me.page.locator('#recent .more-recent').getAttribute('aria-label'), 'Show 1 more');
+    await me.page.locator('#recent .more-recent').click();
+    await me.until('the one asleep, last', async () => (await names()).join() === 'third,second,first');
     await me.until('asleep, in words', async () => /asleep/.test(await me.page.locator('#recent .item[data-name="first"]').innerText()));
     /* The groups below it: Box, and those in no group. */
-    assert.deepEqual(await me.page.locator('#recent .list-head').allInnerTexts().then((x) => x.map((s) => s.replace(/[^A-Za-z ]/g, '').trim().toLowerCase())), ['recent', 'groups']);
+    assert.deepEqual(await me.page.locator('#recent .list-head').allInnerTexts().then((x) => x.map((s) => s.replace(/[^A-Za-z ]/g, '').trim().toLowerCase())), ['recent', 'conversation groups']);
     assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum').count(), 0, 'open: nothing, its rows say it');
     /* Recent folds, on this device, and stays folded; the groups stay. */
     await me.page.locator('#recent .list-fold[data-section="recent"]').click();
     await me.until('folded', async () => (await me.page.locator('#recent .item').count()) === 0);
     assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"]').getAttribute('aria-expanded'), 'false');
     assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum .state-dot').count(), 3, 'folded: a point each, up to four');
-    assert.match(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum').getAttribute('aria-label'), /^(\d+ (needs you|to watch|fine|asleep)(, )?)+$/);
+    assert.match(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum').getAttribute('aria-label'), /^(\d+ (a problem|waits for you|at work|busy|fine|asleep)(, )?)+$/, 'in the kit\'s words (kit.js STATE_WORDS)');
     await me.page.reload();
     await me.until('still folded after a reload', async () => (await me.page.locator('#recent .list-fold[data-section="recent"]').count()) === 1 && (await me.page.locator('#recent .item').count()) === 0);
     assert.ok((await me.page.locator('#items .item').count()) >= 3, 'the groups are still there');
     await me.page.locator('#recent .list-fold[data-section="recent"]').click();
-    await me.until('open again', async () => (await me.page.locator('#recent .item').count()) === 3);
+    await me.until('open again, the one asleep under the arrow', async () => (await me.page.locator('#recent .item').count()) === 2);
     /* The groups fold as a whole too: how many said, kept on this device. */
     await me.page.locator('#recent .list-fold[data-section="groups"]').click();
     await me.until('groups folded', async () => (await me.page.locator('#items .item, #items .group').count()) === 0);
@@ -277,10 +289,12 @@ test('Recent above the groups: the last used first, with when; never a hidden on
     assert.deepEqual(me.errors, []);
 });
 
-test('Recent: the last four, then "Show more"; the list scrolls as one, never a box of its own', { skip: SKIP }, async (t) => {
+test('Recent: the awake ones, then "Show more"; the list scrolls as one, never a box of its own', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     await made(me, [['One', 'Box'], ['Two', ''], ['Three', ''], ['Four', ''], ['Five', ''], ['Six', 'Box']]);
+    /* Up to seven awake ones are in sight (03-11); the asleep ones wait under the arrow: two put to sleep, four shown. */
+    for (const n of ['one', 'two']) await me.api(`/api/conversations/${n}/sleep`, {});
     await me.page.reload();
     await me.until('Recent is there', async () => (await me.page.locator('#recent .item').count()) === 4);
     assert.equal(await me.page.locator('#recent .more-recent').getAttribute('aria-label'), 'Show 2 more');

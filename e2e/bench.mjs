@@ -171,11 +171,19 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             while (rows.length > 0 && rows.at(-1) === '') rows.pop();
             return rows.length >= 2 && rows.at(-2) === line && /^[a-z]+>$/.test(rows.at(-1));
         }, ms);
-        const type = async (text) => { await page.locator('#terminal').click(); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
+        /* Typed in its terminal: its Terminal tab first, if its chat is the one shown (a conversation whose chat is on
+           opens on it after a reload or a rebuild). */
+        const type = async (text) => {
+            const tab = page.locator('#view-terminal');
+            if (await tab.isVisible() && (await tab.getAttribute('aria-pressed')) !== 'true') await tab.click();
+            await page.locator('#terminal').click(); await page.keyboard.type(text); await page.keyboard.press('Enter');
+        };
         const api = (path, body) => page.evaluate(async ([p, b]) => { const r = await fetch(p, b === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, body: await r.json().catch(() => null) }; }, [path, body]);
         /* Creates a conversation from the page, as a person does, and waits for its terminal. Its chat is on from
            the start, as in the product (02-11); `chat: false` unticks it in « More »: its terminal only. */
         async function create(name, tool = 'Shell', { onDisk = false, chat = true } = {}) {
+            /* « + » is in the list: opened again first if a place folded it. */
+            await unfold();
             await page.locator('#new').click();
             await page.fill('#newconv-name', name);
             if (onDisk) await page.locator('#newconv-work [data-work="disk"]').click();
@@ -185,9 +193,24 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await until(`${name} is live`, async () => (await state()) === 'live', 30_000);
             await sees(tool === 'Shell' ? 'ready>' : 'other>');
             /* « + » folds the list now (14-11), as any pick that changes the right pane: open again, as tests found it. */
-            if (await page.evaluate(() => document.getElementById('app')?.dataset.list === 'folded' && !document.getElementById('fold').hidden)) await page.locator('#fold').click();
+            await unfold();
             await fullSize(name);
         }
+        /* THE LIST OPENED AGAIN, if a pick folded it (14-11, foldOnOpen in app.js: Settings, Assets, Access, New,
+           the server gauge fold it on a wide screen unless it is pinned). The menu at the bottom left folds with it,
+           so a test that clicks a second place first opens it, as a person does with « » ». Its button may be
+           out of sight (a place has its own, .fold-here, which clicks it): it is clicked as they do. */
+        async function unfold() {
+            const folding = await page.evaluate(() => {
+                const app = document.getElementById('app');
+                if (app?.dataset.list !== 'folded' || innerWidth <= 700) return false;
+                document.getElementById('fold').click();
+                return true;
+            });
+            if (folding) await until('the list is open again', async () => page.evaluate(() => { const app = document.getElementById('app'); return app.dataset.list === 'open' && !app.classList.contains('sliding'); }));
+        }
+        /* A place of the menu at the bottom left ('settings', 'assets', 'access'), the list opened first if it was folded. */
+        async function nav(which) { await unfold(); await page.locator(`#nav-${which}`).click(); }
         /* Waits until the terminal in the machine has the page's size. A screen
            that takes a terminal already open (bridge.mjs) sets it a line
            short, then right a moment later, so that the tool redraws: until
@@ -202,6 +225,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         }
         /* A place at the bottom left: 'assets' (the server's Assets), or 'map' (Access, the map alone; 'devices' too: devices are on the map). */
         async function openAccess(tab = 'map') {
+            await unfold();
             if (tab === 'assets') {
                 await page.locator('#nav-assets').click();
                 await until('the Assets place is shown', async () => page.locator('#assets').isVisible());
@@ -314,7 +338,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         async function menu() { if (await page.locator('#menu').isVisible() && (await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
         /* On a phone: the keys behind "More". */
         async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
-        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, leaveAssets, newFolder, files, access, review, chapter, menu, more };
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, unfold, nav, fullSize, openAccess, openDevice, addAsset, openAsset, leaveAssets, newFolder, files, access, review, chapter, menu, more };
     }
     return { origin, dir, person, browser, sshRoot, engineKeys, engineLanguages, engineUrl: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` };
 }

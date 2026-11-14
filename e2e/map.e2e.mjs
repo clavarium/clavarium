@@ -94,7 +94,7 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     assert.equal(await page.locator('#flows-of').inputValue(), 'conversation:client-a');
     assert.match(await page.locator('#flows-trace .lk-steps').evaluate((e) => e.textContent), /client-a writes in site-a/);
     /* Exported, from Settings: the configuration, never a value. */
-    await page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-backup');
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#flows-export').click()]);
     const text = readFileSync(await download.path(), 'utf8');

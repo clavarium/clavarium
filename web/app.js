@@ -1801,6 +1801,13 @@
     function openSearch() {
         if (DEVICE) return;
         /* Asked for: the keyboard comes with it, lock or not. */
+        /* The list folded away (a pick folds it, 14-11): it comes back, or the field would be typed in out of sight. */
+        /* At once, not slid: the slide ends by giving the terminal the keys, the search needs them. */
+        if (listFolded && !narrow()) {
+            listFolded = false;
+            try { localStorage.setItem('clavarium-list', 'open'); } catch { /* a private window */ }
+            applyFold(false); fit.fit?.();
+        }
         if (!$('search').hidden) { $('search-field').focus(); return; }
         $('search').hidden = false; $('search-open').setAttribute('aria-expanded', 'true');
         nav.push('search', () => closeSearch());
@@ -4353,9 +4360,11 @@
         if (!giving && $('panel').dataset.painted !== current) { $('panel').dataset.painted = current; void paintPanel().catch(() => {}); }
         if (!giving) { convHandLoading(conversations.find((x) => x.name === current)); curvesLoading($('machine-curves'), current); }
         /* What it has may have changed from another screen: asked again before it is shown. */
+        const tabShown = $('panel').dataset.tab;
         await refresh();
         await paintPanel();
-        if (atAccess) openChapter('access');
+        /* A tab picked by hand while it was asked again is kept: it no longer jumps to Access under the finger. */
+        if (atAccess && $('panel').dataset.tab === tabShown) openChapter('access');
     }
     $('folders').addEventListener('click', () => {
         /* A tab chosen before on this device: that one. Never chosen: its Access chapter, as it always opened. */

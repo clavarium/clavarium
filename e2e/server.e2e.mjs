@@ -13,10 +13,11 @@ test('This server: its disk and memory in Settings; a small gauge only when it i
     await me.create('alpha');
     const gauge = me.page.locator('#server-gauge');
     assert.equal(await gauge.isVisible(), false, 'plenty of room: no gauge');
-    await me.page.locator('#nav-settings').click();
-    /* Settings: every chapter folded at first, in tabs named as on every settings page. */
+    await me.nav('settings');
+    /* Settings: every chapter folded at first but Features, open atop General (04-11: what this Clavarium can do),
+       in tabs named as on every settings page. */
     await me.until('Settings are shown', async () => me.page.locator('#settings').isVisible());
-    assert.deepEqual(await me.page.evaluate(() => [...document.querySelectorAll('#settings details.chapter')].filter((d) => d.open).length), 0);
+    assert.deepEqual(await me.page.evaluate(() => [...document.querySelectorAll('#settings details.chapter')].filter((d) => d.open).map((d) => d.dataset.chapter)), ['s-features']);
     assert.deepEqual(await me.page.locator('#settings-nav button[data-group]').evaluateAll((all) => all.map((b) => b.textContent.toLowerCase())), ['general', 'this device', 'resources', 'access', 'chat & voice', 'automatic', 'diagnostics', 'advanced']);
     /* At hand, above the tabs: memory, disk and CPU. */
     await me.until('the tiles', async () => (await me.page.locator('#settings-tiles .tile').count()) >= 2);
@@ -41,6 +42,8 @@ test('This server: its disk and memory in Settings; a small gauge only when it i
     /* Short of room: the gauge comes, and opens This server. */
     process.env.FAKE_SERVER_ROOM = SHORT;
     await me.page.reload();
+    /* It sits under the list, folded by Settings (14-11): opened again first. */
+    await me.unfold();
     await me.until('the gauge is shown', async () => gauge.isVisible());
     assert.match(await gauge.innerText(), /This server is short of room[\s\S]*Disk[\s\S]*reserve reached[\s\S]*Memory[\s\S]*0\.5 GB left[\s\S]*See what takes room/);
     await gauge.click();
@@ -74,7 +77,7 @@ test('This server: its disk and memory in Settings; a small gauge only when it i
 test('Settings, Logs, and a restart from Advanced: a source over a span, secrets masked, copied whole, kept as a file; this server started again when asked twice', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-logs');
     await me.page.locator('#logs-source').selectOption('system');
     await me.page.locator('#logs-span').selectOption('boot');
@@ -97,7 +100,7 @@ test('Settings, Logs, and a restart from Advanced: a source over a span, secrets
     await me.chapter('s-advanced');
     await me.page.locator('#server-restart').click();
     assert.equal(existsSync(join(b.dir, 'restart-asked')), false, 'one click does nothing yet');
-    assert.match(await me.page.locator('#server-restart').innerText(), /Yes: restart this server now/);
+    assert.match(await me.page.locator('#server-restart').innerText(), /Yes: restart Clavarium now/);
     await me.page.locator('#server-restart').click();
     await me.until('asked of the host', async () => existsSync(join(b.dir, 'restart-asked')));
     assert.deepEqual(me.errors, []);
@@ -106,7 +109,7 @@ test('Settings, Logs, and a restart from Advanced: a source over a span, secrets
 test('Settings, the disks: every disk whole, formatted or not; the system one never erased; one prepared once its name is typed; one mounted; the machines offered a place', { skip: SKIP }, async (t) => {
     const b = await bench(t, { serverRoomMs: 200 });
     const me = await b.person();
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-resources');
     await me.page.locator('#move-machines-box > summary').click();
     const card = (name) => me.page.locator(`#move-machines-rows .disk-card[data-disk="${name}"]`);
@@ -150,7 +153,7 @@ test('the curves: memory, CPU and disk over time, of this server (with its reser
     const b = await bench(t, { serverRoomMs: 100, historyEveryMs: 300 });
     const me = await b.person();
     await me.create('alpha');
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-resources');
     const curves = me.page.locator('#server-curves');
     await me.until('three curves, with a line drawn', async () => (await curves.locator('.curve').count()) === 3 && (await curves.locator('.curve[data-measure="cpu"] .curve-line').count()) === 1, 30_000);
@@ -186,7 +189,7 @@ test('What happened: what was done from the page, dated and in words; chosen by 
     await me.api('/api/secrets', { name: 'DEPLOY_KEY', value: 'never-shown-anywhere' });
     await me.api('/api/resources', { name: 'notes' });
     await me.api('/api/conversations/alpha/resources', { resource: 'notes', access: 'write' });
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-events');
     const lines = () => me.page.locator('#events-list .event-text').allInnerTexts();
     await me.until('said, newest first', async () => (await lines()).length >= 4);
@@ -212,7 +215,7 @@ test('a flow exported with the files of its folders, and imported: the folder ma
     const notes = join(b.dir, 'data', 'resources', 'notes');
     mkdirSync(join(notes, 'deep'), { recursive: true });
     writeFileSync(join(notes, 'hello.txt'), 'kept across'); writeFileSync(join(notes, 'deep', 'more.txt'), 'and this');
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-backup');
     await me.page.locator('#flows-with-files').check();
     const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#flows-export').click()]);
@@ -239,7 +242,7 @@ test('a flow exported with the files of its folders, and imported: the folder ma
 test('Settings, Network: the Wi-Fi this server is on; another one joined with its password, said before what happens if it does not work; the outcome read back; one kept forgotten', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-network');
     await me.until('the network in use is said', async () => /^On Home \(Wi-Fi, wlan0\)/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')));
     /* Its connections, cable and Wi-Fi, each with its address. */
@@ -285,7 +288,7 @@ test('Settings, Network: Wi-Fi managed outside Clavarium on this server: one sen
     writeFileSync(join(b.dir, 'wifi.json'), JSON.stringify({ using: null, saved: [], last: null }));
     const me = await b.person();
     await me.page.route('**/api/wifi', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ available: false, why: 'no-nmcli', device: null, using: null, saved: [], last: null }) }));
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-network');
     await me.until('said', async () => /managed outside Clavarium on this server/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')));
     assert.equal(await me.page.locator('#wifi-controls').isVisible(), false);
@@ -295,7 +298,7 @@ test('Settings, Network: a network set up when Ubuntu was installed, handed over
     const b = await bench(t);
     writeFileSync(join(b.dir, 'wifi.json'), JSON.stringify({ using: 'Home', saved: ['Home'], last: null, outside: true }));
     const me = await b.person();
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-network');
     await me.until('said, and offered', async () => await me.page.locator('#wifi-hand').isVisible());
     assert.equal(await me.page.locator('#wifi-now').innerText(), 'Clavarium does not manage this server\'s network yet.');

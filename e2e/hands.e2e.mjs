@@ -168,7 +168,7 @@ test('one Give… in a conversation\'s tab: what it has not yet, its right, then
     assert.equal(await give.locator('.kit-aspick-row[data-name="seeds"]').count(), 0, 'no longer offered');
     /* Or a new one, of every kind, below the list. */
     const box = give.locator('.kit-newasset');
-    assert.equal(await box.locator('.as-kinds button').count(), 10, 'every kind, a voice box, a device, an MCP server too');
+    assert.equal(await box.locator('.as-kinds button').count(), 11, 'every kind, a voice box, a device, an MCP server, a browser too');
     assert.equal(await box.locator('[aria-current="step"]').innerText().then((x) => x.replace(/\s+/g, ' ').trim()), '1 Kind');
     /* A folder, to read: made, then given by itself. */
     await box.locator('.as-kinds button[data-kind="folder"]').click();
@@ -301,8 +301,9 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     const b = await bench(t, { microphone });
     const me = await b.person();
     assert.equal((await me.api('/api/secrets', { name: 'STT_KEY', value: 'a-key-never-shown' })).status, 201);
-    await me.page.locator('#nav-settings').click();
-    /* EVERY CHAPTER HAS SOMETHING TO ACT ON, but About, where the facts are, one line each. */
+    await me.nav('settings');
+    /* EVERY CHAPTER HAS SOMETHING TO ACT ON, but About, where the facts are, one line each, and Jobs
+       (Diagnostics, 14-11): what ran, to be read, nothing to do while none ran. */
     await me.chapter('s-about');
     await me.until('the facts', async () => /^Clavarium \S+/.test(await me.page.locator('#settings-about').innerText()));
     assert.match(await me.page.locator('#settings-people').innerText(), /Development mode|Administrators: /);
@@ -310,7 +311,7 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     assert.equal(await me.page.locator('#settings-ch-people').count(), 0, 'People & address: merged into About');
     /* Features (atop General) is drawn once its facts are read: waited for, not taken for a chapter with nothing to do. */
     await me.until('the features are drawn', async () => (await me.page.locator('#settings-features button').count()) > 0);
-    const idle = await me.page.locator('#settings details.chapter').evaluateAll((all) => all.filter((d) => !['s-about', 's-shortcuts'].includes(d.dataset.chapter) && !d.querySelector('.chapter-body button, .chapter-body select, .chapter-body input, .chapter-body textarea')).map((d) => d.dataset.chapter));
+    const idle = await me.page.locator('#settings details.chapter').evaluateAll((all) => all.filter((d) => !['s-about', 's-shortcuts', 's-jobs'].includes(d.dataset.chapter) && !d.querySelector('.chapter-body button, .chapter-body select, .chapter-body input, .chapter-body textarea')).map((d) => d.dataset.chapter));
     assert.deepEqual(idle, [], 'a chapter that only ever shows text');
     /* No shortcut: one line, how to add one. */
     if ((await me.api('/api/shortcuts')).body.length === 0) { await me.chapter('s-shortcuts'); assert.match(await me.page.locator('#settings-shortcuts-hint').innerText(), /No shortcut yet/); }
@@ -346,7 +347,7 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     /* Its key past its expiry day: not sent; said in red, with a dot on the chapter. */
     assert.equal((await me.api('/api/secrets/STT_KEY/replace', { expires: '2020-01-01' })).status, 200);
     await me.page.reload();
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-dictation');
     await me.until('said expired', async () => (await me.page.locator('#settings-dictation').innerText()) === 'Key expired: replace it in Assets > Secrets');
     assert.equal(await me.page.locator('#settings-dictation').getAttribute('data-tone'), 'bad');

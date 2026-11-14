@@ -22,6 +22,8 @@ test('a free name: the identifier drawn from it, the name changed later and show
     await me.page.fill('#title-name', 'Car <b>rental</b> 🚗');
     await me.page.locator('#title-form button[type=submit]').click();
     await me.until('the new name is in the bar', async () => (await me.page.locator('#name').innerText()) === 'Car <b>rental</b> 🚗');
+    /* In the list too, once it is opened again (« + » folded it, 14-11). */
+    await me.unfold();
     assert.equal(await me.page.locator('#items b').innerText(), 'Car <b>rental</b> 🚗');
     assert.equal(await me.page.locator('#items b b').count(), 0, 'never markup');
     const refused = await me.api('/api/conversations/location-voiture/title', { title: `evil${String.fromCodePoint(0x202e)}txt` });
@@ -35,6 +37,8 @@ test('a free name: the identifier drawn from it, the name changed later and show
     assert.equal(made.status, 201, JSON.stringify(made.body));
     await me.until('the other one is listed', async () => (await me.page.locator('#items .item').count()) >= 1 && /Other/.test(await me.page.locator('#items').innerText()));
     await me.page.locator('#items .item', { hasText: 'Other' }).click();
+    /* Opening it folded the list (14-11): opened again, to read it. */
+    await me.unfold();
     await me.until('the hidden one left the list', async () => !/Car/.test(await me.page.locator('#items').innerText()));
     assert.equal(await me.page.locator('#hidden-toggle').innerText(), '1 hidden');
     await me.page.locator('#hidden-toggle').click();
@@ -92,7 +96,8 @@ test('a new conversation, a page of its own: its tools, an error under its field
     assert.equal(second.title, 'Second');
     assert.equal(second.work, 'disk');
     assert.equal(await page.locator('#new').getAttribute('aria-pressed'), 'false');
-    /* Opened again: empty, the files kept here again. */
+    /* Opened again: empty, the files kept here again. « + » is in the list, folded by the first (14-11). */
+    await me.unfold();
     await page.locator('#new').click();
     await me.until('open again', () => page.locator('#newconv').isVisible());
     assert.equal(await page.locator('#newconv-name').inputValue(), '');

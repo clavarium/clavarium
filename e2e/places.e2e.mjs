@@ -38,14 +38,14 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await me.until('back on the map', async () => (await page.locator('#links').isVisible()) && !(await page.locator('#flows').isVisible()));
     await page.locator('#access-close').click();
     await me.until('Access is closed, and its address with it', async () => !(await page.locator('#access').isVisible()) && new URL(page.url()).searchParams.get('open') === null);
-    /* Assets, a place of its own, with its address. */
-    await page.locator('#nav-assets').click();
+    /* Assets, a place of its own, with its address. Access folded the list (14-11): it is opened first. */
+    await me.nav('assets');
     await me.until('the Assets place', async () => (await page.locator('#assets').isVisible()) && /open=assets/.test(page.url()));
     await page.locator('#assets-rows .as-row[data-asset="folder:seeds"]').click();
     await me.until('seeds, opened', async () => /a=folder%3Aseeds/.test(page.url()));
     await me.leaveAssets();
     /* Export and Import: in Settings. */
-    await page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-backup');
     for (const id of ['#flows-export', '#flows-import']) assert.equal(await page.locator(id).isVisible(), true, id);
     await page.locator('#settings-close').click();
@@ -55,7 +55,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await page.locator('#cassets-attach').click();
     await me.until('the picker', async () => page.locator('#cassets-detail .kit-aspick').isVisible());
     assert.equal(await page.locator('#access-assets-here').count(), 0, 'one way to give');
-    assert.equal(await page.locator('#cassets-detail .kit-aspick .kit-newasset .as-kinds button').count(), 10, 'or a new one, of every kind (a voice box, a device, an MCP server too)');
+    assert.equal(await page.locator('#cassets-detail .kit-aspick .kit-newasset .as-kinds button').count(), 11, 'or a new one, of every kind (a voice box, a device, an MCP server, a browser too)');
     await page.locator('#cassets-detail .kit-aspick-row[data-name="seeds"]').click();
     await page.locator('#cassets-detail .kit-aspick-give .kit-aspick-go').click();
     await me.until('seeds is read by garden', async () => (await me.api('/api/conversations')).body[0].resources.some((r) => r.name === 'seeds' && r.access === 'read'));
@@ -74,7 +74,9 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await me.until('settings', async () => page.locator('#settings').isVisible());
     assert.equal(await page.locator('#nav-settings').getAttribute('aria-current'), 'page');
     /* A conversation touched in the list: Settings gives way to it. The list then folds out of its way
-       (foldOnOpen): its row is marked, though no longer on screen -- read by its text, not as seen. */
+       (foldOnOpen): its row is marked, though no longer on screen -- read by its text, not as seen.
+       Folded by the last place opened (kept on this device), the list is opened first. */
+    await me.unfold();
     await page.locator('#items .item', { hasText: 'garden' }).click();
     await me.until('settings gave way to garden', async () => !(await page.locator('#settings').isVisible()) && (await page.locator('#list .item[aria-current=true]').textContent()).includes('garden'));
     assert.deepEqual(me.errors, []);
