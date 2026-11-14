@@ -669,7 +669,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     all.room = (ask) => capacity.check(ask);
     /* A COPY (conversations.copy): its work folder from its original's, host side -- what is its alone left out
        (its reminders, its pending asks to the keepers, its devices, its chat's live files) -- then the same accesses. */
-    all.copyWork = (from, to) => copyWorkFolder(folders.workFolder(from), folders.workFolder(to));
+    all.copyWork = (from, to, onProgress) => copyWorkFolder(folders.workFolder(from), folders.workFolder(to), onProgress);
     all.copyRights = async (from, to) => {
         for (const r of folders.of(from)) {
             if (r.access === 'write') gitKeeper?.beforeWriter(r.name, to, true);

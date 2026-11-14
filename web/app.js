@@ -368,7 +368,10 @@
         const owner = conversations.find((x) => x.name === panel.of.split('/')[0]);
         paintMlive($('notice-mlive'), owner);
         const mline = mstepLine(owner?.machine);
-        $('notice-text').textContent = mline || `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`;
+        /* A copy or a move, past its machine's build: what it does now (its work, its tool's memory), said as the server says it. */
+        const carrying = owner?.phase === 'building' && /^(Copying|Taking|Putting|Giving)\b/.test(owner.step ?? '') ? owner.step : '';
+        if (carrying) $('notice-title').textContent = owner.copyOf ? 'Copying it' : 'Moving it';
+        $('notice-text').textContent = mline || (carrying ? `${carrying}\u2026` : `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`);
         return true;
     };
     /* Shown, or brought up to date when it is shown already (its wheel keeps turning). */
@@ -1428,7 +1431,7 @@
     const agentWho = (c) => [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' \u00b7 ');
     function convModel(c, told = false) {
         /* Under way: the step the panel shows, in its words (the tool named once). */
-        const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
+        const under = c.phase === 'building' && /^(Copying|Taking|Putting|Giving)\b/.test(c.step ?? '') ? c.step : c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
         /* What it is doing, when it says something: its tool is not named on every row. */
         const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? uiSaid('set-list-starting', 'starting') : uiSaid('set-list-restarting', 'restarting')) : c.phase === 'ready' ? (c.asleep ? uiSaid('set-list-asleep', 'asleep') : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? uiSaid('set-list-moving', 'moving its work') : c.phase === 'restarting' ? uiSaid('set-list-restarting', 'restarting') : uiSaid('set-list-failed', 'failed'));
         /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */

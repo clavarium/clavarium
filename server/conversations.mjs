@@ -21,6 +21,8 @@ import { join } from 'node:path';
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
+/* A size in words: 840 KB, 12 MB, 1.4 GB. */
+const sizeWords = (bytes) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : bytes >= 1024 ** 2 ? `${Math.round(bytes / 1024 ** 2)} MB` : `${Math.round(bytes / 1024)} KB`);
 /* The door of a conversation in a shared machine (#221), put in the machine by the server. */
 export const DOOR = new URL('../config/machine/clavarium-enter', import.meta.url);
 /* The most programs one conversation may run in a shared machine. */
@@ -1026,12 +1028,17 @@ export class Conversations {
             const built = this.#store.get(to);
             if (!built) return undefined;   /* erased meanwhile */
             if (built.phase === 'failed') throw new Error(built.error ?? 'its machine could not be made.');
+            /* Said as it goes, once a second at most: a long copy is seen moving (13-11, "on ne sait pas si ça marche"). */
+            let said = 0;
+            const say = (step) => { const now = Date.now(); if (now - said < 1000) return; said = now; if (this.#store.get(to)) this.#store.patch(to, { step }); };
             this.#store.patch(to, { step: 'Copying its work' });
-            await this.copyWork(from, to);
+            const work = await this.copyWork(from, to, (p) => say(`Copying its work: ${p.files} file${p.files === 1 ? '' : 's'}, ${sizeWords(p.bytes)}`));
+            if (work?.files !== undefined) this.#store.patch(to, { step: `Copying its work: ${work.files} file${work.files === 1 ? '' : 's'}, ${sizeWords(work.bytes)}, done` });
             if (tool.state) {
                 this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
                 if (state !== 'Running') {
+                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory: waking its original` });
                     await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
                     /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
                        holding memory (capacity.mjs, reclaimSleepers) does not put it back to sleep while it is read --
@@ -1047,8 +1054,11 @@ export class Conversations {
                 let code; let child;
                 for (let attempt = 0; attempt < 2 && code !== 0; attempt++) {
                     if (attempt) await new Promise((ok) => setTimeout(ok, 10_000));
+                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
                     const out = await this.exportState(from);
                     child = out.child;
+                    let read = 0;
+                    out.stream.on('data', (d) => { read += d.length; say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); });
                     const failed = new Promise((ok) => child.on('error', () => ok(-1)));
                     const file = createWriteStream(carried, { mode: 0o600 });
                     out.stream.pipe(file);
@@ -1061,6 +1071,7 @@ export class Conversations {
                     const started = await this.#vms.start(to);
                     if (started.code !== 0) throw new Error(`its machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
                 }
+                this.#store.patch(to, { step: `Putting ${tool.label}'s memory in the copy` });
                 await this.#unpack(to, c.tool, createReadStream(carried));
             }
             this.#store.patch(to, { step: 'Giving it the same accesses' });

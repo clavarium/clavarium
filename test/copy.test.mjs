@@ -141,3 +141,39 @@ exit 0
     assert.ok(seen.includes(false), 'not asleep while it is read');
     assert.deepEqual(b.all.asleep(), ['mail'], 'asleep again after');
 });
+
+test('a long copy says how far it is: its work as files and size, as it goes', async (t) => {
+    const from = mkdtempSync(join(tmpdir(), 'clv-copy-from-'));
+    const to = mkdtempSync(join(tmpdir(), 'clv-copy-to-'));
+    t.after(() => { rmSync(from, { recursive: true, force: true }); rmSync(to, { recursive: true, force: true }); });
+    mkdirSync(join(from, 'a'));
+    writeFileSync(join(from, 'a', 'one'), 'x'.repeat(2048));
+    writeFileSync(join(from, 'two'), 'y'.repeat(1024));
+    const seen = [];
+    const done = await copyWorkFolder(from, join(to, 'w'), (p) => seen.push(p));
+    assert.deepEqual(done, { files: 2, bytes: 3072 });
+    assert.equal(seen.length, 2);
+    assert.deepEqual(seen.at(-1), { files: 2, bytes: 3072 });
+});
+
+test('a copy shows its steps by name while it carries: its work, its tool\'s memory, put back', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-copy-vmm-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const fake = join(dir, 'vmm');
+    writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do case "$a" in *"tar -czf"*) sleep 1; printf 'ARCHIVE'; exit 0;; *"tar -xzf"*) cat > /dev/null; sleep 1; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+exit 0
+`, { mode: 0o755 });
+    const b = bench(t, { prefix: [fake] });
+    b.all.copyWork = async (f, tt, on) => { on?.({ files: 3, bytes: 5 * 1024 * 1024 }); await new Promise((ok) => setTimeout(ok, 200)); return { files: 3, bytes: 5 * 1024 * 1024 }; };
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    const r = await b.all.copy('mail', { title: 'Copy' });
+    const steps = new Set();
+    const watch = setInterval(() => { const s = b.store.get(r.name)?.step; if (s) steps.add(s); }, 10);
+    await b.all.copied;
+    clearInterval(watch);
+    const all = [...steps].join(' | ');
+    assert.match(all, /Copying its work: 3 files, 5 MB/);
+    assert.match(all, /Copying Kept's memory/);
+    assert.match(all, /Putting Kept's memory in the copy/);
+});
