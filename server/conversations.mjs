@@ -14,9 +14,9 @@ import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { availableParallelism } from 'node:os';
 import { spawn } from 'node:child_process';
-import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, copyFileSync } from 'node:fs';
+import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, copyFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -982,19 +982,35 @@ export class Conversations {
 
     /* An exported state unpacked into its home (its tool stopped by the caller): its manifest checked, then each
        part put in place of the old. -> the manifest's { name, at }, or null. */
+    /* `input`: a stream, sent through the VM manager's input; or the path of a file here -- then, when it has a work
+       folder here, put there and read from it in its machine (14-11: the VM manager's channel failed past a few tens
+       of KB on the owner's server, both ways). */
     async #unpack(name, toolId, input) {
+        let viaWork = '';
+        let source = input;
+        const workDir = typeof input === 'string' && this.#store.get(name)?.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        if (workDir) {
+            const id = `in-${Date.now()}`;
+            viaWork = join(workDir, '.clavarium-carry', `${id}.tgz`);
+            mkdirSync(dirname(viaWork), { recursive: true });
+            copyFileSync(input, viaWork);
+            source = id;
+        } else if (typeof input === 'string') source = createReadStream(input);
+        try { return await this.#unpackFrom(name, toolId, source, Boolean(viaWork)); } finally { if (viaWork) rmSync(viaWork, { force: true }); }
+    }
+    async #unpackFrom(name, toolId, input, fromWork) {
         /* Unpacked aside first: its manifest read, its tool checked; then moved into the home. */
         /* Aside in the home itself (never /tmp, which may be memory): then each part moved in place of the old. */
-        const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; tar -xzf - -C "$m"; '
+        const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; if [ -n "$2" ]; then tar -xzf "/work/.clavarium-carry/$2.tgz" -C "$m"; else tar -xzf - -C "$m"; fi; '
             + 'grep -q "\\"kind\\":\\"clavarium-conversation\\"" "$m/clavarium-conversation.json" || { echo "not an exported conversation" >&2; exit 3; }; '
             + 'grep -q "\\"tool\\":\\"$1\\"" "$m/clavarium-conversation.json" || { echo "another tool" >&2; exit 4; }; '
             + 'cat "$m/clavarium-conversation.json"; rm -f "$m/clavarium-conversation.json"; '
             + 'for e in "$m"/.[!.]* "$m"/*; do if [ ! -e "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
-        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', toolId]);
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', toolId, fromWork ? input : '']);
         const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
         const out = []; const err = [];
         child.stdout.on('data', (d) => out.push(d)); child.stderr.on('data', (d) => err.push(d));
-        input.pipe(child.stdin);
+        if (fromWork) child.stdin.end(); else input.pipe(child.stdin);
         child.stdin.on('error', () => { /* it stopped reading: said below */ });
         const code = await new Promise((ok) => child.on('close', ok));
         if (code === 3) throw new Refusal(400, 'This is not an exported conversation.');
@@ -1138,7 +1154,7 @@ export class Conversations {
                     if (started.code !== 0) throw new Error(`its machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
                 }
                 this.#store.patch(to, { step: `Putting ${tool.label}'s memory in the copy` });
-                await this.#unpack(to, c.tool, createReadStream(carried));
+                await this.#unpack(to, c.tool, carried);
             }
             this.#store.patch(to, { step: 'Giving it the same accesses' });
             await this.copyRights(from, to);
@@ -1232,7 +1248,7 @@ export class Conversations {
                 /* Not opened while its state is put back: building still, to the end. */
                 this.#store.patch(name, { phase: 'building', step: `Putting ${tool.label}'s state back` });
                 this.drop(name);
-                try { await this.#unpack(name, c.tool, createReadStream(carried)); } catch (error) {
+                try { await this.#unpack(name, c.tool, carried); } catch (error) {
                     this.#store.patch(name, { phase: 'ready', step: undefined });
                     this.ready(name);
                     this.renewed(name, `Moved to the shared machine ${machine}, but ${tool.label}'s state did not come along (${error.message}): it starts afresh. Its old machine is kept, stopped.`, true);

@@ -89,14 +89,14 @@ exit 0
     assert.notEqual(b.vms.get('clv-mail'), 'Running', 'asleep again');
 });
 
-test('a copy reads its tool\'s memory through its original\'s work folder when it has one, not the VM manager\'s output (14-11)', async (t) => {
+test('a copy reads its tool\'s memory through its original\'s work folder, and puts it in through its own, never through the VM manager\'s channel (14-11)', async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'clv-copy-vmm-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const work = join(dir, 'work'); mkdirSync(work);
     const fake = join(dir, 'vmm');
     /* Its archive written where it is told (the last word: its id), in the work folder; nothing on its output. */
     writeFileSync(fake, `#!/bin/sh
-for a in "$@"; do case "$a" in *"tar -czf"*) for id; do :; done; mkdir -p "${work}/.clavarium-carry"; printf 'ARCHIVE-IN-WORK' > "${work}/.clavarium-carry/$id.tgz"; exit 0;; *"tar -xzf"*) { printf '%s:' "$3"; cat; } > "${dir}/imported"; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+for a in "$@"; do case "$a" in *"tar -czf"*) for id; do :; done; mkdir -p "${work}/.clavarium-carry"; printf 'ARCHIVE-IN-WORK' > "${work}/.clavarium-carry/$id.tgz"; exit 0;; *"tar -xzf"*) for id; do :; done; { printf '%s:' "$3"; if [ -f "${work}/.clavarium-carry/$id.tgz" ]; then printf 'from-work:'; cat "${work}/.clavarium-carry/$id.tgz"; else cat; fi; } > "${dir}/imported"; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
 exit 0
 `, { mode: 0o755 });
     const b = bench(t, { prefix: [fake] });
@@ -106,7 +106,7 @@ exit 0
     const r = await b.all.copy('mail', { title: 'Copy' });
     await b.all.copied;
     assert.equal(b.store.get(r.name).phase, 'ready');
-    assert.equal(readFileSync(join(dir, 'imported'), 'utf8'), `clv-${r.name}:ARCHIVE-IN-WORK`);
+    assert.equal(readFileSync(join(dir, 'imported'), 'utf8'), `clv-${r.name}:from-work:ARCHIVE-IN-WORK`, 'put in its own work folder, read from there');
     assert.deepEqual(readdirSync(join(work, '.clavarium-carry')), [], 'taken from there: nothing left in its work');
 });
 
