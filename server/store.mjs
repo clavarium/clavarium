@@ -10,9 +10,12 @@ import { dirname } from 'node:path';
 export class Store {
     #path;
     #items;
+    /* Told of each change, its record before and after (undefined: made or removed): jobs.mjs reads it. */
+    onChange;
 
-    constructor(path) {
+    constructor(path, { onChange } = {}) {
         this.#path = path;
+        this.onChange = onChange;
         mkdirSync(dirname(path), { recursive: true });
         try { this.#items = JSON.parse(readFileSync(path, 'utf8')); } catch { this.#items = []; }
         if (!Array.isArray(this.#items)) this.#items = [];
@@ -23,21 +26,32 @@ export class Store {
 
     put(conversation) {
         const i = this.#items.findIndex((x) => x.name === conversation.name);
+        const before = i >= 0 ? { ...this.#items[i] } : undefined;
         if (i >= 0) this.#items[i] = { ...conversation }; else this.#items.push({ ...conversation });
         this.#save();
+        this.#told(before, conversation);
     }
 
     patch(name, changes) {
         const c = this.#items.find((x) => x.name === name);
         if (!c) return undefined;
+        const before = { ...c };
         Object.assign(c, changes);
         this.#save();
+        this.#told(before, c);
         return { ...c };
     }
 
     remove(name) {
+        const before = this.get(name);
         this.#items = this.#items.filter((x) => x.name !== name);
         this.#save();
+        if (before) this.#told(before, undefined);
+    }
+
+    #told(before, after) {
+        if (!this.onChange) return;
+        try { this.onChange(before, after ? { ...after } : undefined); } catch { /* a listener never breaks a write */ }
     }
 
     #save() {

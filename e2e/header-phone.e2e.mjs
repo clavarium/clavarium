@@ -11,8 +11,8 @@ test('on a phone, the bar of a conversation stays within the screen, its setting
     const page = me.page;
     for (const width of [320, 360, 390]) {
         await page.setViewportSize({ width, height: 780 });
-        /* As with a binder given, and 24 assets. */
-        await page.evaluate(() => { document.getElementById('view-lists').hidden = false; document.getElementById('folders').hidden = false; document.getElementById('assets-count').textContent = '24'; });
+        /* As with a binder given, 24 assets, and 2 jobs under way (14-11). */
+        await page.evaluate(() => { document.getElementById('view-lists').hidden = false; document.getElementById('folders').hidden = false; document.getElementById('assets-count').textContent = '24'; const j = document.getElementById('jobs-room'); j.hidden = false; j.textContent = '2'; document.getElementById('back').dataset.jobs = 'on'; });
         await me.until('the bar laid out', async () => page.locator('#folders').isVisible());
         const right = await page.evaluate(() => Math.max(...[...document.querySelectorAll('#room > header *')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect().right)));
         assert.ok(right <= width, `${width}px: the bar ends at ${Math.round(right)}px`);

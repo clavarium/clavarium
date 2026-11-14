@@ -522,7 +522,7 @@
         const old = document.getElementById('room')?.querySelector(':scope > header');
         if (old) old.replaceWith(DEVICE
             ? KIT.TopBar({ variant: 'main', title: $('name'), actions: [...old.children].filter((n) => n.id !== 'name') })
-            : KIT.TopBar({ variant: 'main', fold: $('fold'), back: { element: $('back'), label: 'Conversations' }, state: $('state'), title: $('name'), actions: [$('views')] }));
+            : KIT.TopBar({ variant: 'main', fold: $('fold'), back: { element: $('back'), label: 'Conversations' }, state: $('state'), title: $('name'), actions: [$('jobs-room'), $('views')] }));
     }
     /* A room (the device page has none): its dot, its name, under it who speaks now (only then); on its right who is
        in it (07-11: small stacked avatars, a click opens the list) then its settings, in the same group of views a
@@ -1978,9 +1978,68 @@
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         /* The panel is open: what the answerer did meanwhile is said there. */
         if (!DEVICE && panelShown) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
+        if (!DEVICE && home) void paintJobs();
         /* A start told step by step is asked about more often: its tool appears soon after its last step. */
         if (home) pollTimer = setTimeout(refresh, conversations.some(holds) || conversations.some((c) => c.machine) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
     }
+
+    /* ---------- WHAT IT IS DOING (jobs.mjs, 14-11) ----------
+       A badge by the list's title while something runs (« ● 2 under way »), or when one failed since the list
+       was last opened (« ● 1 failed », red); nothing otherwise. Tapped: what runs, its step; then the day's ends,
+       done or failed with why. A line opens its conversation. Read with the list, nothing asked of the machines. */
+    let jobsNow = { running: [], done: [] };
+    const JOBS_SEEN = 'clavarium.jobsSeen';
+    const jobsSeen = () => { try { return localStorage.getItem(JOBS_SEEN) ?? ''; } catch { return ''; } };
+    async function paintJobs() {
+        try { const r = await fetch(`${API}/jobs`); if (!r.ok) return; jobsNow = await r.json(); } catch { return; }
+        const failed = jobsNow.done.filter((j) => j.result === 'failed' && String(j.endedAt) > jobsSeen()).length;
+        const n = jobsNow.running.length;
+        /* Two places, one state: by the list's title, and in the bar of the conversation open (its list folded
+           away, or a phone's, a screen of its own) -- shorter there, the bar is narrow. */
+        for (const [id, words] of [['jobs-open', n ? `${n} under way` : `${failed} failed`], ['jobs-room', n ? String(n) : '!']]) {
+            const badge = $(id);
+            badge.hidden = !n && !failed;
+            badge.dataset.tone = !n && failed ? 'bad' : '';
+            badge.textContent = words;
+            badge.title = n ? `Under way: ${jobsNow.running.map((j) => j.what).join(' · ')}` : 'Failed: tap to see what';
+            badge.setAttribute('aria-label', n ? `${n} under way` : `${failed} failed`);
+        }
+        if (n || failed) $('back').dataset.jobs = n ? 'on' : 'bad'; else delete $('back').dataset.jobs;
+        if (!$('jobs').hidden) paintJobsList();
+    }
+    function paintJobsList() {
+        const line = (j, mark, result) => {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'job'; b.dataset.result = result;
+            const when = j.endedAt ? new Date(j.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            b.append(Object.assign(document.createElement('span'), { textContent: mark }), Object.assign(document.createElement('span'), { textContent: j.what }),
+                Object.assign(document.createElement('small'), { textContent: result === 'running' ? (j.step || 'Starting') : [j.why, when].filter(Boolean).join(' · ') }));
+            if (j.conversation && conversations.some((c) => c.name === j.conversation)) b.addEventListener('click', () => { closeJobs(); select(j.conversation, { step: true }); });
+            else b.disabled = true;
+            return b;
+        };
+        const head = (text) => Object.assign(document.createElement('h3'), { textContent: text });
+        const parts = [];
+        if (jobsNow.running.length) parts.push(head('Under way'), ...jobsNow.running.map((j) => line(j, '⟳', 'running')));
+        if (jobsNow.done.length) parts.push(head('Today'), ...jobsNow.done.map((j) => line(j, j.result === 'done' ? '✓' : '✗', j.result === 'done' ? 'done' : 'failed')));
+        if (!parts.length) parts.push(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'Nothing under way.' }));
+        $('jobs').replaceChildren(...parts);
+    }
+    function closeJobs() { $('jobs').hidden = true; for (const id of ['jobs-open', 'jobs-room']) $(id).setAttribute('aria-expanded', 'false'); }
+    for (const id of ['jobs-open', 'jobs-room']) $(id).addEventListener('click', () => {
+        if (!$('jobs').hidden) { closeJobs(); return; }
+        paintJobsList();
+        /* Under the badge tapped, kept within the screen. */
+        const at = $(id).getBoundingClientRect(); const pop = $('jobs');
+        pop.hidden = false;
+        pop.style.top = `${Math.round(at.bottom + 6)}px`;
+        pop.style.left = `${Math.round(Math.max(8, Math.min(at.left, window.innerWidth - pop.offsetWidth - 8)))}px`;
+        $(id).setAttribute('aria-expanded', 'true');
+        try { localStorage.setItem(JOBS_SEEN, new Date().toISOString()); } catch { /* kept for this visit only */ }
+        if (!jobsNow.running.length) { $('jobs-open').hidden = true; $('jobs-room').hidden = true; delete $('back').dataset.jobs; }
+    });
+    document.addEventListener('click', (event) => { if (!$('jobs').hidden && !event.target.closest('#jobs, #jobs-open, #jobs-room')) closeJobs(); });
+    /* Escape closes the list, and only it: never the conversation under it too (14-11: the page went to « No conversation »). */
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('jobs').hidden) { event.stopImmediatePropagation(); event.preventDefault(); closeJobs(); } }, true);
 
     /* ---------- A NEW CONVERSATION: a page of its own, as Settings ----------
        "+ New" opens it beside the list (the whole screen on a phone), with an
@@ -3387,8 +3446,12 @@
         box.hidden = !wanted;
         /* Where the tool talks through the app, the chat is the whole screen: one box to write in. */
         /* Its chat off, on this server's own page: said, with the button that turns it on (a device's page keeps the plain screen). */
-        const offer = !DEVICE && !wanted && !noTerminal();
-        $('simple-plain').hidden = wanted || offer;
+        /* Not known yet -- the list not read, its chat not asked, or it is being built or moved: nothing said
+           rather than a wrong screen (14-11: « chat is off », then « Its screen: connecting », then the chat). */
+        const here = conversations.find((x) => x.name === current);
+        const unknown = !DEVICE && (!here || here.phase !== 'ready' || talkOf !== current);
+        const offer = !unknown && !DEVICE && !wanted && !noTerminal();
+        $('simple-plain').hidden = wanted || offer || unknown;
         $('chat-turn').hidden = !offer;
         if (offer) {
             const possible = !(talkOf === current && talk.possible === false);

@@ -948,9 +948,12 @@ export class Conversations {
         /* In its machine: the manifest written aside, then one archive -- the manifest first, then what is kept
            (a path it has not made yet left out), the cache left out. */
         /* (Its paths are plain -- letters, digits, . _ / - -- checked by tools.mjs: given as words.) */
-        const script = 'set -e; m=$(mktemp -d); printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+        const script = 'm=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
             + 'ex=""; for a in $2; do ex="$ex --exclude=./$a"; done; ks=""; for a in $3; do if [ -e "$HOME/$a" ]; then ks="$ks ./$a"; fi; done; '
-            + 'tar -czf - -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks; rm -rf "$m"';
+            + 'rc=0; tar -czf - --warning=no-file-changed -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks || rc=$?; rm -rf "$m"; '
+            /* 1: a file changed while read (its tool writing its log as it is read, 14-11: a live Claude Code): the
+               archive is whole all the same -- what was there, read; only a real error (2) fails. */
+            + '[ "$rc" -le 1 ]';
         const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' ')]);
         const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
         /* What it said when it failed: kept short, for the message that says why (a copy, a move). */
@@ -1028,7 +1031,8 @@ export class Conversations {
     async #copying(from, to, c, tool, building, open = () => {}) {
         const dir = mkdtempSync(join(tmpdir(), 'clv-copy-'));
         const carried = join(dir, 'state.tar.gz');
-        let woke = false;
+        let woke = false; let putBack = 'sleep';
+        const back = () => (putBack === 'stop' ? this.machineAction(from, 'stop', { wait: true }) : this.sleep(from));
         try {
             /* Said as it goes, once a second at most: a long copy is seen moving (13-11, "on ne sait pas si ça marche"). */
             let said = 0;
@@ -1037,7 +1041,9 @@ export class Conversations {
                 this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
                 if (state !== 'Running') {
-                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory: waking its original` });
+                    /* Put back as it was found (14-11: one stopped was left asleep, its memory held). */
+                    putBack = state === 'Stopped' ? 'stop' : 'sleep';
+                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory: ${putBack === 'stop' ? 'starting its original (it was stopped)' : 'waking its original'}` });
                     await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
                     /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
                        holding memory (capacity.mjs, reclaimSleepers) does not put it back to sleep while it is read --
@@ -1078,7 +1084,7 @@ export class Conversations {
                 }
                 if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
                 /* Read: its original back to sleep at once, before the copy's machine is made. */
-                if (woke) { await this.sleep(from).catch(() => {}); woke = false; }
+                if (woke) { await back().catch(() => {}); woke = false; }
                 this.#borrowed.delete(from);
             }
             open(true);
@@ -1111,7 +1117,7 @@ export class Conversations {
             return undefined;
         } finally {
             rmSync(dir, { recursive: true, force: true });
-            if (woke) await this.sleep(from).catch(() => {});
+            if (woke) await back().catch(() => {});
             this.#borrowed.delete(from);
         }
     }
