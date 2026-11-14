@@ -647,3 +647,27 @@ test('a tool asks to be restarted by a file beside its chat: seen, then taken; a
     symlinkSync('/etc/hostname', join(dir, 'restart-asked'));
     assert.equal(b.talk.restartAsked('helper'), false, 'a link is not a request');
 });
+
+test('when its thread is archived: Parley\'s default till the owner chooses; set, read back, kept in its bridge folder; values out of range refused', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    assert.deepEqual(b.talk.split('helper'), { messages: 5000 }, 'Parley\'s default');
+    assert.deepEqual(b.talk.of('helper', new URLSearchParams('state=1')).split, { messages: 5000 }, 'with the chat\'s state');
+    const settings = () => JSON.parse(readFileSync(join(b.bridge, 'settings.json'), 'utf8')).split;
+    assert.deepEqual(b.talk.setSplit('helper', { messages: 2000 }), { split: { messages: 2000 } });
+    assert.deepEqual(settings(), { messages: 2000 });
+    assert.deepEqual(b.talk.setSplit('helper', { days: 0.5 }), { split: { days: 0.5 } });
+    assert.deepEqual(b.talk.split('helper'), { days: 0.5 });
+    assert.deepEqual(b.talk.setSplit('helper', { off: true }), { split: false });
+    assert.equal(settings(), false);
+    assert.equal(b.talk.of('helper').split, false, 'with the thread');
+    for (const bad of [{ messages: 499 }, { messages: 100_001 }, { messages: 2500.5 }, { messages: '2000' }, { days: 0.4 }, { days: 366 }, { days: '7' }, { days: Infinity }, {}, { off: 'yes' }]) {
+        assert.throws(() => b.talk.setSplit('helper', bad), (e) => e.status === 400, JSON.stringify(bad));
+    }
+    assert.equal(settings(), false, 'a refused value changes nothing');
+    assert.deepEqual(b.talk.setSplit('helper', { messages: 100_000 }), { split: { messages: 100_000 } });
+    assert.deepEqual(b.talk.setSplit('helper', { days: 365 }), { split: { days: 365 } });
+    assert.throws(() => b.talk.setSplit('nobody', { days: 7 }), /No such conversation/);
+    const disk = bench(t, { work: 'disk' });
+    assert.throws(() => disk.talk.setSplit('helper', { days: 7 }), (e) => e.status === 409);
+});

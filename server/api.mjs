@@ -34,6 +34,8 @@
  *   POST /api/conversations/<name>/talk          {text, answers?, files?, via?}: written in its chat; files from .../talk/file; via 'voice': dictated
  *   POST /api/conversations/<name>/talk/react    {to, reaction}: the owner's reaction to a message of the tool (null: taken back)
  *   POST /api/conversations/<name>/talk/pin      {to, on}: the owner pins a message of the chat (on: false unpins); 5 at most
+ *   POST /api/conversations/<name>/talk/split    {messages: 500..100000} | {days: 0.5..365} | {off: true}: when its thread is
+ *                                                archived into volumes (nothing deleted) -> {split}; read back as `split` in GET .../talk
  *   POST /api/conversations/<name>/chat-name     {name}: the name the chat gives its tool ('' : the neutral word of the dictionary)
  *   POST /api/conversations/<name>/tasks-binder  {binder}: the binder shown beside its chat ('' automatic, '-' none, else an id)
  *   POST /api/conversations/<name>/voice-mark    {on}: what is dictated into its terminal starts with a microphone sign (AI tools only)
@@ -835,13 +837,14 @@ export async function handleApi(request, response, conversations, headers, resou
             }
             return send(200, { asset, rights, given }), true;
         }
-        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind|\/react|\/pin)?$/.exec(pathname);
+        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind|\/react|\/pin|\/split)?$/.exec(pathname);
         if (talking && talk) {
             const conversation = decodeURIComponent(talking[1]);
             if (talking[2] === '/invite') return send(200, await talk.invite(conversation, typeof body.lang === 'string' ? body.lang : 'en')), true;
             if (talking[2] === '/remind') return send(200, await talk.remind(conversation, { urgent: body?.urgent === true })), true;
             if (talking[2] === '/react') return send(200, await talk.react(conversation, body.to, body.reaction ?? null)), true;
             if (talking[2] === '/pin') return send(200, await talk.pin(conversation, body.to, body.on !== false)), true;
+            if (talking[2] === '/split') return send(200, talk.setSplit(conversation, { messages: body.messages, days: body.days, off: body.off })), true;
             if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
             /* What the chat may add to an answer: the choices ticked, the answers of a group, the zone of a picture it is about (Parley checks each). */
             return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via, { picked: body.picked, replies: body.replies, about: body.about, quick: body.quick === true })), true;

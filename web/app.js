@@ -3864,6 +3864,7 @@
         const here = conversations.find((x) => x.name === current);
         if (document.activeElement !== $('chat-name')) $('chat-name').value = here?.chatName ?? '';
         void paintTasksBinder(here);
+        void paintChatSplit();
         if (document.activeElement !== $('title-name')) $('title-name').value = shownName(here);
         $('title-box').hidden = $('hide-box').hidden = $('group-box').hidden = DEVICE || !here;
         if (document.activeElement !== $('group-name')) $('group-name').value = here?.group ?? '';
@@ -3940,6 +3941,32 @@
         $('panel-error').hidden = true;
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/tasks-binder`, { binder: $('tasks-binder').value }); await refresh(); void paintTasks(current); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
+    /* WHEN ITS THREAD IS ARCHIVED (server/talk.mjs setSplit): a choice of a few; another value set elsewhere is shown as it is. */
+    const CHAT_SPLITS = [
+        ['messages:2000', () => uiSaid('set-split-2000', 'Every 2,000 messages')],
+        ['messages:5000', () => uiSaid('set-split-5000', 'Every 5,000')],
+        ['days:7', () => uiSaid('set-split-week', 'Every week')],
+        ['days:1', () => uiSaid('set-split-day', 'Every day')],
+        ['off', () => uiSaid('set-split-never', 'Never')],
+    ];
+    const splitKey = (v) => (v === false ? 'off' : v?.days ? `days:${v.days}` : `messages:${v?.messages ?? 5000}`);
+    async function paintChatSplit() {
+        const name = current;
+        const t = talkOf === name ? talk : await readTalk();
+        if (name !== current) return;
+        $('chat-split-row').hidden = !t?.on || t.split === undefined;
+        if ($('chat-split-row').hidden || document.activeElement === $('chat-split')) return;
+        const now = splitKey(t.split);
+        const choices = CHAT_SPLITS.some(([v]) => v === now) ? CHAT_SPLITS : [...CHAT_SPLITS, [now, () => now.replace(':', ' ')]];
+        $('chat-split').replaceChildren(...choices.map(([v, text]) => { const o = document.createElement('option'); o.value = v; o.textContent = text(); o.selected = v === now; return o; }));
+    }
+    $('chat-split').addEventListener('change', async () => {
+        const [kind, n] = $('chat-split').value.split(':');
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk/split`, kind === 'off' ? { off: true } : { [kind]: Number(n) }); await readTalk(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        $('chat-split').blur(); await paintChatSplit();
     });
     $('chat-name-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -4304,7 +4331,9 @@
         });
     }
     /* Its settings, on the Access chapter. `giving`: « Give… » instead, in its Assets tab (07-11, assets step 4). */
-    async function openAccess(giving = false) {
+    /* `atAccess`: on its Access chapter (a link that asks for it). The settings button keeps the tab the person was
+       on (14-11: it jumped from Resources to Access by itself, each time the settings were opened or painted again). */
+    async function openAccess(giving = false, { atAccess = true } = {}) {
         if (DEVICE || !current) return;
         if (place !== 'conversations') leavePlace();
         if (giving) { openGive(); return; }
@@ -4312,10 +4341,13 @@
         /* What it has may have changed from another screen: asked again before it is shown. */
         await refresh();
         await paintPanel();
-        /* The folders button shows the folders: their chapter opened, in its tab. */
-        openChapter('access');
+        if (atAccess) openChapter('access');
     }
-    $('folders').addEventListener('click', () => { void openAccess(false); });
+    $('folders').addEventListener('click', () => {
+        /* A tab chosen before on this device: that one. Never chosen: its Access chapter, as it always opened. */
+        let kept = null; try { kept = localStorage.getItem('clavarium-tab-panel'); } catch { /* a private window */ }
+        void openAccess(false, { atAccess: !kept });
+    });
     /* « N assets · see »: its Assets tab. */
     $('access-assets').addEventListener('click', () => { goTab('assets'); });
 
@@ -8899,7 +8931,7 @@
             $('server-memory-note').textContent = aboveWords(mem.freeMb - r.reserve.memoryMb, r.reserve.memoryMb);
             const held = r.machines.reduce((a, x) => a + x.rssMb, 0);
             const rest = Math.max(0, mem.totalMb - mem.freeMb - held);
-            const named = r.machines.map((x, i) => ({ key: x.name ?? `vm-${i}`, label: x.shelf ? 'ready-made machine (being made)' : (x.name ? machineTitle(x.name) : 'another machine'), mb: x.rssMb, x }));
+            const named = r.machines.map((x, i) => ({ key: x.name ?? `vm-${i}`, label: x.shelf ? 'ready-made machine (being made)' : x.name ? machineTitle(x.name) : x.shared ? uiSaid('set-mem-shared', 'Shared « {m} »: {who}', { m: x.shared, who: (x.who ?? []).join(', ') }) : 'another machine', mb: x.rssMb, x }));
             const share = shareOf(named, rest, mem.freeMb);
             $('server-memory-share').replaceChildren(...(r.machines.length ? [shareDonut(share.slices, uiSaid('set-share-memory', 'Memory by machine'), mem.totalMb - mem.freeMb, mem.totalMb)] : []));
             parts($('server-memory-parts'), [

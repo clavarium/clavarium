@@ -180,9 +180,13 @@ export class Capacity {
         const set = this.reserve();
         const all = this.#conversations.list();
         const records = new Map(all.map((c) => [`clv-${c.name}`, c]));
+        /* A shared machine (#221) is no conversation's own: named, with who lives in it (14-11: it showed as « another machine »). */
+        const shared = new Map();
+        for (const c of all) if (c.sharedMachine) { const s = shared.get(`clv-${c.sharedMachine}`) ?? { shared: c.sharedMachine, who: [], sizeMb: c.machineMb ?? null }; s.who.push(c.title ?? c.name); shared.set(`clv-${c.sharedMachine}`, s); }
         const machines = room.machines.map((m) => {
             const c = records.get(m.vm);
-            return { name: c ? c.name : null, shelf: m.vm.startsWith('clvshelf-'), rssMb: m.rssMb, sizeMb: c?.memoryMb ?? null, ...(room.machineAge?.[m.vm] !== undefined ? { ageS: room.machineAge[m.vm] } : {}) };
+            const s = c ? null : shared.get(m.vm);
+            return { name: c ? c.name : null, ...(s ? { shared: s.shared, who: s.who } : {}), shelf: m.vm.startsWith('clvshelf-'), rssMb: m.rssMb, sizeMb: c?.memoryMb ?? s?.sizeMb ?? null, ...(room.machineAge?.[m.vm] !== undefined ? { ageS: room.machineAge[m.vm] } : {}) };
         });
         /* What the system says is available: the machines' own use is in it already. */
         const memory = room.memory ? { totalMb: room.memory.totalMb, freeMb: room.memory.availableMb, usedPercent: percent(room.memory.totalMb - room.memory.availableMb, room.memory.totalMb) } : null;
