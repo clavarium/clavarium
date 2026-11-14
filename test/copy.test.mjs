@@ -78,7 +78,7 @@ exit 0
 `, { mode: 0o755 });
     const b = bench(t, { prefix: [fake] });
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
-    b.vms.set('clv-mail', 'Suspended');
+    b.vms.set('clv-mail', 'Suspended'); b.store.patch('mail', { asleep: true });
     const r = await b.all.copy('mail', { title: 'Copy' });
     await b.all.copied;
     assert.equal(b.store.get(r.name).phase, 'ready');
@@ -154,7 +154,7 @@ exit 0
 `, { mode: 0o755 });
     const b = bench(t, { prefix: [fake] });
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
-    b.vms.set('clv-mail', 'Suspended');
+    b.vms.set('clv-mail', 'Suspended'); b.store.patch('mail', { asleep: true });
     b.store.patch('mail', { asleep: true });
     assert.deepEqual(b.all.asleep(), ['mail']);
     const seen = [];
@@ -212,7 +212,7 @@ exit 0
 `, { mode: 0o755 });
     const b = bench(t, { prefix: [fake] });
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
-    b.vms.set('clv-mail', 'Suspended');
+    b.vms.set('clv-mail', 'Suspended'); b.store.patch('mail', { asleep: true });
     b.calls.length = 0;
     const r = await b.all.copy('mail', { title: 'Copy' });
     await b.all.copied;

@@ -1042,7 +1042,9 @@ export class Conversations {
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
                 if (state !== 'Running') {
                     /* Put back as it was found (14-11: one stopped was left asleep, its memory held). */
-                    putBack = state === 'Stopped' ? 'stop' : 'sleep';
+                    /* Asleep by its record and not seen stopped: back to sleep; otherwise (stopped, or its state not read --
+                       14-11 on test-c, just after a restart) stopped, which frees its memory. */
+                    putBack = this.#store.get(from)?.asleep === true && state !== 'Stopped' ? 'sleep' : 'stop';
                     this.#store.patch(to, { step: `Copying ${tool.label}'s memory: ${putBack === 'stop' ? 'starting its original (it was stopped)' : 'waking its original'}` });
                     await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
                     /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
