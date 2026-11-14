@@ -93,7 +93,7 @@ import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs'
 import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
 import { copyWorkFolder } from './copywork.mjs';
-import { Jobs } from './jobs.mjs';
+import { Jobs, withUpdates } from './jobs.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MAINTENANCE = 'deploy/maintenance.html';
@@ -243,7 +243,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
            /api/ext/ through without sign-on, and strips the identity headers there. */
         if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
-            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, reminders: apikeys.reminders, binder: apikeys.binder, events, headers: HEADERS, originOk, version: platform?.version ?? null });
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, reminders: apikeys.reminders, binder: apikeys.binder, jobs: apikeys.jobs, events, headers: HEADERS, originOk, version: platform?.version ?? null });
             return;
         }
         if (door && pathname.startsWith('/c/')) {
@@ -791,6 +791,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* What the host program says of the server is never waited for long: a key gets what is known. */
     const briefly = { brief: () => quick(capacity.brief(), 3000, null), room: () => quick(capacity.room(), 3000, null) };
     const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }),
+        /* What Clavarium does (jobs.mjs), as Settings shows it: the list without logs, one job with its log. */
+        jobs: { list: () => withUpdates(all.jobs, all.list(), updates?.about().history ?? []), log: (id) => all.jobs.log(id) },
         /* A key's conversations (their chat, through talk.mjs): read as the page reads it; a message posted as the page
            posts one (its secrets lifted the same way), signed with the key's name. */
         chats: {

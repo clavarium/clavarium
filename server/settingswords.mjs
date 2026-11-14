@@ -91,6 +91,7 @@ export const SETTINGS_WORDS_FR = {
     'set-apikeys-expires': 'Expire', 'set-apikeys-30': 'Dans 30 jours', 'set-apikeys-90': 'Dans 90 jours', 'set-apikeys-365': 'Dans un an',
     'set-apikeys-never': 'Jamais', 'set-apikeys-cancel': 'Annuler', 'set-apikeys-create': 'Créer', 'set-apikeys-new': 'Nouvelle clé',
     'set-apikeys-never-by-key': 'Jamais : secrets, clés, comptes, droits', 'set-apikeys-scope-status': 'Son état (mémoire, disque, versions)',
+    'set-apikeys-scope-jobs': 'Tâches : ce que fait Clavarium, ses journaux',
     'set-apikeys-scope-create-rooms': 'Créer des salons', 'set-apikeys-act': 'Agir', 'set-apikeys-manage': 'Gérer',
     'set-apikeys-no-scope': 'Aucune portée', 'set-apikeys-by-you': 'par vous', 'set-apikeys-used': 'Utilisée {when}', 'set-apikeys-unused': 'Jamais utilisée',
     'set-apikeys-expired': 'Expirée', 'set-apikeys-expires-on': 'Expire le {date}', 'set-apikeys-no-expiry': 'N\'expire pas',

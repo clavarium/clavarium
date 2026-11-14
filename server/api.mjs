@@ -177,6 +177,7 @@ import { writeFileSync } from 'node:fs';
 import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
+import { withUpdates } from './jobs.mjs';
 import { readRights, typeOf, nameOf } from './grants.mjs';
 import { VmUnknown } from './vm.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
@@ -409,12 +410,7 @@ export async function handleApi(request, response, conversations, headers, resou
             const reactOf = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
             if (reactOf && reacting) return send(200, reacting.settings(decodeURIComponent(reactOf[1]))), true;
             if (pathname === '/api/jobs' && conversations.jobs) {
-                const said = conversations.jobs.list(conversations.list?.() ?? []);
-                const day = Date.now() - 24 * 3600_000;
-                const updated = (updates?.about().history ?? []).filter((h) => h.at && Date.parse(h.at) >= day)
-                    .map((h) => ({ what: `Clavarium ${h.action === 'rollback' ? 'back to' : 'updated to'} ${h.to ?? '?'}`, endedAt: h.at, result: h.result === 'done' ? 'done' : 'failed', ...(h.result === 'done' ? {} : { why: h.why ?? h.result ?? '' }) }));
-                const done = [...said.done, ...updated].sort((a, b) => String(b.endedAt).localeCompare(String(a.endedAt)));
-                return send(200, { running: said.running, done }), true;
+                return send(200, withUpdates(conversations.jobs, conversations.list?.() ?? [], updates?.about().history ?? [])), true;
             }
             /* A job's log (jobs.mjs): read when its line is opened, never with the list, which stays light. */
             if (pathname === '/api/jobs/log' && conversations.jobs) {

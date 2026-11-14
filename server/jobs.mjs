@@ -7,6 +7,7 @@
  *   note(name, text)      a line added to the log of that conversation's job under way (none: nothing)
  *   list(now?)            { running: [...], done: [...] } newest first, done within KEEP_MS; without their logs
  *   log(id)               that job, under way or done, with its log; undefined if unknown
+ *   withUpdates(...)      list() with Clavarium's own updates of the day among the done (the owner's page, an API key)
  *
  * Each job keeps a LOG (14-11), for the owner in Settings and for the conversation's AI, rather than diagnostics
  * on screen: each new step, the lines noted, its end. A step that only counts on ("… 12 MB read") is kept once
@@ -34,6 +35,17 @@ export function jobWords(c) {
     if (c.phase === 'restarting') return `Restarting ${titleOf(c)}`;
     if (c.copyOf) return `Copy ${titleOf(c)}${c.sharedMachine ? ` in « ${c.sharedMachine} »` : ''}`;
     return `Building ${titleOf(c)}${c.sharedMachine ? ` in « ${c.sharedMachine} »` : ''}`;
+}
+
+/* The jobs as the owner's page and an API key read them (/api/jobs, /api/ext/v1/jobs): those of the
+   conversations, and Clavarium's own updates of the day (updates.mjs history) among the done, newest first. */
+export function withUpdates(jobs, records = [], history = [], now = Date.now()) {
+    const said = jobs.list(records);
+    const day = now - KEEP_MS;
+    const updated = history.filter((h) => h.at && Date.parse(h.at) >= day)
+        .map((h) => ({ what: `Clavarium ${h.action === 'rollback' ? 'back to' : 'updated to'} ${h.to ?? '?'}`, endedAt: h.at, result: h.result === 'done' ? 'done' : 'failed', ...(h.result === 'done' ? {} : { why: h.why ?? h.result ?? '' }) }));
+    const done = [...said.done, ...updated].sort((a, b) => String(b.endedAt).localeCompare(String(a.endedAt)));
+    return { running: said.running, done };
 }
 
 export class Jobs {
