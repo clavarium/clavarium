@@ -4304,7 +4304,9 @@
         });
     }
     /* Its settings, on the Access chapter. `giving`: « Give… » instead, in its Assets tab (07-11, assets step 4). */
-    async function openAccess(giving = false) {
+    /* `atAccess`: on its Access chapter (a link that asks for it). The settings button keeps the tab the person was
+       on (14-11: it jumped from Resources to Access by itself, each time the settings were opened or painted again). */
+    async function openAccess(giving = false, { atAccess = true } = {}) {
         if (DEVICE || !current) return;
         if (place !== 'conversations') leavePlace();
         if (giving) { openGive(); return; }
@@ -4312,10 +4314,13 @@
         /* What it has may have changed from another screen: asked again before it is shown. */
         await refresh();
         await paintPanel();
-        /* The folders button shows the folders: their chapter opened, in its tab. */
-        openChapter('access');
+        if (atAccess) openChapter('access');
     }
-    $('folders').addEventListener('click', () => { void openAccess(false); });
+    $('folders').addEventListener('click', () => {
+        /* A tab chosen before on this device: that one. Never chosen: its Access chapter, as it always opened. */
+        let kept = null; try { kept = localStorage.getItem('clavarium-tab-panel'); } catch { /* a private window */ }
+        void openAccess(false, { atAccess: !kept });
+    });
     /* « N assets · see »: its Assets tab. */
     $('access-assets').addEventListener('click', () => { goTab('assets'); });
 
