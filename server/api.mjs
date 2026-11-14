@@ -187,6 +187,7 @@ import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
 import { demandeView } from './demandes.mjs';
 import { mcpAdd, mcpImport, mcpRefresh, mcpRights, mcpSeen, forgetKey } from './mcpx.mjs';
+import { BACK_PATH, backPage } from './mcpoauth.mjs';
 
 const BODY_MAX = 16 * 1024;
 /* A setup file travels inside the JSON of a request: room for it, escaped. */
@@ -523,6 +524,15 @@ export async function handleApi(request, response, conversations, headers, resou
             if (paired && sharing) return send(200, sharing.devices.of(decodeURIComponent(paired[1]))), true;
             const sending = /^\/api\/conversations\/([^/]+)\/git\/([a-z0-9-]{1,32})\/auto$/.exec(pathname);
             if (sending && gitKeeper) return send(200, gitKeeper.auto(sending[2], decodeURIComponent(sending[1]))), true;
+            /* Back from signing in to an external MCP server (mcpoauth.mjs): the owner's browser, sent here by the
+               provider. A page, not JSON; its state is the proof it was started from this page. */
+            if (pathname === BACK_PATH && tethers?.oauth) {
+                let page;
+                try { const done = await tethers.oauth.finish({ tethers }, { code: query.get('code'), state: query.get('state'), error: query.get('error') }); page = backPage({ ok: true, title: done.title }); }
+                catch (error) { page = backPage({ ok: false, message: error instanceof Refusal ? error.message : 'The sign-in failed.' }); }
+                response.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }).end(page);
+                return true;
+            }
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
@@ -676,6 +686,8 @@ export async function handleApi(request, response, conversations, headers, resou
            keeper runs as the owner (person), never as an agent. */
         /* External MCP servers (mcpx.mjs): added with their key (kept host-only in the vault, Tether given its name),
            imported from a pasted mcpServers block, listed again, a conversation's rights on their tools, new tools seen. */
+        /* Signing in to one with OAuth: the link the owner opens ({ url }), or { need: 'client' } for a client id to paste. */
+        if (pathname === '/api/tether/mcp-oauth' && tethers?.oauth) return send(200, await tethers.oauth.start({ tethers }, body ?? {}, sharing?.origin?.(request.headers) ?? `http://${request.headers.host}`)), true;
         const mcpOp = /^\/api\/tether\/mcp-(add|import|refresh|rights|seen)$/.exec(pathname);
         if (mcpOp && tethers) {
             const ctx = { tethers, secrets };

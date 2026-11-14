@@ -5566,6 +5566,23 @@
             catch (error) { sayAsErr(error); }
             await repaintAsset();
         });
+        /* Signed in with OAuth where the service offers no key (mcpoauth.mjs): the consent in a new tab, back here by
+           itself. A server that registers no client by itself asks for its client id once. */
+        const oauth = el('button', '', uiSaid('set-mcp-oauth', 'Sign in with OAuth')); oauth.type = 'button'; oauth.dataset.act = 'mcp-oauth';
+        const clientRow = el('div', 'set-row mcp-client'); clientRow.hidden = true;
+        const clientId = el('input'); clientId.type = 'text'; clientId.autocomplete = 'off'; clientId.spellcheck = false;
+        clientId.setAttribute('aria-label', uiSaid('set-mcp-client', 'Client id'));
+        clientId.placeholder = uiSaid('set-mcp-client', 'Client id');
+        clientRow.append(el('span', '', uiSaid('set-mcp-client-need', 'Paste its client id.')), clientId);
+        oauth.addEventListener('click', async () => {
+            oauth.disabled = true; $(asErrId()).hidden = true;
+            try {
+                const r = await post(`${API}/tether/mcp-oauth`, { target: t.id, ...(clientId.value.trim() ? { clientId: clientId.value.trim() } : {}) });
+                if (r?.need === 'client') { clientRow.hidden = false; clientId.focus(); }
+                else if (r?.url) window.open(r.url, '_blank', 'noopener');
+            } catch (error) { sayAsErr(error); }
+            oauth.disabled = false;
+        });
         const fresh = tools.filter((x) => x.fresh === true);
         const seen = fresh.length ? el('button', '', uiSaid('set-mcp-seen', 'Mark as seen')) : null;
         if (seen) {
@@ -5590,7 +5607,8 @@
         const body = [];
         if (t.catalog?.error) body.push(el('p', 'error', uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: t.catalog.error })));
         body.push(tools.length ? list : el('p', 'hint', uiSaid('set-mcp-none', 'No tools listed yet.')));
-        out.push({ title: uiSaid('set-mcp-tools', 'Tools'), extra: [seen, refresh], body, cls: 'as-mcp-tools' });
+        body.push(clientRow);
+        out.push({ title: uiSaid('set-mcp-tools', 'Tools'), extra: [seen, oauth, refresh], body, cls: 'as-mcp-tools' });
         /* Custom: each kind of tool Yes / Ask / No, for each conversation set to it. */
         const custom = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');
         if (custom.length) {

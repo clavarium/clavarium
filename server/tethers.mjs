@@ -113,6 +113,9 @@ export class Tethers {
        {kind, text, data}) } (dockets.mjs): what wakes an agent told of a notice. `make`: the keeper (tests). */
     /* `browsers`: the paired browsers (browsers.mjs), set by the constructor when it is given one; their connector is the keeper's `browser`. */
     browsers = null;
+    /* Set by the server (main.mjs): the OAuth sign-ins of external MCP servers (mcpoauth.mjs), whose tokens the
+       keeper reveals fresh. */
+    oauth = null;
     constructor({ dataDir, resources, conversations, secrets, connectors, browsers = null, dockets = null, now = () => Date.now(), make = keeper }) {
         if (browsers) { connectors = { ...(connectors ?? {}), browser: browsers.connector }; this.browsers = browsers; }
         this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets; this.#dockets = dockets;
@@ -245,6 +248,9 @@ export class Tethers {
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.
        An unknown or expired secret is a plain refusal the connector turns into "Refused". */
     async #reveal(name) {
+        /* An MCP server signed in with OAuth (mcpoauth.mjs): its current access token, refreshed here when due. */
+        const fresh = await this.oauth?.access?.(name);
+        if (fresh !== undefined) return fresh;
         const value = this.#secrets?.reveal?.(name);
         if (value === undefined || value === null) throw new Error(`no secret named "${name}" on this server`);
         return value;

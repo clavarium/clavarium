@@ -73,6 +73,7 @@ import { Wifi } from './wifi.mjs';
 import { MeshCentral } from './meshcentral.mjs';
 import { Binders } from './binders.mjs';
 import { Tethers } from './tethers.mjs';
+import { McpOAuth } from './mcpoauth.mjs';
 import { Browsers } from './browsers.mjs';
 import { Accounts } from './accounts.mjs';
 import { ServerLogs } from './serverlogs.mjs';
@@ -492,6 +493,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let tethers = null;
     const browsers = new Browsers({ dataDir, store: () => tethers?.store(), log: (line) => console.log(line) });
     tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, browsers, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) }, ...(tetherConnectors ?? {}) } });
+    /* External MCP servers signed in with OAuth: their tokens held here, refreshed here (mcpoauth.mjs). */
+    tethers.oauth = new McpOAuth({ secrets });
     const stopTethers = tethers.start();
     /* Connecting a mailbox, calendar or address book by token: the consent happens
        in the owner's browser, the refresh token is kept host-only (never in a
