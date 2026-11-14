@@ -140,7 +140,7 @@
         if (pose === null) { if (m) m.hidden = true; return; }
         if (!m) {
             m = document.createElement('div'); m.id = 'notice-mascot'; m.className = 'mascot';
-            m.innerHTML = `${MASCOTS[MASCOT]()}<span class="m-z">z</span><span class="m-z">z</span><span class="m-z">z</span>`;
+            m.innerHTML = `${MASCOTS[MASCOT]()}<span class="m-z">z</span><span class="m-z">z</span><span class="m-z">z</span><span class="m-q" aria-hidden="true">?</span>`;
             $('notice-text').before(m);
         }
         m.hidden = false;
@@ -169,9 +169,18 @@
         }
         m.classList.remove('waking', 'stirring');
         m.classList.toggle('asleep', pose === 'asleep');
+        /* Finding its way back (14-11): the page come back after a while, the server asked again -- a question mark over it. */
+        m.classList.toggle('wondering', pose === 'wondering');
         m.dataset.pose = pose;
     };
 
+    /* A wait that ends goes in a short fade (14-11: not abrupt), its place given back at once. */
+    const fadeAway = (box) => {
+        if (box.hidden) return;
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) { box.hidden = true; return; }
+        box.classList.add('fading-out');
+        setTimeout(() => { box.classList.remove('fading-out'); box.hidden = true; }, 160);
+    };
     const show = (text, action, run, cancel) => {
         $('notice-text').textContent = text;
         $('notice-action').textContent = action ?? '';
@@ -869,7 +878,7 @@
                it said then was lost -- nobody listened yet. The bridge listens
                from "ready" on. Until it hears, the tool draws for the old size
                and whatever is typed meanwhile lands in a garbled screen. */
-            if (message.type === 'ready') { say('live', 'live'); notice.hidden = true; fit.fit(); sendSize(); setTimeout(() => { fit.fit(); sendSize(); }, 300); }
+            if (message.type === 'ready') { say('live', 'live'); fadeAway(notice); fit.fit(); sendSize(); setTimeout(() => { fit.fit(); sendSize(); }, 300); }
             /* A start told step by step: the same panel as a build or a restart. */
             if (message.type === 'status' && message.progress) {
                 if (message.text) say(String(message.text), 'connecting');
@@ -881,13 +890,13 @@
                    not enough for a wait that can last minutes (a tester waited
                    three, with nothing else to read). One sentence, with the time
                    it has taken so far, said again each second. */
-                const said = String(message.text);
+                const said = message.text ? String(message.text) : uiSaid('set-reaching', 'Reaching it again:');
                 const since = waitingSince || Date.now();
                 const tell = () => {
                     const s = Math.floor((Date.now() - since) / 1000);
                     $('notice-text').textContent = `${said} ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} so far; a start usually takes a minute or two. Its work, its files and its chat are kept.`;
                 };
-                show(''); tell();
+                show(''); tell(); mascot('wondering');
                 const ticking = setInterval(() => { if (socket !== mine || output || notice.hidden) { clearInterval(ticking); return; } tell(); }, 1000);
                 slowTimers.push(ticking);
             }
@@ -3515,7 +3524,7 @@
             /* The whole thread searched, however little of it is shown. */
             search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
-            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}),
+            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, quick: true, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}),
                 /* The choices ticked, the answers of a group, the zone of a picture the answer is about. */
                 ...(extra?.picked ? { picked: extra.picked } : {}), ...(extra?.replies ? { replies: extra.replies } : {}), ...(extra?.about ? { about: extra.about } : {}) }),
             /* Formulas: Parley's own KaTeX, served here. Zones and people may point to a file of a shared folder (file:/work/...). */

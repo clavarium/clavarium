@@ -829,7 +829,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (talking[2] === '/pin') return send(200, await talk.pin(conversation, body.to, body.on !== false)), true;
             if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
             /* What the chat may add to an answer: the choices ticked, the answers of a group, the zone of a picture it is about (Parley checks each). */
-            return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via, { picked: body.picked, replies: body.replies, about: body.about })), true;
+            return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via, { picked: body.picked, replies: body.replies, about: body.about, quick: body.quick === true })), true;
         }
         const docketed = /^\/api\/conversations\/([^/]+)\/docket(\/cancel)?$/.exec(pathname);
         if (docketed && wakeups) {

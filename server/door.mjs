@@ -188,7 +188,7 @@ export async function handleDoor(request, response, { devices, conversations, re
                 if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An attachment is a file.' });
                 return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
             }
-            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via)); }
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
         }
         /* Its terminal does not come: only a device given it asks for it to be repaired. */
         if (request.method === 'POST' && route === '/terminal/repair') { need(part.terminal, 'the terminal'); return send(200, await repair(name)); }

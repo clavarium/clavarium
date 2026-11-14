@@ -3078,3 +3078,10 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .hand-switches .set-row > .set-what { flex: none; }
 .hand-switches .set-row > .set-control { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
 a.button[aria-disabled] { opacity: .5; pointer-events: none; }
+
+/* Finding its way back (14-11): a question mark that rises over the sheep, slowly. */
+.mascot .m-q { position: absolute; left: 80%; top: -10%; font: 700 18px var(--sans, system-ui); color: var(--brass); opacity: 0; pointer-events: none; }
+.mascot.wondering .m-q { animation: m-q 2.4s ease-in-out infinite; }
+@keyframes m-q { 0% { opacity: 0; transform: translateY(6px) rotate(-8deg); } 30%, 70% { opacity: 1; transform: translateY(0) rotate(6deg); } 100% { opacity: 0; transform: translateY(-4px) rotate(-4deg); } }
+.fading-out { transition: opacity .15s ease-out; opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .mascot.wondering .m-q { animation: none; opacity: 1; } }

@@ -948,7 +948,8 @@ export class Conversations {
         /* In its machine: the manifest written aside, then one archive -- the manifest first, then what is kept
            (a path it has not made yet left out), the cache left out. */
         /* (Its paths are plain -- letters, digits, . _ / - -- checked by tools.mjs: given as words.) */
-        const script = 'm=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+        /* A reading of an earlier try that never ended (14-11: three left, each holding its pipe): ended first. */
+        const script = 'for p in $(pgrep -f "^tar -czf - --warning=no-file-changed -C /tmp/"); do kill $p 2>/dev/null; done; m=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
             + 'ex=""; for a in $2; do ex="$ex --exclude=./$a"; done; ks=""; for a in $3; do if [ -e "$HOME/$a" ]; then ks="$ks ./$a"; fi; done; '
             + 'rc=0; tar -czf - --warning=no-file-changed -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks || rc=$?; rm -rf "$m"; '
             /* 1: a file changed while read (its tool writing its log as it is read, 14-11: a live Claude Code): the
@@ -1074,7 +1075,10 @@ export class Conversations {
                        (D: waiting on the disk), its load, its free memory -- or said not to answer at all. Said with the
                        wait, and in the end's why (14-11: stuck at 36 KB on the owner's server, never here). */
                     let seen = '';
-                    const probe = 'for p in $(pgrep -x tar); do f=$(ls -l /proc/$p/fd 2>/dev/null | grep -o "/home/[^ ]*" | tail -1); echo "tar $(cut -d" " -f3 /proc/$p/stat) ${f#$HOME/}"; done; '
+                    /* Each tar and gzip: its state, what the kernel has it wait on (wchan), the file it holds and that
+                       file's filesystem -- enough to tell a disk, a network mount or a pipe nobody empties. */
+                    const probe = 'for p in $(pgrep -x tar) $(pgrep -x gzip); do f=$(ls -l /proc/$p/fd 2>/dev/null | grep -o "/home/[^ ]*" | tail -1); '
+                        + 'echo "$(cat /proc/$p/comm) $p $(cut -d" " -f3 /proc/$p/stat) $(cat /proc/$p/wchan 2>/dev/null) ${f#$HOME/}${f:+ [$(stat -f -c %T "$f" 2>/dev/null)]}"; done; '
                         + 'echo "load $(cut -d" " -f1 /proc/loadavg)"; awk \'/MemAvailable/{print "free " int($2/1024) " MB"}\' /proc/meminfo';
                     const ask = () => { seen = '…'; this.#vms.exec(from, ['sh', '-c', probe], { timeoutMs: 20_000 }).then((r) => { seen = r.code === 0 ? (r.stdout || '').trim().split('\n').join(', ').slice(0, 200) : 'its machine did not answer'; }, () => { seen = 'its machine did not answer'; }); };
                     const watch = setInterval(() => {
