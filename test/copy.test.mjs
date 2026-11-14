@@ -110,6 +110,7 @@ exit 0
     assert.match(out, /^vm halt clv-mail\b/m, 'stopped again');
     assert.ok(out.indexOf('vm halt clv-mail') < out.indexOf('vm launch clv-copy'), 'before the copy\'s machine is made');
     assert.notEqual(b.store.get('mail').asleep, true);
+    assert.equal(b.store.get('mail').lentTo, undefined, 'no longer said read for a copy');
 });
 
 test('a copy: refused before anything is made; a copy that fails is said, its original untouched', async (t) => {
