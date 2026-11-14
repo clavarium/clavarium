@@ -167,13 +167,35 @@ exit 0
     const b = bench(t, { prefix: [fake] });
     b.all.copyWork = async (f, tt, on) => { on?.({ files: 3, bytes: 5 * 1024 * 1024 }); await new Promise((ok) => setTimeout(ok, 200)); return { files: 3, bytes: 5 * 1024 * 1024 }; };
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
-    const r = await b.all.copy('mail', { title: 'Copy' });
     const steps = new Set();
-    const watch = setInterval(() => { const s = b.store.get(r.name)?.step; if (s) steps.add(s); }, 10);
+    const patch = b.store.patch.bind(b.store);
+    b.store.patch = (name, change) => { if (change?.step) steps.add(change.step); return patch(name, change); };
+    await b.all.copy('mail', { title: 'Copy' });
     await b.all.copied;
-    clearInterval(watch);
     const all = [...steps].join(' | ');
     assert.match(all, /Copying its work: 3 files, 5 MB/);
     assert.match(all, /Copying Kept's memory/);
     assert.match(all, /Putting Kept's memory in the copy/);
+});
+
+test('a copy reads its original first and puts it back to sleep BEFORE its own machine is made: the two never run at once', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-copy-vmm-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const fake = join(dir, 'vmm');
+    writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do case "$a" in *"tar -czf"*) printf 'ARCHIVE'; exit 0;; *"tar -xzf"*) cat > /dev/null; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+exit 0
+`, { mode: 0o755 });
+    const b = bench(t, { prefix: [fake] });
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    b.vms.set('clv-mail', 'Suspended');
+    b.calls.length = 0;
+    const r = await b.all.copy('mail', { title: 'Copy' });
+    await b.all.copied;
+    assert.equal(b.store.get(r.name).phase, 'ready');
+    const out = b.calls;
+    const asleepAgain = out.findIndex((l) => /^vm (suspend|stop) clv-mail$/.test(l));
+    const made = out.findIndex((l) => l.startsWith(`vm launch clv-${r.name}`));
+    assert.ok(asleepAgain >= 0 && made >= 0, out.join('\n'));
+    assert.ok(asleepAgain < made, 'asleep again before the copy\'s machine is launched');
 });

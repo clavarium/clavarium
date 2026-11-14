@@ -21,6 +21,8 @@ import { join } from 'node:path';
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
+/* A copy reading its original's memory: nothing for this long, and it is ended (and why said). */
+export const COPY_QUIET_MS = Number(process.env.CLAVARIUM_COPY_QUIET_MS) || 3 * 60_000;
 /* A size in words: 840 KB, 12 MB, 1.4 GB. */
 const sizeWords = (bytes) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : bytes >= 1024 ** 2 ? `${Math.round(bytes / 1024 ** 2)} MB` : `${Math.round(bytes / 1024)} KB`);
 /* The door of a conversation in a shared machine (#221), put in the machine by the server. */
@@ -317,7 +319,8 @@ export class Conversations {
         return there.map((x) => x.machineMb).find(Number.isInteger) ?? Math.max(...there.map((x) => Number(x.memoryMb) || 0));
     }
 
-    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group, machine, machineMb }) {
+    /* `after`: a promise its build waits for (a copy reads its original first); resolving false, no build. */
+    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group, machine, machineMb, after }) {
         const { name, title } = this.#naming({ name: given, title: read });
         /* IN A SHARED MACHINE (#221), named: its work is always kept here (mounted into its place there). */
         if (machine !== undefined && (typeof machine !== 'string' || !isConversationName(machine))) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
@@ -351,7 +354,7 @@ export class Conversations {
         const { order, groups } = this.#order();
         this.#store.put(conversation);
         this.#keepOrder({ order: [name, ...order], groups: group && !groups.includes(group) ? [...groups, group] : groups });
-        this.built = this.#build(name, chosen, memory);
+        this.built = after === undefined ? this.#build(name, chosen, memory) : Promise.resolve(after).then((go) => (go === false || !this.#store.get(name) ? undefined : this.#build(name, chosen, memory)));
         return conversation;
     }
 
@@ -1010,30 +1013,26 @@ export class Conversations {
         const memory = shared ? Math.max(tool.memoryMb, Math.min(Number(c.memoryMb) || tool.memoryMb, Number(size) || SHARED_MB)) : Number(c.memoryMb) || tool.memoryMb;
         const label = typeof title === 'string' && title.trim() ? title.trim() : `${c.title ?? c.name} (copy)`;
         await this.admit({ title: label, tool: c.tool, memoryMb: memory, ...(shared ? { machine, machineMb } : {}) });
-        const made = this.create({ title: label, tool: c.tool, memoryMb: memory, ...(shared ? { machine, machineMb } : { cpus: c.cpus, diskGb: c.diskGb }), ...(c.group ? { group: c.group } : {}) });
+        /* Its tool's memory is read FIRST, its original then put back to sleep, and only then its machine built: the
+           two never run at once (14-11: a new 4 GB machine and the woken original together starved the server). */
+        let open; const gate = new Promise((ok) => { open = ok; });
+        const made = this.create({ title: label, tool: c.tool, memoryMb: memory, ...(shared ? { machine, machineMb } : { cpus: c.cpus, diskGb: c.diskGb }), ...(c.group ? { group: c.group } : {}), after: gate });
         /* Before its build can end (it awaits first): held, never usable half made. */
         this.#holding.add(made.name);
         this.#store.patch(made.name, { copyOf: name });
         const building = this.built;
-        this.copied = this.#copying(name, made.name, c, tool, building);
+        this.copied = this.#copying(name, made.name, c, tool, building, open);
         return this.#store.get(made.name);
     }
 
-    async #copying(from, to, c, tool, building) {
+    async #copying(from, to, c, tool, building, open = () => {}) {
         const dir = mkdtempSync(join(tmpdir(), 'clv-copy-'));
         const carried = join(dir, 'state.tar.gz');
         let woke = false;
         try {
-            await building;
-            const built = this.#store.get(to);
-            if (!built) return undefined;   /* erased meanwhile */
-            if (built.phase === 'failed') throw new Error(built.error ?? 'its machine could not be made.');
             /* Said as it goes, once a second at most: a long copy is seen moving (13-11, "on ne sait pas si ça marche"). */
             let said = 0;
             const say = (step) => { const now = Date.now(); if (now - said < 1000) return; said = now; if (this.#store.get(to)) this.#store.patch(to, { step }); };
-            this.#store.patch(to, { step: 'Copying its work' });
-            const work = await this.copyWork(from, to, (p) => say(`Copying its work: ${p.files} file${p.files === 1 ? '' : 's'}, ${sizeWords(p.bytes)}`));
-            if (work?.files !== undefined) this.#store.patch(to, { step: `Copying its work: ${work.files} file${work.files === 1 ? '' : 's'}, ${sizeWords(work.bytes)}, done` });
             if (tool.state) {
                 this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
@@ -1057,16 +1056,40 @@ export class Conversations {
                     this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
                     const out = await this.exportState(from);
                     child = out.child;
-                    let read = 0;
-                    out.stream.on('data', (d) => { read += d.length; say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); });
+                    let read = 0; let lastAt = Date.now(); let stalled = false;
+                    out.stream.on('data', (d) => { read += d.length; lastAt = Date.now(); say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); });
+                    /* Nothing comes for a while: said, with how long; for too long, the reading is ended and why said --
+                       never an endless wait nobody can read (14-11: stuck at "36 KB read"). */
+                    const watch = setInterval(() => {
+                        const quiet = Math.round((Date.now() - lastAt) / 1000);
+                        if (quiet >= COPY_QUIET_MS / 1000) { stalled = true; child.kill('SIGKILL'); return; }
+                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s`);
+                    }, 5000);
                     const failed = new Promise((ok) => child.on('error', () => ok(-1)));
                     const file = createWriteStream(carried, { mode: 0o600 });
                     out.stream.pipe(file);
-                    code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]);
+                    code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => clearInterval(watch));
+                    if (stalled) {
+                        const now = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
+                        throw new Error(`its original stopped sending its tool's memory (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min; its machine is ${now ?? 'in a state that could not be read'})`);
+                    }
                     await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
                     if (code !== 255) break;
                 }
                 if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
+                /* Read: its original back to sleep at once, before the copy's machine is made. */
+                if (woke) { await this.sleep(from).catch(() => {}); woke = false; }
+                this.#borrowed.delete(from);
+            }
+            open(true);
+            await building;
+            const built = this.#store.get(to);
+            if (!built) return undefined;   /* erased meanwhile */
+            if (built.phase === 'failed') throw new Error(built.error ?? 'its machine could not be made.');
+            this.#store.patch(to, { step: 'Copying its work' });
+            const work = await this.copyWork(from, to, (p) => say(`Copying its work: ${p.files} file${p.files === 1 ? '' : 's'}, ${sizeWords(p.bytes)}`));
+            if (work?.files !== undefined) this.#store.patch(to, { step: `Copying its work: ${work.files} file${work.files === 1 ? '' : 's'}, ${sizeWords(work.bytes)}, done` });
+            if (tool.state) {
                 if ((await this.#vms.state(to, { fresh: true }).catch(() => undefined)) !== 'Running') {
                     const started = await this.#vms.start(to);
                     if (started.code !== 0) throw new Error(`its machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
@@ -1082,6 +1105,7 @@ export class Conversations {
             this.ready(to);
             return undefined;
         } catch (error) {
+            open(false);
             this.#holding.delete(to);
             if (this.#store.get(to)) this.#store.patch(to, { phase: 'failed', step: undefined, progress: undefined, buildingSince: undefined, error: `Not copied: ${String(error?.message ?? error).replace(/\.?$/, '.')} Its original is untouched; erase this copy.` });
             return undefined;
