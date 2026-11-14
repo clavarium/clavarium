@@ -2002,6 +2002,8 @@
        was last opened (« ● 1 failed », red); nothing otherwise. Tapped: what runs, its step; then the day's ends,
        done or failed with why. A line opens its conversation. Read with the list, nothing asked of the machines. */
     let jobsNow = { running: [], done: [] };
+    /* The copies made from here (the wizard, #cm), watched until their job ends: their names, new each time. */
+    const copiesWatched = new Set();
     const JOBS_SEEN = 'clavarium.jobsSeen';
     const jobsSeen = () => { try { return localStorage.getItem(JOBS_SEEN) ?? ''; } catch { return ''; } };
     async function paintJobs() {
@@ -2020,6 +2022,7 @@
         }
         if (n || failed) $('back').dataset.jobs = n ? 'on' : 'bad'; else delete $('back').dataset.jobs;
         if (!$('jobs').hidden) paintJobsList();
+        cmJobsSeen();
     }
     function paintJobsList() {
         const line = (j, mark, result) => {
@@ -2668,15 +2671,6 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; focusTerminal(); });
         };
-        /* In a shared machine (#221): its name and the others in it, said once -- stopping it stops them too. */
-        const sharedIn = here?.sharedMachine;
-        $('machine-shared').hidden = DEVICE || !sharedIn;
-        if (sharedIn) {
-            const others = conversations.filter((c) => c.sharedMachine === sharedIn && c.name !== current).map((c) => c.title ?? c.name);
-            $('machine-shared').textContent = others.length
-                ? uiSaid('set-mshared-with', 'Shared machine « {m} », with {others}. Stopping it stops them too.', { m: sharedIn, others: others.join(', ') })
-                : uiSaid('set-mshared-alone', 'Shared machine « {m} », alone in it for now.', { m: sharedIn });
-        }
         /* Its tool's memory, exported as one file, or put back from one (#351): the person's own act, from here. */
         $('carry-box').hidden = DEVICE || !here;
         /* Its machine must run to be read: stopped or asleep, said there, with the one button that starts it
@@ -3071,21 +3065,16 @@
         $('machine-size-title').textContent = sharedHere ? 'Memory' : 'Memory, cores and disk';
         if (sharedHere) { $('machine-size-hint').textContent = 'Its limit in the shared machine · from its next start'; $('machine-size-apply').textContent = 'Apply'; }
         $('shared-size').hidden = !sharedHere || here.phase !== 'ready';
-        /* Into a shared machine (#221): offered to one in a machine of its own; a shared machine there is offered first. */
-        $('into-shared').hidden = sharedHere || DEVICE || !here || here.phase !== 'ready';
-        if (!$('into-shared').hidden && document.activeElement !== $('into-shared-name')) {
-            const names = [...new Set(conversations.map((x) => x.sharedMachine).filter(Boolean))].sort();
-            $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
-            if (!$('into-shared-name').value && names.length) $('into-shared-name').value = names[0];
-            paintIntoShared();
-        }
-        /* A copy of it (#221): offered to any that is ready. */
-        $('copy-it').hidden = DEVICE || !here || here.phase !== 'ready';
-        if (!$('copy-it').hidden && ![$('copy-title'), $('copy-machine')].includes(document.activeElement)) {
-            if ($('copy-it').dataset.of !== here.name) { $('copy-it').dataset.of = here.name; $('copy-title').value = `${here.title ?? here.name} (copy)`; $('copy-where').value = ''; $('copy-machine').value = ''; }
-            const names = [...new Set(conversations.map((x) => x.sharedMachine).filter(Boolean))].sort();
-            $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
-            paintCopy();
+        /* Where it runs (#221, 14-11): its own machine, or a shared one and who else is there; Copy... and Move...
+           open the wizard, for one that is ready. */
+        $('where-row').hidden = DEVICE || !here;
+        if (here) {
+            $('where-now').textContent = whereWords(here);
+            /* Its machine shared with others: stopping or restarting it stops them too -- said where it runs. */
+            const sharers = here.sharedMachine ? conversations.some((x) => x.sharedMachine === here.sharedMachine && x.name !== here.name) : false;
+            $('where-now').title = sharers ? uiSaid('set-where-stops', 'Stopping it stops them too') : '';
+            if (sharers) $('where-now').append(' · ', uiSaid('set-where-stops', 'Stopping it stops them too'));
+            for (const id of ['where-copy', 'where-move']) $(id).disabled = here.phase !== 'ready';
         }
         if (sharedHere && document.activeElement !== $('shared-memory')) {
             const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine);
@@ -3203,68 +3192,178 @@
             }, resume);
     });
 
-    /* ITS SHARED MACHINE'S MEMORY (#221): asked first, naming every conversation it interrupts. */
-    /* A new shared machine: its memory chosen; one that is there keeps its own. Work on its own disk: kept here first. */
-    function paintIntoShared() {
-        const here = conversations.find((x) => x.name === current);
-        const names = new Set(conversations.map((x) => x.sharedMachine).filter(Boolean));
-        const known = names.has($('into-shared-name').value.trim());
-        $('into-shared-mb').hidden = known; $('into-shared-mb-label').hidden = known;
-        const onDisk = here?.work === 'disk';
-        $('into-shared-hint').textContent = onDisk ? 'Keep its files here first (Where the tool works)' : 'Trial · work and tool state come along';
-        $('into-shared-apply').disabled = onDisk;
+    /* ---------- COPY OR MOVE (#221, 14-11): a wizard of two screens over the page ----------
+       1. Choose: Copy (this one stays as it is) or Move (the same conversation, another machine), and where it
+          runs -- its own machine, a shared machine there (who lives in it, its memory), or a new one (named, its
+          memory chosen). Moving out of a shared machine does not exist yet: said so, not offered.
+       2. Check: what goes and what does not; for a move, its own machine deleted, in red.
+       Confirmed, a copy closes it at once: the person stays where they are, the copy is a job « under way », and
+       its end is one line at the bottom (« Open it », or « See why » in Settings, Jobs). A move does as it did:
+       the page waits for it and reconnects. Work on its own machine's disk cannot go: kept here first. */
+    function whereWords(c) {
+        if (!c.sharedMachine) return uiSaid('set-where-own', 'Its own machine');
+        const others = conversations.filter((x) => x.sharedMachine === c.sharedMachine && x.name !== c.name).map((x) => x.title ?? x.name);
+        return others.length
+            ? uiSaid('set-where-shared', 'Shared machine « {m} », with {others}', { m: c.sharedMachine, others: others.join(', ') })
+            : uiSaid('set-where-alone', 'Shared machine « {m} », alone in it', { m: c.sharedMachine });
     }
-    $('into-shared-name').addEventListener('input', () => paintIntoShared());
-    $('into-shared').addEventListener('submit', (event) => {
-        event.preventDefault();
-        const name = current;
-        const here = conversations.find((x) => x.name === name);
-        if (!here || here.sharedMachine) return;
-        const machine = $('into-shared-name').value.trim();
-        if (!machine) { $('panel-error').textContent = 'Name the shared machine first.'; $('panel-error').hidden = false; return; }
-        const known = conversations.some((x) => x.sharedMachine === machine);
-        const machineMb = known ? undefined : Number($('into-shared-mb').value);
-        leavePanel();
-        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
-        show(`Move ${here.title ?? here.name} into the shared machine « ${machine} »${known ? '' : ` (new, ${sizeWords(machineMb)})`}? Its tool stops, its work and its state come along, then ITS OWN MACHINE IS DELETED.`,
-            'Move it', async () => {
-                disconnect(); say('moving', 'connecting'); show('Moving...'); $('notice-spin').hidden = false;
-                try { await post(`${API}/conversations/${encodeURIComponent(name)}/into-machine`, { machine, ...(machineMb ? { machineMb } : {}) }); await refresh(); enter(); }
-                catch (error) { show(error.message, 'Back', enter); }
-            }, resume);
-    });
-    /* A COPY: in its own machine, or a shared one (there already, or new: its memory chosen). Work on its own disk: kept here first. */
-    function paintCopy() {
-        const here = conversations.find((x) => x.name === current);
-        const shared = $('copy-where').value === 'shared';
-        const known = conversations.some((x) => x.sharedMachine && x.sharedMachine === $('copy-machine').value.trim());
-        $('copy-machine').hidden = !shared; $('copy-mb').hidden = !shared || known;
-        const onDisk = here?.work === 'disk';
-        $('copy-hint').textContent = onDisk ? 'Keep its files here first (Where the tool works)' : 'Work, AI memory and accesses · the original untouched';
-        $('copy-apply').disabled = onDisk;
+    /* The shared machines there: their names, who lives in each, its memory. */
+    function sharedMachines() {
+        const by = new Map();
+        for (const c of conversations) {
+            if (!c.sharedMachine) continue;
+            const m = by.get(c.sharedMachine) ?? { name: c.sharedMachine, who: [], mb: c.machineMb };
+            m.who.push(c.title ?? c.name); m.mb ??= c.machineMb;
+            by.set(c.sharedMachine, m);
+        }
+        return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
     }
-    $('copy-where').addEventListener('change', () => { if ($('copy-where').value === 'shared' && !$('copy-machine').value) $('copy-machine').value = [...new Set(conversations.map((x) => x.sharedMachine).filter(Boolean))].sort()[0] ?? ''; paintCopy(); });
-    $('copy-machine').addEventListener('input', () => paintCopy());
-    $('copy-it').addEventListener('submit', (event) => {
-        event.preventDefault();
-        const name = current;
-        const here = conversations.find((x) => x.name === name);
+    /* What is chosen: of which conversation, copy or move, and where ('' its own machine, 'new', or a machine's name). */
+    const cm = { of: '', kind: 'copy', place: '' };
+    const cmHere = () => conversations.find((x) => x.name === cm.of);
+    const cmCard = (place, title, small, { disabled = false } = {}) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'cm-card'; b.setAttribute('role', 'radio');
+        b.dataset.place = place; b.disabled = disabled;
+        b.setAttribute('aria-checked', String(!disabled && cm.place === place));
+        b.append(Object.assign(document.createElement('b'), { textContent: title }));
+        if (small) b.append(Object.assign(document.createElement('small'), { textContent: small }));
+        b.addEventListener('click', () => { cm.place = place; paintCm(); if (place === 'new') $('cm-new-name').focus(); });
+        return b;
+    };
+    /* The places it may go, for a copy or a move of this one; the one chosen kept if it still is one. */
+    function cmPlaces(here) {
+        const machines = sharedMachines().filter((m) => !(cm.kind === 'move' && m.name === here.sharedMachine));
+        if (cm.kind === 'move' && here.sharedMachine) return { cards: [cmCard('', uiSaid('set-where-own', 'Its own machine'), uiSaid('set-cm-not-yet', 'Not yet'), { disabled: true })], open: [] };
+        const open = [...(cm.kind === 'copy' ? [''] : []), ...machines.map((m) => m.name), 'new'];
+        if (!open.includes(cm.place)) cm.place = open[0];
+        const cards = [];
+        if (cm.kind === 'copy') cards.push(cmCard('', uiSaid('set-where-own', 'Its own machine')));
+        for (const m of machines) {
+            const small = [m.who.length ? uiSaid('set-cm-with', 'With {who}', { who: m.who.join(', ') }) : '', m.mb ? sizeWords(m.mb) : ''].filter(Boolean).join(' · ');
+            cards.push(cmCard(m.name, uiSaid('set-cm-shared', 'Shared machine « {m} »', { m: m.name }), small));
+        }
+        cards.push(cmCard('new', uiSaid('set-cm-new', 'A new shared machine')));
+        return { cards, open };
+    }
+    /* Where it goes, as asked of the server: { machine?, machineMb? }, its words, or why it cannot. */
+    function cmTarget(here) {
+        if (cm.place === '') return { body: {}, said: uiSaid('set-where-own', 'Its own machine') };
+        const machine = cm.place === 'new' ? $('cm-new-name').value.trim() : cm.place;
+        if (cm.place === 'new' && !machine) return { why: uiSaid('set-cm-name-first', 'Name the shared machine first') };
+        if (!/^[a-z][a-z0-9-]{0,31}$/.test(machine)) return { why: uiSaid('set-cm-name-bad', 'Lower-case letters, digits, hyphens') };
+        if (conversations.some((x) => x.name === machine)) return { why: uiSaid('set-cm-name-taken', 'That is a conversation\'s name') };
+        /* A name typed that is a machine there already: that one, its memory its own. */
+        const known = sharedMachines().some((m) => m.name === machine);
+        if (cm.kind === 'move' && machine === here.sharedMachine) return { why: uiSaid('set-cm-there', 'It is there already') };
+        const machineMb = known ? undefined : Number($('cm-new-mb').value);
+        return { body: { machine, ...(machineMb ? { machineMb } : {}) }, machine, known, machineMb };
+    }
+    /* Screen 1, painted again as it is chosen. */
+    function paintCm() {
+        const here = cmHere();
+        if (!here) { closeCm(); return; }
+        const t = here.title ?? here.name;
+        for (const b of document.querySelectorAll('#cm .cm-kinds .cm-card')) b.setAttribute('aria-checked', String(b.dataset.kind === cm.kind));
+        $('cm-sheep').dataset.kind = cm.kind;
+        if (!$('cm-choose').hidden) {
+            $('cm-title').textContent = uiSaid('set-cm-title', 'Copy or move {t}', { t });
+            const { cards, open } = cmPlaces(here);
+            $('cm-places').replaceChildren(...cards);
+            $('cm-new').hidden = cm.place !== 'new' || !open.includes('new');
+            const typed = $('cm-new-name').value.trim();
+            $('cm-new-mb').hidden = sharedMachines().some((m) => m.name === typed);
+            const onDisk = here.work === 'disk';
+            $('cm-why').textContent = onDisk ? uiSaid('set-cm-disk', 'Its work is on its disk: keep it here first') : '';
+            $('cm-why').hidden = !onDisk;
+            $('cm-next').disabled = onDisk || !open.length;
+        }
+    }
+    function openCm(kind) {
+        const here = conversations.find((x) => x.name === current);
+        if (DEVICE || !here || here.phase !== 'ready') return;
+        if (cm.of !== here.name) { $('cm-new-name').value = ''; $('cm-copy-title').value = ''; }
+        Object.assign(cm, { of: here.name, kind, place: kind === 'copy' ? '' : (sharedMachines().find((m) => m.name !== here.sharedMachine)?.name ?? 'new') });
+        $('machine-names').replaceChildren(...sharedMachines().map((m) => Object.assign(document.createElement('option'), { value: m.name })));
+        $('cm-copy-title').value = `${here.title ?? here.name} (copy)`;
+        /* Its sheep: two for a copy (the second slides out of the first), one walking for a move. */
+        if (!$('cm-sheep').childElementCount) $('cm-sheep').innerHTML = `<div class="mascot cm-one">${MASCOTS[MASCOT]()}</div><div class="mascot cm-one">${MASCOTS[MASCOT]()}</div>`;
+        $('cm-choose').hidden = false; $('cm-check').hidden = true;
+        paintCm();
+        if (!$('cm').open) $('cm').showModal();
+        document.querySelector('#cm .cm-kinds .cm-card[aria-checked="true"]')?.focus();
+    }
+    function closeCm() { if ($('cm').open) $('cm').close(); }
+    $('where-copy').addEventListener('click', () => openCm('copy'));
+    $('where-move').addEventListener('click', () => openCm('move'));
+    for (const b of document.querySelectorAll('#cm .cm-kinds .cm-card')) b.addEventListener('click', () => { cm.kind = b.dataset.kind; paintCm(); });
+    $('cm-new-name').addEventListener('input', () => { $('cm-new-mb').hidden = sharedMachines().some((m) => m.name === $('cm-new-name').value.trim()); $('cm-why').hidden = true; });
+    $('cm-cancel').addEventListener('click', closeCm);
+    /* Escape closes the wizard, and only it: never the place under it too. */
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && $('cm').open) { event.stopImmediatePropagation(); event.preventDefault(); closeCm(); } }, true);
+    /* Screen 2: what it does, said for the copy or the move chosen. */
+    $('cm-next').addEventListener('click', () => {
+        const here = cmHere();
         if (!here) return;
-        const title = $('copy-title').value.trim() || `${here.title ?? here.name} (copy)`;
-        const shared = $('copy-where').value === 'shared';
-        const machine = shared ? $('copy-machine').value.trim() : '';
-        if (shared && !machine) { $('panel-error').textContent = 'Name the shared machine first.'; $('panel-error').hidden = false; return; }
-        const known = shared && conversations.some((x) => x.sharedMachine === machine);
-        const machineMb = shared && !known ? Number($('copy-mb').value) : undefined;
-        leavePanel();
-        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
-        show(`Make « ${title} », a copy of ${here.title ?? here.name}${shared ? ` in the shared machine « ${machine} »${known ? '' : ` (new, ${sizeWords(machineMb)})`}` : ' in a machine of its own'}? Its work, its AI's memory and its accesses are copied; not its devices nor its reminders. The original is untouched.`,
-            'Copy it', async () => {
-                show('Copying...'); $('notice-spin').hidden = false;
-                try { await post(`${API}/conversations/${encodeURIComponent(name)}/copy`, { title, ...(machine ? { machine } : {}), ...(machineMb ? { machineMb } : {}) }); await refresh(); resume(); }
-                catch (error) { show(error.message, 'Back', enter); }
-            }, resume);
+        const goes = cmTarget(here);
+        if (goes.why) { $('cm-why').textContent = goes.why; $('cm-why').hidden = false; return; }
+        const t = here.title ?? here.name;
+        const where = goes.machine ? `« ${goes.machine} »` : uiSaid('set-cm-own-to', 'its own machine');
+        $('cm-title').textContent = cm.kind === 'copy' ? uiSaid('set-cm-copy-to', 'Copy {t} to {where}', { t, where }) : uiSaid('set-cm-move-to', 'Move {t} into {where}', { t, where });
+        $('cm-new-line')?.remove();
+        if (goes.machine && !goes.known) $('cm-check').prepend(Object.assign(document.createElement('p'), { id: 'cm-new-line', className: 'cm-not', textContent: uiSaid('set-cm-new-line', 'A new shared machine · {size}', { size: sizeWords(goes.machineMb) }) }));
+        $('cm-copy-part').hidden = cm.kind !== 'copy'; $('cm-move-part').hidden = cm.kind !== 'move';
+        $('cm-go').textContent = cm.kind === 'copy' ? uiSaid('set-cm-copy-go', 'Copy it') : uiSaid('set-cm-move-go', 'Move it');
+        $('cm-go').className = 'primary';
+        $('cm-choose').hidden = true; $('cm-check').hidden = false;
+        (cm.kind === 'copy' ? $('cm-copy-title') : $('cm-go')).focus();
     });
+    $('cm-back').addEventListener('click', () => { $('cm-check').hidden = true; $('cm-choose').hidden = false; paintCm(); $('cm-next').focus(); });
+    $('cm-go').addEventListener('click', async () => {
+        const name = cm.of;
+        const here = cmHere();
+        if (!here) return;
+        const goes = cmTarget(here);
+        if (goes.why) return;
+        closeCm();
+        if (cm.kind === 'move') {
+            /* As it was: the page waits for the move, then reconnects to it in its new machine. */
+            leavePanel();
+            disconnect(); say('moving', 'connecting'); show('Moving...'); $('notice-spin').hidden = false;
+            try { await post(`${API}/conversations/${encodeURIComponent(name)}/into-machine`, goes.body); await refresh(); enter(); }
+            catch (error) { show(error.message, 'Back', enter); }
+            return;
+        }
+        const title = $('cm-copy-title').value.trim() || `${here.title ?? here.name} (copy)`;
+        try {
+            const made = await post(`${API}/conversations/${encodeURIComponent(name)}/copy`, { title, ...goes.body });
+            if (made?.name) copiesWatched.add(made.name);
+            await refresh();
+        } catch (error) { cmToast(`✗ ${error.message}`, 'bad'); }
+    });
+    /* Its end, read with the jobs (paintJobs): done, « Open it »; failed or removed, « See why ». */
+    function cmJobsSeen() {
+        for (const name of copiesWatched) {
+            const end = jobsNow.done.find((j) => j.conversation === name);
+            if (!end) continue;
+            copiesWatched.delete(name);
+            if (end.result === 'done') cmToast(`✓ ${uiSaid('set-cm-ready', 'Copy ready')}`, 'ok', uiSaid('set-cm-open', 'Open it'), () => select(name, { step: true }));
+            else cmToast(`✗ ${uiSaid('set-cm-failed', 'Not copied')}`, 'bad', uiSaid('set-cm-see-why', 'See why'), async () => { await openSettings(); openChapter('s-jobs')?.scrollIntoView({ block: 'start' }); });
+        }
+    }
+    let cmToastTimer;
+    function cmToast(text, tone, label, act) {
+        const toast = $('cm-toast');
+        $('cm-toast-text').textContent = text;
+        toast.dataset.tone = tone;
+        $('cm-toast-go').hidden = !label;
+        $('cm-toast-go').textContent = label ?? '';
+        $('cm-toast-go').onclick = () => { toast.hidden = true; void act?.(); };
+        toast.hidden = false;
+        clearTimeout(cmToastTimer); cmToastTimer = setTimeout(() => { toast.hidden = true; }, 60_000);
+    }
+    $('cm-toast-close').addEventListener('click', () => { $('cm-toast').hidden = true; });
+
+    /* ITS SHARED MACHINE'S MEMORY (#221): asked first, naming every conversation it interrupts. */
     $('shared-size').addEventListener('submit', (event) => {
         event.preventDefault();
         const name = current;
