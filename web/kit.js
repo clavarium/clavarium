@@ -19,6 +19,7 @@
  *                  a device are two of its kinds too (step 4).
  *   TopBar         THE BAR atop every page of the right-hand pane, two variants: `main` (a conversation, a room:
  *                  its views on the right) and `sub` (a page of its own or inside one: a way back on the right)
+ *   Bone, loading  WHILE IT LOADS (14-11): bars in place of what is read, the area at its final size; then it fades in
  *   ShareDonut     who takes a whole (memory, a disk): a small donut, its slices from shareSlices, the main
  *                  figure in its middle; ShareKey, a slice's swatch beside its row in the list
  *   AssetIcon      an asset's sign and colour, by its kind (one table, ASSET_ICONS)
@@ -427,6 +428,34 @@
         rest();
         root.append(svg, mid);
         return root;
+    }
+
+    /* ---------- WHILE IT LOADS (14-11): no area grows when what it shows arrives ----------
+       Bone: a quiet bar where a figure, a line or a chart will be, sized by the page's style (`cls`) or `w`/`h`;
+       it shimmers slowly (still under reduced motion). Never a figure made up meanwhile (no « 0 % »).
+       loading(box, true, key): the box says it is busy, and keeps the height it had the last time it was read on
+       this device (`key`: a size only, never a figure). loading(box, false, key): it lets go of that height,
+       remembers the new one, and what it shows fades in -- only when it was waiting (a refresh does not blink). */
+    function Bone({ cls = '', w = '', h = '' } = {}) {
+        const b = node('span', `kit-bone${cls ? ` ${cls}` : ''}`); b.setAttribute('aria-hidden', 'true');
+        if (w) b.style.width = w; if (h) b.style.height = h;
+        return b;
+    }
+    const SIZES = 'clavarium.sizes';
+    const sizesKept = () => { try { return JSON.parse(localStorage.getItem(SIZES) ?? '{}') ?? {}; } catch { return {}; } };
+    function loading(box, on = true, key = '') {
+        if (!box) return;
+        if (on) {
+            box.setAttribute('aria-busy', 'true');
+            const h = key ? Number(sizesKept()[key]) : 0;
+            if (h > 0) box.style.minHeight = `${h}px`;
+            return;
+        }
+        if (box.getAttribute('aria-busy') !== 'true') return;
+        box.removeAttribute('aria-busy'); box.style.minHeight = '';
+        if (key && box.offsetHeight > 0) { const all = sizesKept(); all[key] = box.offsetHeight; try { localStorage.setItem(SIZES, JSON.stringify(all)); } catch { /* a private window */ } }
+        box.classList.remove('kit-settle'); void box.offsetWidth; box.classList.add('kit-settle');
+        box.addEventListener('animationend', () => box.classList.remove('kit-settle'), { once: true });
     }
 
     /* ---------- ASSETS (06-11, the unified assets, step 1: the pieces; the screens move to them in step 2) ---------- */
@@ -1102,7 +1131,7 @@
         AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, deviceItems, AccessList, accessModel, AssetPanel, AssetDelete, AssetPicker, assetPickModel, RIGHT_SAME,
         memberLevel, groupLevels, groupLevel, groupFanOut, skippedSaid, GroupChip,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, MCP_WORDS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
-        shareSlices, ShareDonut, ShareKey,
+        shareSlices, ShareDonut, ShareKey, Bone, loading,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf, IDLE_MS, idleFor, idleWords, tidyList,
         setWords(fn) { if (typeof fn === 'function') words = fn; },
         StatusDot, Avatar, Chips, Switch, Segmented, InlineConfirm, ConvCard, StepFlow, SecretPicker, NewAsset, TopBar,
