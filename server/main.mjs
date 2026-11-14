@@ -93,6 +93,7 @@ import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs'
 import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
 import { copyWorkFolder } from './copywork.mjs';
+import { Jobs } from './jobs.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MAINTENANCE = 'deploy/maintenance.html';
@@ -312,12 +313,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let repairTerminal = async () => { throw new Error('not ready'); };
     const asHost = runner(host);
     /* A conversation in a shared machine (#221) says which: the machine its VM operations reach. */
-    const conversationStore = new Store(`${dataDir}/conversations.json`);
+    const jobs = new Jobs({ path: `${dataDir}/jobs.json` });
+    const conversationStore = new Store(`${dataDir}/conversations.json`, { onChange: (before, after) => jobs.seen(before, after) });
     const vms = new Vms(asHost, host, {
         machineOf: (name) => { const m = conversationStore.get(name)?.sharedMachine; return typeof m === 'string' && m ? m : undefined; },
         userOf: (name) => { const u = conversationStore.get(name)?.machineUser; return u && Number.isInteger(u.uid) && Number.isInteger(u.gid) ? u : undefined; },
     });
     const all = conversations ?? new Conversations({ store: conversationStore, layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
+    /* What it is doing (jobs.mjs): read by GET /api/jobs. */
+    if (!all.jobs) all.jobs = jobs;
     /* Who may do what with what: ONE table, shared by everything below. */
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
     /* Folder-style boxes the owner drops assets into, to tidy the views and hand a whole box at once (groups.mjs). */

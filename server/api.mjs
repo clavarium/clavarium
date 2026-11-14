@@ -126,6 +126,7 @@
  *   POST /api/wifi/handover: the network handed over to NetworkManager (back as it was if it does not work)
  *   GET  /api/meshcentral: the remote screen (MeshCentral); POST /api/meshcentral/enable (turned on, in the background) /disable
  *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
+ *   GET  /api/jobs   what it is doing: { running, done } (jobs.mjs), its updates of the day among the done
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/history/all?span=1h|24h|7d    Settings, Usage: the server and every machine (asleep too) on one time axis,
  *                                           in GB and cores: {t, capacity, server, itself, machines: [{name, alloc, asleep, ...}]}
@@ -406,6 +407,14 @@ export async function handleApi(request, response, conversations, headers, resou
             /* Who may sign in (operators.mjs): none in local mode. */
             const reactOf = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
             if (reactOf && reacting) return send(200, reacting.settings(decodeURIComponent(reactOf[1]))), true;
+            if (pathname === '/api/jobs' && conversations.jobs) {
+                const said = conversations.jobs.list(conversations.list?.() ?? []);
+                const day = Date.now() - 24 * 3600_000;
+                const updated = (updates?.about().history ?? []).filter((h) => h.at && Date.parse(h.at) >= day)
+                    .map((h) => ({ what: `Clavarium ${h.action === 'rollback' ? 'back to' : 'updated to'} ${h.to ?? '?'}`, endedAt: h.at, result: h.result === 'done' ? 'done' : 'failed', ...(h.result === 'done' ? {} : { why: h.why ?? h.result ?? '' }) }));
+                const done = [...said.done, ...updated].sort((a, b) => String(b.endedAt).localeCompare(String(a.endedAt)));
+                return send(200, { running: said.running, done }), true;
+            }
             if (pathname === '/api/events' && events) {
                 const ask = { kind: query.get('kind') ?? '', conversation: query.get('conversation') ?? '', q: query.get('q') ?? '', before: query.get('before') ?? '', limit: Math.min(1000, Number(query.get('limit')) || 200) };
                 const said = events.list(ask);

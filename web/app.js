@@ -1978,9 +1978,55 @@
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         /* The panel is open: what the answerer did meanwhile is said there. */
         if (!DEVICE && panelShown) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
+        if (!DEVICE && home) void paintJobs();
         /* A start told step by step is asked about more often: its tool appears soon after its last step. */
         if (home) pollTimer = setTimeout(refresh, conversations.some(holds) || conversations.some((c) => c.machine) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
     }
+
+    /* ---------- WHAT IT IS DOING (jobs.mjs, 14-11) ----------
+       A badge by the list's title while something runs (« ● 2 under way »), or when one failed since the list
+       was last opened (« ● 1 failed », red); nothing otherwise. Tapped: what runs, its step; then the day's ends,
+       done or failed with why. A line opens its conversation. Read with the list, nothing asked of the machines. */
+    let jobsNow = { running: [], done: [] };
+    const JOBS_SEEN = 'clavarium.jobsSeen';
+    const jobsSeen = () => { try { return localStorage.getItem(JOBS_SEEN) ?? ''; } catch { return ''; } };
+    async function paintJobs() {
+        try { const r = await fetch(`${API}/jobs`); if (!r.ok) return; jobsNow = await r.json(); } catch { return; }
+        const failed = jobsNow.done.filter((j) => j.result === 'failed' && String(j.endedAt) > jobsSeen()).length;
+        const badge = $('jobs-open');
+        const n = jobsNow.running.length;
+        badge.hidden = !n && !failed;
+        badge.dataset.tone = !n && failed ? 'bad' : '';
+        badge.textContent = n ? `${n} under way` : `${failed} failed`;
+        badge.title = n ? jobsNow.running.map((j) => j.what).join(' · ') : 'Tap to see what failed';
+        if (!$('jobs').hidden) paintJobsList();
+    }
+    function paintJobsList() {
+        const line = (j, mark, result) => {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'job'; b.dataset.result = result;
+            const when = j.endedAt ? new Date(j.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            b.append(Object.assign(document.createElement('span'), { textContent: mark }), Object.assign(document.createElement('span'), { textContent: j.what }),
+                Object.assign(document.createElement('small'), { textContent: result === 'running' ? (j.step || 'Starting') : [j.why, when].filter(Boolean).join(' · ') }));
+            if (j.conversation && conversations.some((c) => c.name === j.conversation)) b.addEventListener('click', () => { closeJobs(); select(j.conversation, { step: true }); });
+            else b.disabled = true;
+            return b;
+        };
+        const head = (text) => Object.assign(document.createElement('h3'), { textContent: text });
+        const parts = [];
+        if (jobsNow.running.length) parts.push(head('Under way'), ...jobsNow.running.map((j) => line(j, '⟳', 'running')));
+        if (jobsNow.done.length) parts.push(head('Today'), ...jobsNow.done.map((j) => line(j, j.result === 'done' ? '✓' : '✗', j.result === 'done' ? 'done' : 'failed')));
+        if (!parts.length) parts.push(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'Nothing under way.' }));
+        $('jobs').replaceChildren(...parts);
+    }
+    function closeJobs() { $('jobs').hidden = true; $('jobs-open').setAttribute('aria-expanded', 'false'); }
+    $('jobs-open').addEventListener('click', () => {
+        if (!$('jobs').hidden) { closeJobs(); return; }
+        paintJobsList(); $('jobs').hidden = false; $('jobs-open').setAttribute('aria-expanded', 'true');
+        try { localStorage.setItem(JOBS_SEEN, new Date().toISOString()); } catch { /* kept for this visit only */ }
+        if (!jobsNow.running.length) $('jobs-open').hidden = true;
+    });
+    document.addEventListener('click', (event) => { if (!$('jobs').hidden && !event.target.closest('#jobs, #jobs-open')) closeJobs(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('jobs').hidden) closeJobs(); });
 
     /* ---------- A NEW CONVERSATION: a page of its own, as Settings ----------
        "+ New" opens it beside the list (the whole screen on a phone), with an
@@ -3387,8 +3433,12 @@
         box.hidden = !wanted;
         /* Where the tool talks through the app, the chat is the whole screen: one box to write in. */
         /* Its chat off, on this server's own page: said, with the button that turns it on (a device's page keeps the plain screen). */
-        const offer = !DEVICE && !wanted && !noTerminal();
-        $('simple-plain').hidden = wanted || offer;
+        /* Not known yet -- the list not read, its chat not asked, or it is being built or moved: nothing said
+           rather than a wrong screen (14-11: « chat is off », then « Its screen: connecting », then the chat). */
+        const here = conversations.find((x) => x.name === current);
+        const unknown = !DEVICE && (!here || here.phase !== 'ready' || talkOf !== current);
+        const offer = !unknown && !DEVICE && !wanted && !noTerminal();
+        $('simple-plain').hidden = wanted || offer || unknown;
         $('chat-turn').hidden = !offer;
         if (offer) {
             const possible = !(talkOf === current && talk.possible === false);
