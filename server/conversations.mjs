@@ -1031,7 +1031,8 @@ export class Conversations {
     async #copying(from, to, c, tool, building, open = () => {}) {
         const dir = mkdtempSync(join(tmpdir(), 'clv-copy-'));
         const carried = join(dir, 'state.tar.gz');
-        let woke = false;
+        let woke = false; let putBack = 'sleep';
+        const back = () => (putBack === 'stop' ? this.machineAction(from, 'stop', { wait: true }) : this.sleep(from));
         try {
             /* Said as it goes, once a second at most: a long copy is seen moving (13-11, "on ne sait pas si ça marche"). */
             let said = 0;
@@ -1040,7 +1041,9 @@ export class Conversations {
                 this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
                 if (state !== 'Running') {
-                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory: waking its original` });
+                    /* Put back as it was found (14-11: one stopped was left asleep, its memory held). */
+                    putBack = state === 'Stopped' ? 'stop' : 'sleep';
+                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory: ${putBack === 'stop' ? 'starting its original (it was stopped)' : 'waking its original'}` });
                     await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
                     /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
                        holding memory (capacity.mjs, reclaimSleepers) does not put it back to sleep while it is read --
@@ -1081,7 +1084,7 @@ export class Conversations {
                 }
                 if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
                 /* Read: its original back to sleep at once, before the copy's machine is made. */
-                if (woke) { await this.sleep(from).catch(() => {}); woke = false; }
+                if (woke) { await back().catch(() => {}); woke = false; }
                 this.#borrowed.delete(from);
             }
             open(true);
@@ -1114,7 +1117,7 @@ export class Conversations {
             return undefined;
         } finally {
             rmSync(dir, { recursive: true, force: true });
-            if (woke) await this.sleep(from).catch(() => {});
+            if (woke) await back().catch(() => {});
             this.#borrowed.delete(from);
         }
     }

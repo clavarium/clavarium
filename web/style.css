@@ -1426,11 +1426,16 @@ select.pill { appearance: auto; }
 #list .top-acts { display: flex; align-items: center; gap: 6px; }
 #list-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* What it is doing (14-11): a small badge by the title, its list folded under it. */
-#list .top { position: relative; }
 .jobs-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: 8px; margin-right: auto; padding: 2px 10px; min-height: 0; border: 1px solid var(--brass); border-radius: 999px; background: transparent; color: var(--brass-ink); font-size: .75rem; font-weight: 600; white-space: nowrap; }
 .jobs-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.jobs-room { margin: 0; padding: 2px 4px; gap: 4px; border-color: transparent; }
+/* A phone's bar has no room for it: a dot on its way back to the list, where the badge is. */
+@media (max-width: 480px) { .jobs-room { display: none !important; } }
+#back[data-jobs] { position: relative; }
+#back[data-jobs]::after { content: ""; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--brass); }
+#back[data-jobs="bad"]::after { background: var(--danger); }
 .jobs-badge[data-tone="bad"] { border-color: var(--danger); color: var(--danger); }
-.jobs-pop { position: absolute; z-index: 30; top: 100%; left: 8px; right: 8px; margin-top: 4px; min-width: 260px; max-height: 60vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgb(0 0 0 / .35); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.jobs-pop { position: fixed; z-index: 60; width: min(340px, calc(100vw - 16px)); max-height: 60vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgb(0 0 0 / .35); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .jobs-pop h3 { margin: 2px 0 0; font-size: .8125rem; }
 .jobs-pop .job { display: grid; grid-template-columns: 16px 1fr; gap: 2px 8px; text-align: left; background: transparent; border: 0; padding: 4px 0; color: var(--ink); font: inherit; font-size: .8125rem; cursor: pointer; }
 .jobs-pop .job small { grid-column: 2; color: var(--ink2); overflow-wrap: anywhere; }

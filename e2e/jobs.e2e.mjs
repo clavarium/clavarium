@@ -17,5 +17,13 @@ test('a conversation built is a job done of the day; nothing under way, no badge
     assert.deepEqual(jobs.running, []);
     await page.waitForTimeout(500);
     assert.equal(await page.locator('#jobs-open').isVisible(), false);
+    /* Its list opened, then Escape: the list closed, the conversation still open under it. */
+    await page.evaluate(() => { document.getElementById('jobs-open').hidden = false; });
+    await page.locator('#jobs-open').click();
+    await me.until('its list open', async () => page.locator('#jobs').isVisible());
+    assert.match(await page.locator('#jobs').innerText(), /Today[\s\S]*Building/);
+    await page.keyboard.press('Escape');
+    await me.until('its list closed', async () => !(await page.locator('#jobs').isVisible()));
+    assert.equal(await page.locator('#name').innerText(), 'clavarium-dev');
     assert.deepEqual(me.errors, []);
 });

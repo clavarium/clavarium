@@ -89,6 +89,29 @@ exit 0
     assert.notEqual(b.vms.get('clv-mail'), 'Running', 'asleep again');
 });
 
+test('a copy of an original that was STOPPED: started to read it, then stopped again -- never left asleep (14-11)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-copy-vmm-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const fake = join(dir, 'vmm');
+    writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do case "$a" in *"tar -czf"*) printf 'ARCHIVE'; exit 0;; *"tar -xzf"*) cat > /dev/null; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+exit 0
+`, { mode: 0o755 });
+    const b = bench(t, { prefix: [fake] });
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    b.vms.set('clv-mail', 'Stopped');
+    b.store.patch('mail', { stopped: true });
+    const r = await b.all.copy('mail', { title: 'Copy' });
+    await b.all.copied;
+    assert.equal(b.store.get(r.name).phase, 'ready');
+    const out = b.calls.join('\n');
+    assert.match(out, /^vm start clv-mail$/m, 'started to read its state');
+    assert.doesNotMatch(out, /^vm suspend clv-mail$/m, 'not put to sleep');
+    assert.match(out, /^vm halt clv-mail\b/m, 'stopped again');
+    assert.ok(out.indexOf('vm halt clv-mail') < out.indexOf('vm launch clv-copy'), 'before the copy\'s machine is made');
+    assert.notEqual(b.store.get('mail').asleep, true);
+});
+
 test('a copy: refused before anything is made; a copy that fails is said, its original untouched', async (t) => {
     const b = bench(t);
     b.all.create({ name: 'code', tool: 'tool', workOnDisk: true }); await b.all.built;
