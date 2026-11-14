@@ -166,7 +166,7 @@ export const SETTINGS_WORDS_FR = {
     'set-mcp-name': 'Nom', 'set-mcp-url': 'Adresse', 'set-mcp-key': 'Clé', 'set-mcp-add': 'Ajouter',
     /* Où elle tourne, et l'assistant Copier ou déplacer (#221, 14-11). */
     'set-where': 'Où elle tourne', 'set-where-copy': 'Copier…', 'set-where-move': 'Déplacer…', 'set-where-own': 'Sa propre machine',
-    'set-where-shared': 'Machine partagée « {m} », avec {others}', 'set-where-alone': 'Machine partagée « {m} », seule', 'set-where-stops': 'L’arrêter les arrête aussi',
+    'set-where-shared': 'Machine partagée « {m} », avec {others}', 'set-where-alone': 'Machine partagée « {m} », seule', 'set-where-stops': 'L’arrêter les arrête aussi', 'set-mem-shared': 'Partagée « {m} » : {who}',
     'set-cm-title': 'Copier ou déplacer {t}', 'set-cm-copy': 'Copier', 'set-cm-copy-what': 'Celle-ci reste telle quelle',
     'set-cm-move': 'Déplacer', 'set-cm-move-what': 'La même, sur une autre machine', 'set-cm-cancel': 'Annuler', 'set-cm-next': 'Suivant',
     'set-cm-not-yet': 'Pas encore', 'set-cm-with': 'Avec {who}', 'set-cm-shared': 'Machine partagée « {m} »', 'set-cm-new': 'Une nouvelle machine partagée',

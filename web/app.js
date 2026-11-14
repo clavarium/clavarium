@@ -8899,7 +8899,7 @@
             $('server-memory-note').textContent = aboveWords(mem.freeMb - r.reserve.memoryMb, r.reserve.memoryMb);
             const held = r.machines.reduce((a, x) => a + x.rssMb, 0);
             const rest = Math.max(0, mem.totalMb - mem.freeMb - held);
-            const named = r.machines.map((x, i) => ({ key: x.name ?? `vm-${i}`, label: x.shelf ? 'ready-made machine (being made)' : (x.name ? machineTitle(x.name) : 'another machine'), mb: x.rssMb, x }));
+            const named = r.machines.map((x, i) => ({ key: x.name ?? `vm-${i}`, label: x.shelf ? 'ready-made machine (being made)' : x.name ? machineTitle(x.name) : x.shared ? uiSaid('set-mem-shared', 'Shared « {m} »: {who}', { m: x.shared, who: (x.who ?? []).join(', ') }) : 'another machine', mb: x.rssMb, x }));
             const share = shareOf(named, rest, mem.freeMb);
             $('server-memory-share').replaceChildren(...(r.machines.length ? [shareDonut(share.slices, uiSaid('set-share-memory', 'Memory by machine'), mem.totalMb - mem.freeMb, mem.totalMb)] : []));
             parts($('server-memory-parts'), [
