@@ -2,7 +2,7 @@
    original untouched, woken only the time to read its state, then put to sleep again. Its own files only. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync, symlinkSync, readlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync, symlinkSync, readlinkSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Conversations } from '../server/conversations.mjs';
@@ -87,6 +87,27 @@ exit 0
     assert.match(out, /^vm start clv-mail$/m, 'woken to read its state');
     assert.ok(out.lastIndexOf('vm start clv-mail') < out.lastIndexOf('clv-mail'), 'then something more done to it: put to sleep');
     assert.notEqual(b.vms.get('clv-mail'), 'Running', 'asleep again');
+});
+
+test('a copy reads its tool\'s memory through its original\'s work folder when it has one, not the VM manager\'s output (14-11)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-copy-vmm-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const work = join(dir, 'work'); mkdirSync(work);
+    const fake = join(dir, 'vmm');
+    /* Its archive written where it is told (the last word: its id), in the work folder; nothing on its output. */
+    writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do case "$a" in *"tar -czf"*) for id; do :; done; mkdir -p "${work}/.clavarium-carry"; printf 'ARCHIVE-IN-WORK' > "${work}/.clavarium-carry/$id.tgz"; exit 0;; *"tar -xzf"*) { printf '%s:' "$3"; cat; } > "${dir}/imported"; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+exit 0
+`, { mode: 0o755 });
+    const b = bench(t, { prefix: [fake] });
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    b.store.patch('mail', { work: 'kept' });
+    b.all.workFolder = () => work;
+    const r = await b.all.copy('mail', { title: 'Copy' });
+    await b.all.copied;
+    assert.equal(b.store.get(r.name).phase, 'ready');
+    assert.equal(readFileSync(join(dir, 'imported'), 'utf8'), `clv-${r.name}:ARCHIVE-IN-WORK`);
+    assert.deepEqual(readdirSync(join(work, '.clavarium-carry')), [], 'taken from there: nothing left in its work');
 });
 
 test('a copy of an original that was STOPPED: started to read it, then stopped again -- never left asleep (14-11)', async (t) => {
