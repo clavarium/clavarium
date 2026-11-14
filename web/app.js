@@ -590,7 +590,7 @@
     if (listPinned) listFolded = false;
     const paintPin = () => {
         $('list-pin').setAttribute('aria-pressed', String(listPinned));
-        const label = listPinned ? 'The list stays open: click to let it fold when a conversation is opened' : 'Keep the list open: it no longer folds when a conversation is opened';
+        const label = listPinned ? 'The list stays open: click to let it fold when something is opened' : 'Keep the list open: it no longer folds when something is opened';
         $('list-pin').title = label; $('list-pin').setAttribute('aria-label', listPinned ? 'Unpin the list' : 'Keep the list open');
     };
     const pin = (on) => {
@@ -1224,6 +1224,8 @@
             return;
         }
         /* STOPPED BY ITS OWNER: it stays stopped until somebody starts it. */
+        /* Read for a copy just now (#221): started or woken without its tool, put back as it was after -- said, not « Stopped ». */
+        if (c && c.lentTo && !socket && c.phase === 'ready') { say('read for a copy', 'connecting'); show(uiSaid('set-lent-page', 'Read for its copy « {t} » · nothing to do', { t: c.lentTo })); $('notice-spin').hidden = false; return; }
         if (c && c.stopped === true && !socket && c.phase === 'ready') { say('stopped', 'waiting'); show(uiSaid('set-stopped-page', 'Stopped. It starts when you start it.'), uiSaid('set-m-start', 'Start'), connect); return; }
         if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
@@ -1272,7 +1274,9 @@
     }
     /* Opening a conversation or a room gets the list out of the way, so it has the room;
        the "»" button brings the list back. Only on a real pick by the owner, never on a
-       device or when deselecting. */
+       device or when deselecting. The same for any pick in the list column that changes
+       the right pane (Settings, Assets, Access, New, the server gauge): called from those
+       clicks, never from showPlace/enterPlace (they also run on reload, address, Back). */
     function foldOnOpen() {
         if (DEVICE || listFolded || listPinned) return;
         listFolded = true;
@@ -1330,9 +1334,10 @@
     /* ONE FLAT POINT per conversation, its colour the state -- the worst that applies: a machine problem (red),
        the agent waits for you (blue), the agent at work (gold, pulsing), the machine busy (amber, pulsing),
        fine (green), asleep (a hollow ring). The same point, same colours, sums a folded group below. */
-    const machineState = (c) => (c.asleep ? 'off' : (c.phase === 'failed' || healthNeeds(c)) ? 'problem'
+    /* Stopped is off as asleep is (14-11: a stopped one had the green point of one that runs). */
+    const machineState = (c) => (c.asleep || c.stopped === true ? 'off' : (c.phase === 'failed' || healthNeeds(c)) ? 'problem'
         : (holds(c) || ['building', 'restarting', 'moving'].includes(c.phase)) ? 'busy' : 'online');
-    const agentState = (c) => (c.asleep ? 'sleep' : (talkNeeds(c) || c.answerer?.needs) ? 'wait'
+    const agentState = (c) => (c.asleep || c.stopped === true ? 'sleep' : (talkNeeds(c) || c.answerer?.needs) ? 'wait'
         : c.talk?.state === 'working' ? 'work' : c.talk?.state === 'done' ? 'done' : 'idle');
     const STATE_WORDS = KIT.STATE_WORDS;
     const rollup = (c) => { const m = machineState(c); const a = agentState(c);
@@ -1433,9 +1438,9 @@
         /* Under way: the step the panel shows, in its words (the tool named once). */
         const under = c.phase === 'building' && /^(Copying|Taking|Putting|Giving)\b/.test(c.step ?? '') ? c.step : c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
         /* What it is doing, when it says something: its tool is not named on every row. */
-        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? uiSaid('set-list-starting', 'starting') : uiSaid('set-list-restarting', 'restarting')) : c.phase === 'ready' ? (c.asleep ? uiSaid('set-list-asleep', 'asleep') : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? uiSaid('set-list-moving', 'moving its work') : c.phase === 'restarting' ? uiSaid('set-list-restarting', 'restarting') : uiSaid('set-list-failed', 'failed'));
+        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? uiSaid('set-list-starting', 'starting') : uiSaid('set-list-restarting', 'restarting')) : c.phase === 'ready' ? (c.asleep ? uiSaid('set-list-asleep', 'asleep') : c.stopped === true ? uiSaid('set-list-stopped', 'stopped') : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? uiSaid('set-list-moving', 'moving its work') : c.phase === 'restarting' ? uiSaid('set-list-restarting', 'restarting') : uiSaid('set-list-failed', 'failed'));
         /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
-        const plain = c.phase === 'ready' && !c.asleep && !under && !holds(c);
+        const plain = c.phase === 'ready' && !c.asleep && c.stopped !== true && !under && !holds(c);
         const chips = [];
         /* Found by a search while hidden: said. */
         if (c.hidden === true && query) chips.push({ text: uiSaid('set-list-hidden', 'hidden'), cls: 'shared-mark', tone: 'note' });
@@ -1934,7 +1939,7 @@
     async function refresh() {
         clearTimeout(pollTimer);
         try {
-            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}/${Boolean(x.machine)}/${x.stopped === true}` : '');
+            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}/${Boolean(x.machine)}/${x.stopped === true}/${Boolean(x.lentTo)}` : '');
             const before = mark(conversations.find((x) => x.name === current));
             if (DEVICE) {
                 const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
@@ -2210,7 +2215,7 @@
         if (!nav.close('create')) leavePlace();
     }
     $('hidden-toggle').addEventListener('click', () => { showHidden = !showHidden; paint(); });
-    $('new').addEventListener('click', () => { void openNew(); });
+    $('new').addEventListener('click', () => { foldOnOpen(); void openNew(); });
     $('newconv-cancel').addEventListener('click', closeNew);
     $('newconv-close').addEventListener('click', closeNew);
     /* From the map's "+" of Conversations: the same page. */
@@ -2665,7 +2670,19 @@
         }
         /* Its tool's memory, exported as one file, or put back from one (#351): the person's own act, from here. */
         $('carry-box').hidden = DEVICE || !here;
+        /* Its machine must run to be read: stopped or asleep, said there, with the one button that starts it
+           (14-11: a raw « Its machine is not running » came back as the file). */
+        const down = here?.stopped === true || here?.asleep === true;
         $('carry-export').href = `${API}/conversations/${encodeURIComponent(current)}/export`;
+        $('carry-export').toggleAttribute('aria-disabled', down);
+        $('carry-export').onclick = down ? (event) => { event.preventDefault(); } : null;
+        $('carry-import').disabled = down;
+        $('carry-said').hidden = !down;
+        if (down) {
+            const start = Object.assign(document.createElement('button'), { type: 'button', className: 'inline', textContent: here.asleep === true ? uiSaid('set-wake-it', 'Wake it') : uiSaid('set-m-start', 'Start') });
+            start.addEventListener('click', () => { leavePanel(); connect(); });
+            $('carry-said').replaceChildren(uiSaid('set-carry-down', 'It must run to export or import.'), ' ', start);
+        }
         $('carry-import').onclick = () => $('carry-file').click();
         $('carry-file').onchange = () => {
             const file = $('carry-file').files?.[0]; $('carry-file').value = '';
@@ -7025,15 +7042,15 @@
     }
     nav.outside = () => { if (!DEVICE) void followAddress(); };
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
-    $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
-    $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
+    $('nav-access').addEventListener('click', () => { foldOnOpen(); if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
+    $('nav-assets').addEventListener('click', () => { foldOnOpen(); if (place !== 'assets') void openAssetsPlace(); });
     $('map-new-device').addEventListener('click', () => newDevice(accessFor));
     /* Every device and what each was given, by device or by thing: a step over the map. */
     $('map-all-devices').addEventListener('click', () => { void openAccessPage('devices'); });
     /* Voice boxes are on the page of all devices: opened there, at them. */
     $('map-voice-boxes').addEventListener('click', async () => { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); });
     $('share-manage-close').addEventListener('click', () => { if (!nav.close('sub')) void openAccessPage('map', { push: false }); });
-    $('nav-settings').addEventListener('click', () => { if (place !== 'settings') void openSettings(); });
+    $('nav-settings').addEventListener('click', () => { foldOnOpen(); if (place !== 'settings') void openSettings(); });
     $('access-close').addEventListener('click', () => leavePlace());
     $('access-for-clear').addEventListener('click', () => { accessFor = ''; void openAccessPage(accessTab, { push: false }); });
     for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.addEventListener('click', () => { if (b.dataset.mode !== mapMode || accessTab !== 'map') void openAccessPage('map', { mode: b.dataset.mode }); });
@@ -8856,6 +8873,7 @@
         g.hidden = false;
     }
     $('server-gauge').addEventListener('click', async () => {
+        foldOnOpen();
         if (place !== 'settings') await openSettings(); else await paintServer();
         const top = openChapter('s-resources');
         top.scrollIntoView({ block: 'start' });

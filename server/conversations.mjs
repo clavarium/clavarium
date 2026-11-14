@@ -278,7 +278,7 @@ export class Conversations {
         return this.#store.all().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
             /* An AI tool has an instruction file; a shell has none: what is dictated there is never marked. */
-            return { ...c, rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
+            return { ...c, ...(c.lentTo && !this.#borrowed.has(c.name) ? { lentTo: undefined } : {}), rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
         });
     }
 
@@ -1042,13 +1042,17 @@ export class Conversations {
                 const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
                 if (state !== 'Running') {
                     /* Put back as it was found (14-11: one stopped was left asleep, its memory held). */
-                    putBack = state === 'Stopped' ? 'stop' : 'sleep';
+                    /* Asleep by its record and not seen stopped: back to sleep; otherwise (stopped, or its state not read --
+                       14-11 on test-c, just after a restart) stopped, which frees its memory. */
+                    putBack = this.#store.get(from)?.asleep === true && state !== 'Stopped' ? 'sleep' : 'stop';
                     this.#store.patch(to, { step: `Copying ${tool.label}'s memory: ${putBack === 'stop' ? 'starting its original (it was stopped)' : 'waking its original'}` });
                     await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
                     /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
                        holding memory (capacity.mjs, reclaimSleepers) does not put it back to sleep while it is read --
                        the reading would end cut (13-11: exit 255). */
                     this.#borrowed.add(from);
+                    /* Its page says so while it is read (not « Stopped » or « Asleep »): cleared once put back. */
+                    this.#store.patch(from, { lentTo: this.#store.get(to)?.title ?? to });
                     const started = await this.#vms.start(from);
                     if (started.code !== 0) throw new Error(`its original's machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
                     woke = true;
@@ -1066,10 +1070,18 @@ export class Conversations {
                     out.stream.on('data', (d) => { read += d.length; lastAt = Date.now(); say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); });
                     /* Nothing comes for a while: said, with how long; for too long, the reading is ended and why said --
                        never an endless wait nobody can read (14-11: stuck at "36 KB read"). */
+                    /* Quiet for 30 s: its machine asked, once, what its reading does -- the file it is on and its state
+                       (D: waiting on the disk), its load, its free memory -- or said not to answer at all. Said with the
+                       wait, and in the end's why (14-11: stuck at 36 KB on the owner's server, never here). */
+                    let seen = '';
+                    const probe = 'for p in $(pgrep -x tar); do f=$(ls -l /proc/$p/fd 2>/dev/null | grep -o "/home/[^ ]*" | tail -1); echo "tar $(cut -d" " -f3 /proc/$p/stat) ${f#$HOME/}"; done; '
+                        + 'echo "load $(cut -d" " -f1 /proc/loadavg)"; awk \'/MemAvailable/{print "free " int($2/1024) " MB"}\' /proc/meminfo';
+                    const ask = () => { seen = '…'; this.#vms.exec(from, ['sh', '-c', probe], { timeoutMs: 20_000 }).then((r) => { seen = r.code === 0 ? (r.stdout || '').trim().split('\n').join(', ').slice(0, 200) : 'its machine did not answer'; }, () => { seen = 'its machine did not answer'; }); };
                     const watch = setInterval(() => {
                         const quiet = Math.round((Date.now() - lastAt) / 1000);
                         if (quiet >= COPY_QUIET_MS / 1000) { stalled = true; child.kill('SIGKILL'); return; }
-                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s`);
+                        if (quiet >= 30 && !seen) ask();
+                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s${seen && seen !== '…' ? ` (${seen})` : ''}`);
                     }, 5000);
                     const failed = new Promise((ok) => child.on('error', () => ok(-1)));
                     const file = createWriteStream(carried, { mode: 0o600 });
@@ -1077,7 +1089,7 @@ export class Conversations {
                     code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => clearInterval(watch));
                     if (stalled) {
                         const now = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
-                        throw new Error(`its original stopped sending its tool's memory (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min; its machine is ${now ?? 'in a state that could not be read'})`);
+                        throw new Error(`its original stopped sending its tool's memory (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min; its machine is ${now ?? 'in a state that could not be read'}${seen && seen !== '…' ? `; it said: ${seen}` : ''})`);
                     }
                     await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
                     if (code !== 255) break;
@@ -1086,6 +1098,7 @@ export class Conversations {
                 /* Read: its original back to sleep at once, before the copy's machine is made. */
                 if (woke) { await back().catch(() => {}); woke = false; }
                 this.#borrowed.delete(from);
+                if (this.#store.get(from)?.lentTo) this.#store.patch(from, { lentTo: undefined });
             }
             open(true);
             await building;
@@ -1119,6 +1132,7 @@ export class Conversations {
             rmSync(dir, { recursive: true, force: true });
             if (woke) await back().catch(() => {});
             this.#borrowed.delete(from);
+            if (this.#store.get(from)?.lentTo) this.#store.patch(from, { lentTo: undefined });
         }
     }
 

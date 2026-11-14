@@ -78,7 +78,7 @@ exit 0
 `, { mode: 0o755 });
     const b = bench(t, { prefix: [fake] });
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
-    b.vms.set('clv-mail', 'Suspended');
+    b.vms.set('clv-mail', 'Suspended'); b.store.patch('mail', { asleep: true });
     const r = await b.all.copy('mail', { title: 'Copy' });
     await b.all.copied;
     assert.equal(b.store.get(r.name).phase, 'ready');
@@ -110,6 +110,7 @@ exit 0
     assert.match(out, /^vm halt clv-mail\b/m, 'stopped again');
     assert.ok(out.indexOf('vm halt clv-mail') < out.indexOf('vm launch clv-copy'), 'before the copy\'s machine is made');
     assert.notEqual(b.store.get('mail').asleep, true);
+    assert.equal(b.store.get('mail').lentTo, undefined, 'no longer said read for a copy');
 });
 
 test('a copy: refused before anything is made; a copy that fails is said, its original untouched', async (t) => {
@@ -153,7 +154,7 @@ exit 0
 `, { mode: 0o755 });
     const b = bench(t, { prefix: [fake] });
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
-    b.vms.set('clv-mail', 'Suspended');
+    b.vms.set('clv-mail', 'Suspended'); b.store.patch('mail', { asleep: true });
     b.store.patch('mail', { asleep: true });
     assert.deepEqual(b.all.asleep(), ['mail']);
     const seen = [];
@@ -211,7 +212,7 @@ exit 0
 `, { mode: 0o755 });
     const b = bench(t, { prefix: [fake] });
     b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
-    b.vms.set('clv-mail', 'Suspended');
+    b.vms.set('clv-mail', 'Suspended'); b.store.patch('mail', { asleep: true });
     b.calls.length = 0;
     const r = await b.all.copy('mail', { title: 'Copy' });
     await b.all.copied;

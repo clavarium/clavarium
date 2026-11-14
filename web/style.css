@@ -3077,3 +3077,4 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 /* At hand (13-11): a switch's name never under its buttons -- the name keeps its width, the buttons wrap. */
 .hand-switches .set-row > .set-what { flex: none; }
 .hand-switches .set-row > .set-control { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+a.button[aria-disabled] { opacity: .5; pointer-events: none; }
