@@ -110,6 +110,38 @@ exit 0
     assert.deepEqual(readdirSync(join(work, '.clavarium-carry')), [], 'taken from there: nothing left in its work');
 });
 
+test('a move into a shared machine carries its tool\'s state through its work folder too, never the VM manager\'s channel (14-11)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-move-vmm-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const work = join(dir, 'work'); mkdirSync(work);
+    const fake = join(dir, 'vmm');
+    writeFileSync(fake, `#!/bin/sh
+for a in "$@"; do case "$a" in *"tar -czf"*) for id; do :; done; mkdir -p "${work}/.clavarium-carry"; printf 'STATE-IN-WORK' > "${work}/.clavarium-carry/$id.tgz"; exit 0;; *"tar -xzf"*) for id; do :; done; { if [ -f "${work}/.clavarium-carry/$id.tgz" ]; then printf 'from-work:'; cat "${work}/.clavarium-carry/$id.tgz"; else cat; fi; } > "${dir}/imported"; printf '{"name":"mail","at":"x"}'; exit 0;; esac; done
+exit 0
+`, { mode: 0o755 });
+    const b = bench(t, { prefix: [fake] });
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    b.store.patch('mail', { work: 'kept' });
+    b.all.workFolder = () => work;
+    await b.all.moveToShared('mail', { machine: 'assist' });
+    await b.all.built;
+    assert.equal(b.store.get('mail').phase, 'ready');
+    assert.equal(b.store.get('mail').sharedMachine, 'assist');
+    assert.equal(readFileSync(join(dir, 'imported'), 'utf8'), 'from-work:STATE-IN-WORK');
+    assert.deepEqual(readdirSync(join(work, '.clavarium-carry')), [], 'nothing left in its work');
+});
+
+test('a move cut short by a restart of this server: back in its own machine, as it was -- never « build it again » (14-11)', async (t) => {
+    const b = bench(t);
+    b.store.put({ name: 'mail', tool: 'kept', phase: 'building', step: 'Taking its state along', movingTo: 'assist', movingFromMb: 2048, memoryMb: 1024, sharedMachine: 'assist', machineMb: 4096 });
+    const again = new Conversations({ store: b.store, vms: new Vms(async () => ({ code: 0, stdout: '', stderr: '' }), ['vmm'], { freshMs: 0 }), tools: TOOLS, uid: 1000, gid: 1000 });
+    const c = again.get('mail');
+    assert.equal(c.phase, 'ready');
+    assert.equal(c.sharedMachine, undefined); assert.equal(c.machineMb, undefined); assert.equal(c.memoryMb, 2048);
+    assert.equal(c.movingTo, undefined);
+    assert.match(c.moved, /stays in its own machine, as it was/);
+});
+
 test('a copy of an original that was STOPPED: started to read it, then stopped again -- never left asleep (14-11)', async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'clv-copy-vmm-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
