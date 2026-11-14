@@ -1801,6 +1801,13 @@
     function openSearch() {
         if (DEVICE) return;
         /* Asked for: the keyboard comes with it, lock or not. */
+        /* The list folded away (a pick folds it, 14-11): it comes back, or the field would be typed in out of sight. */
+        /* At once, not slid: the slide ends by giving the terminal the keys, the search needs them. */
+        if (listFolded && !narrow()) {
+            listFolded = false;
+            try { localStorage.setItem('clavarium-list', 'open'); } catch { /* a private window */ }
+            applyFold(false); fit.fit?.();
+        }
         if (!$('search').hidden) { $('search-field').focus(); return; }
         $('search').hidden = false; $('search-open').setAttribute('aria-expanded', 'true');
         nav.push('search', () => closeSearch());
@@ -3099,12 +3106,22 @@
     /* A CONVERSATION'S AT HAND: its machine's three tiles, from its health (memory, disk) and its last hour
        (/api/history, read at most every 30 s). */
     const convHandAt = { of: '', at: 0, h: null };
+    /* Its tiles while they are read, at once as its settings open: never those of the one shown before. */
+    function convHandLoading(here) {
+        const box = $('panel-tiles');
+        if (DEVICE || !here || here.asleep || here.phase !== 'ready') return;
+        if (box.dataset.of === here.name && box.children.length) return;
+        box.dataset.of = here.name; box.replaceChildren(...handTilesLoading()); box.hidden = false; KIT.loading(box);
+    }
     async function paintConvHand(here) {
         const box = $('panel-tiles');
         if (DEVICE || !here || here.asleep || here.phase !== 'ready') { box.hidden = true; return; }
-        if (convHandAt.of !== here.name || Date.now() - convHandAt.at > 30_000) { convHandAt.of = here.name; convHandAt.at = Date.now(); convHandAt.h = await handHistory(here.name); }
+        convHandLoading(here);
+        /* One reading at a time, awaited by every painting meanwhile: never tiles drawn without it while it comes. */
+        if (convHandAt.of !== here.name || Date.now() - convHandAt.at > 30_000) { convHandAt.of = here.name; convHandAt.at = Date.now(); convHandAt.h = handHistory(here.name); }
+        const h = await convHandAt.h;
         if (current !== here.name) return;
-        const h = convHandAt.h; const health = here.health;
+        const health = here.health;
         const tiles = [];
         const mem = health?.memory;
         const memUsed = mem?.totalMb ? 100 - (mem.availableMb / mem.totalMb) * 100 : lastOf(h?.memory);
@@ -3116,6 +3133,7 @@
         if (h) tiles.push(handTile(uiSaid('set-cpu', 'CPU'), cpu, uiSaid(here.cpus === 1 ? 'set-core' : 'set-cores', here.cpus === 1 ? '1 core' : '{n} cores', { n: here.cpus ?? 1 }), h.cpu, levelAt(cpu ?? 0)));
         for (const t of tiles) t.addEventListener('click', () => { openChapter('machine')?.scrollIntoView({ block: 'start' }); });
         box.replaceChildren(...tiles); box.hidden = tiles.length === 0;
+        KIT.loading(box, false);
     }
     /* What each folded chapter of a conversation says: its state now. */
     function paintConvStates(here) {
@@ -4338,10 +4356,15 @@
         if (place !== 'conversations') leavePlace();
         if (giving) { openGive(); return; }
         goTab('settings');
+        /* Shown at once with what is known (14-11): its rows do not come one by one while it is asked again. */
+        if (!giving && $('panel').dataset.painted !== current) { $('panel').dataset.painted = current; void paintPanel().catch(() => {}); }
+        if (!giving) { convHandLoading(conversations.find((x) => x.name === current)); curvesLoading($('machine-curves'), current); }
         /* What it has may have changed from another screen: asked again before it is shown. */
+        const tabShown = $('panel').dataset.tab;
         await refresh();
         await paintPanel();
-        if (atAccess) openChapter('access');
+        /* A tab picked by hand while it was asked again is kept: it no longer jumps to Access under the finger. */
+        if (atAccess && $('panel').dataset.tab === tabShown) openChapter('access');
     }
     $('folders').addEventListener('click', () => {
         /* A tab chosen before on this device: that one. Never chosen: its Access chapter, as it always opened. */
@@ -7556,11 +7579,19 @@
             for (const [i, v] of known) d += `${d ? 'L' : 'M'}${((i / n) * 100).toFixed(1)},${(22 - (v / 100) * 20).toFixed(1)}`;
             const svg = svgEl('svg', { viewBox: '0 0 100 22', preserveAspectRatio: 'none', class: 'tile-spark', 'aria-hidden': 'true' });
             svg.append(svgEl('path', { d, 'vector-effect': 'non-scaling-stroke' })); t.append(svg);
-        }
+        } else t.append(el('span', 'tile-spark'));
         t.append(el('span', 'tile-sub', sub));
         t.setAttribute('aria-label', `${label}: ${percent === null ? '—' : `${Math.round(percent)} %`}, ${sub}`);
         return t;
     }
+    /* THE THREE TILES WHILE THEY ARE READ (14-11): their names, « … » where the figures go, bones for the bar and
+       the line -- the size they will have, never a figure made up. */
+    const handTilesLoading = () => [uiSaid('set-memory', 'Memory'), uiSaid('set-disk', 'Disk'), uiSaid('set-cpu', 'CPU')].map((label) => {
+        const t = el('div', 'tile'); t.dataset.loading = '';
+        const k = el('span', 'tile-k'); k.append(el('b', '', label), el('span', 'tile-n', '…'));
+        t.append(k, KIT.Bone({ cls: 'tile-bar' }), KIT.Bone({ cls: 'tile-spark' }), el('span', 'tile-sub', '…'));
+        return t;
+    });
     const lastOf = (values) => { for (let i = (values?.length ?? 0) - 1; i >= 0; i -= 1) if (values[i] !== null && values[i] !== undefined) return values[i]; return null; };
     const handHistory = async (of) => (of ? fetch(`${API}/history?of=${encodeURIComponent(of)}&span=1h`).then((x) => (x.ok ? x.json() : null)).catch(() => null) : null);
     /* A chip: a dot of its state and a word -- only when it says something. */
@@ -7568,6 +7599,16 @@
 
     /* The server's: under the top bar of Settings. */
     let lastServer = null;
+    /* Shown at once as Settings opens, at its final size: the tiles and a chip still being read. */
+    let handFactsRead = false;
+    function settingsHandLoading() {
+        if (DEVICE) return;
+        $('settings-hand').hidden = false;
+        const tiles = $('settings-tiles');
+        if (!tiles.children.length) { tiles.replaceChildren(...handTilesLoading()); tiles.hidden = false; KIT.loading(tiles); }
+        const facts = $('settings-facts');
+        if (!facts.children.length) { handFactsRead = false; facts.replaceChildren(KIT.Bone({ cls: 'hand-chip' })); facts.hidden = false; KIT.loading(facts); }
+    }
     async function paintSettingsHand(r = lastServer) {
         if (DEVICE) return;
         lastServer = r;
@@ -7582,6 +7623,7 @@
         if (h) { const most = Math.max(0, ...(h.cpu ?? []).filter((v) => v !== null)); tiles.push(handTile(uiSaid('set-cpu', 'CPU'), cpu, uiSaid('set-highest', 'highest {n} % in 1 h', { n: Math.round(most) }), h.cpu, levelAt(cpu ?? 0))); }
         for (const t of tiles) t.addEventListener('click', go);
         $('settings-tiles').replaceChildren(...tiles); $('settings-tiles').hidden = tiles.length === 0;
+        KIT.loading($('settings-tiles'), false);
         paintSettingsFacts();
     }
     /* Its chips: the version, a conversation that is not well, a voice box away. */
@@ -7592,14 +7634,17 @@
         if (u?.installed) {
             if (u.available) chips.push(handChip('warn', uiSaid('set-update-out', '{v} is out', { v: u.available.version ?? u.available }), () => { openChapter('s-updates')?.scrollIntoView({ block: 'start' }); }));
             else if (u.version) chips.push(handChip('ok', uiSaid('set-up-to-date', 'Up to date · {v}', { v: u.version })));
-        }
+        } else if (u?.version) chips.push(handChip('ok', `Clavarium ${u.version}`));
         if (handWifi?.using?.ssid) chips.push(handChip('ok', uiSaid('set-wifi-on', 'Wi-Fi · {name}', { name: handWifi.using.ssid })));
         for (const c of conversations.filter((x) => (x.health?.problems ?? []).some((p) => p.level === 'warn' || p.level === 'bad'))) {
             const bad = c.health.problems.some((p) => p.level === 'bad');
             chips.push(handChip(bad ? 'bad' : 'warn', `${c.title || c.name} · ${uiSaid('set-not-well', 'not well')}`, () => select(c.name, { step: true })));
         }
         for (const b of (handBoxes ?? []).filter((x) => x.online === false)) chips.push(handChip('off', uiSaid('set-box-away', '{name} offline', { name: b.name })));
+        /* Nothing to say yet, while some is still read: its bone stays (the row does not come and go). */
+        if (!chips.length && !handFactsRead) return;
         $('settings-facts').replaceChildren(...chips); $('settings-facts').hidden = chips.length === 0;
+        KIT.loading($('settings-facts'), false);
     }
     let handBoxes = null;
     $('hand-check').addEventListener('click', () => { const sheet = $('settings'); sheet.showTab?.('automatic'); openChapter('s-updates'); $('updates-check').click(); $('settings-updates-top').scrollIntoView({ block: 'start' }); });
@@ -7644,11 +7689,13 @@
         const last = Array.isArray(events) ? events[0] : null;
         if (last) chapterNow('s-events', `${agoSaid(last.at)} · ${String(last.text).slice(0, 60)}`);
         handBoxes = await fetch(`${API}/boxes`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        handFactsRead = true;
         paintSettingsFacts();
     }
     for (const d of document.querySelectorAll('#settings details.chapter')) d.addEventListener('toggle', () => { if (!d.open) void paintSettingsStates(); });
     async function openSettings({ push = true } = {}) {
         enterPlace('settings', push);
+        settingsHandLoading(); serverLoading();
         void paintSettingsFeatures().catch(() => {});
         void paintAlerts().catch(() => {});
         void paintWords().catch(() => {});
@@ -8168,6 +8215,7 @@
        what can be done -- move the machines to it, mount it, prepare (erase) it -- or why not. */
     async function paintMoveMachines() {
         const size = (mb) => (mb >= 1024 * 1024 ? `${(mb / 1024 / 1024).toFixed(1)} TB` : GB(mb));
+        listLoading($('move-machines-rows'), 'move-machines', 2);
         const [p, m] = await Promise.all([fetch(`${API}/machines/disks`).then((r) => (r.ok ? r.json() : null)).catch(() => null), fetch(`${API}/machines/moving`).then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
         const old = await fetch(`${API}/machines/places`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const rows = $('move-machines-rows'); rows.replaceChildren();
@@ -8255,7 +8303,7 @@
         }
         if (!p.disks.some((d) => !d.system)) rows.append(el('p', 'hint', 'No other disk: plug one in (or add one to this server), then open this again.'));
     }
-    $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines(); });
+    $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines().finally(() => KIT.loading($('move-machines-rows'), false, 'move-machines')); });
     /* NETWORK: this server's Wi-Fi (server/wifi.mjs). The networks it sees, the one it is on, another
        joined with its password, one it keeps forgotten. A join only STARTS a switch: the host goes back
        to the network before by itself when the new one does not work within a minute -- this page may
@@ -8461,6 +8509,7 @@
     let eventsShown = []; let eventsAsk = 0;
     async function paintEvents({ more = false } = {}) {
         const ask = ++eventsAsk;
+        if (!more) listLoading($('events-list'), 'events', 6);
         const before = more && eventsShown.length ? eventsShown.at(-1).at : '';
         const q = new URLSearchParams({ kind: $('events-kind').value, q: $('events-q').value.trim(), limit: '100', ...(before ? { before } : {}) });
         const got = await fetch(`${API}/events?${q}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -8485,6 +8534,7 @@
             if (e.who && !e.text.includes(e.who)) li.append(el('span', 'event-who', e.who));
             list.append(li);
         }
+        KIT.loading(list, false, 'events');
         $('events-said').textContent = eventsShown.length ? '' : 'Nothing yet.';
         $('events-more').hidden = got.length < 100;
     }
@@ -8503,6 +8553,7 @@
     async function paintJobsChapter() {
         clearTimeout(jobsTimer);
         if (!$('settings-jobs-top').open) return;
+        listLoading($('jobs-list'), 'jobs', 2);
         const got = await fetch(`${API}/jobs`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         if (!got) { $('jobs-said').textContent = uiSaid('set-jobs-unread', 'Cannot be read just now'); return; }
         const line = (j, result) => {
@@ -8521,7 +8572,7 @@
         const parts = [];
         if (got.running.length) parts.push(el('h3', '', uiSaid('set-jobs-running', 'Under way')), ...got.running.map((j) => line(j, 'running')));
         if (got.done.length) parts.push(el('h3', '', uiSaid('set-jobs-today', 'Today')), ...got.done.map((j) => line(j, j.result === 'done' ? 'done' : 'failed')));
-        $('jobs-list').replaceChildren(...parts);
+        $('jobs-list').replaceChildren(...parts); KIT.loading($('jobs-list'), false, 'jobs');
         $('jobs-said').textContent = parts.length ? '' : uiSaid('set-jobs-none', 'Nothing today');
         if (got.running.length) jobsTimer = setTimeout(() => { void paintJobsChapter(); }, 5000);
     }
@@ -8634,6 +8685,22 @@
         if (r.marks?.length) box.append(el('small', 'hint curve-legend curve-legend-oom', `● ${r.marks.length === 1 ? 'a program was' : `${r.marks.length} times a program was`} stopped for lack of memory`));
         return box;
     }
+    /* Its three curves while they are read (14-11): their names, « … », a bone where each line goes -- the size
+       they will have; those of another machine are never left in sight meanwhile. The server's say its reserve. */
+    function curvesLoading(box, of = box.dataset.of) {
+        if (DEVICE || !of || box.dataset.drawn === of) return;
+        box.dataset.drawn = of;
+        box.querySelector('.curves-row').replaceChildren(...CURVES.map(([key, label]) => {
+            const f = el('figure', 'curve'); f.dataset.measure = key; f.dataset.loading = '';
+            const head = el('figcaption', 'curve-head'); head.append(el('b', '', label), el('span', 'curve-now', '…'), el('span', 'curve-max', ''));
+            const plot = el('div', 'curve-plot'); plot.append(KIT.Bone());
+            const foot = el('div', 'curve-foot'); foot.append(el('span', '', '\u00a0'));
+            f.append(head, plot, foot);
+            if (of === 'server' && key !== 'cpu') f.append(el('small', 'hint curve-legend', '\u00a0'));
+            return f;
+        }));
+        box.hidden = false; KIT.loading(box);
+    }
     const curvesAt = new WeakMap();
     async function paintCurves(box, { force = false } = {}) {
         const of = box.dataset.of; if (!of) { box.hidden = true; return; }
@@ -8641,10 +8708,12 @@
         const was = curvesAt.get(box);
         if (!force && was && was.of === of && was.span === span && Date.now() - was.at < 30_000) return;
         curvesAt.set(box, { of, span, at: Date.now() });
+        curvesLoading(box, of);
         const r = await fetch(`${API}/history?of=${encodeURIComponent(of)}&span=${span}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
         if (box.dataset.of !== of) return;
-        box.hidden = !r; if (!r) return;
+        box.hidden = !r; if (!r) { delete box.dataset.drawn; curvesAt.delete(box); return; }
         box.querySelector('.curves-row').replaceChildren(...CURVES.map(([key, label]) => drawCurve(r, key, label)));
+        KIT.loading(box, false);
     }
     for (const box of document.querySelectorAll('.curves')) {
         box.querySelector('.curves-span').addEventListener('click', (event) => {
@@ -8896,6 +8965,39 @@
     addEventListener('resize', () => { clearTimeout(usageResize); usageResize = setTimeout(() => { const w = $('usage-plot').clientWidth; if (w !== usageWidth && $('settings-usage-top').open && $('usage').offsetParent !== null) paintUsageAll(); }, 80); });
     /* Kept current while in sight: a new look a minute. */
     setInterval(() => { if ($('settings-usage-top').open && $('usage').offsetParent !== null) void paintUsage(); }, 60_000);
+    /* RESOURCES WHILE THEY ARE READ (14-11): a disk and the memory, at the size they had the last time on this
+       device, bones in place of their bar, figures, donut and list -- never a figure made up. */
+    const partsBones = (n) => { const b = el('div', 'server-parts-bones'); for (let i = 0; i < n; i += 1) b.append(KIT.Bone({ w: i % 3 === 0 ? '70%' : '55%' })); return b; };
+    /* A list while it is read: a few bones, at the height it had the last time on this device. */
+    function listLoading(box, key, n = 3) {
+        if (box.children.length || box.getAttribute('aria-busy') === 'true') return;
+        const b = el(box.tagName === 'OL' || box.tagName === 'UL' ? 'li' : 'div', 'list-bones');
+        for (let i = 0; i < n; i += 1) b.append(KIT.Bone({ h: '1.4em', w: i % 2 ? '60%' : '80%' }));
+        box.replaceChildren(b); KIT.loading(box, true, key);
+    }
+    function serverLoading() {
+        if (DEVICE) return;
+        curvesLoading($('server-curves'));
+        const disks = $('server-disks');
+        if (!disks.children.length) {
+            const block = el('div', 'server-block'); block.dataset.loading = '';
+            const head = el('div', 'server-head'); head.append(el('b', '', uiSaid('set-disk', 'Disk')), el('span', 'server-figures', '…'));
+            const row = el('div', 'share-row'); row.append(KIT.Bone({ cls: 'share-donut' }), partsBones(5));
+            block.append(head, KIT.Bone({ cls: 'server-meter' }), el('p', 'server-note', '…'), row);
+            disks.replaceChildren(block); KIT.loading(disks, true, 'server-disks');
+        }
+        const mem = $('server-memory');
+        if (mem.hidden && !$('server-memory-figures').textContent) {
+            mem.hidden = false; mem.dataset.loading = '';
+            $('server-memory-figures').textContent = '…'; $('server-memory-note').textContent = '…';
+            $('server-memory-meter').classList.add('kit-bone');
+            $('server-memory-share').replaceChildren(KIT.Bone({ cls: 'share-donut' }));
+            $('server-memory-parts').replaceChildren(partsBones(4));
+            KIT.loading(mem, true, 'server-memory');
+        }
+        /* The reserve's lines, said once read: their room kept meanwhile. */
+        for (const id of ['reserve-now', 'promised-disk', 'promised-memory']) if (!$(id).textContent) { $(id).textContent = '…'; $(id).hidden = false; }
+    }
     async function paintServer() {
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
@@ -8922,7 +9024,7 @@
         promised($('promised-memory'), r.promised?.memory, (mb, total) => `Memory given to running machines: ${mb} of ${total}.`);
         $('server-unknown').hidden = r.known;
         $('server-disks').hidden = !r.disk; $('server-memory').hidden = !r.memory;
-        if (r.disk) paintDisks(r);
+        if (r.disk) { paintDisks(r); KIT.loading($('server-disks'), false, 'server-disks'); }
         if (r.memory) {
             const mem = r.memory;
             $('server-memory-figures').textContent = `${GB(mem.freeMb)} free of ${GB(mem.totalMb)}`;
@@ -8939,6 +9041,8 @@
                 ...named.map(({ key, label, x }) => [label, x.sizeMb ? `uses ${GB(x.rssMb)} · given ${GB(x.sizeMb)}` : `uses ${GB(x.rssMb)}`, true, share.slot.get(key)]),
                 ['The system and other programs', rest, false, 'rest'],
             ]);
+            delete $('server-memory').dataset.loading; $('server-memory-meter').classList.remove('kit-bone');
+            KIT.loading($('server-memory'), false, 'server-memory');
         }
         /* Still measuring: looked at again in a moment, while Settings is open. */
         if ((r.measuring || !r.usage) && !$('settings').hidden) serverTimer = setTimeout(() => { void paintServer(); }, 4000);
@@ -8969,6 +9073,7 @@
     async function paintMachines() {
         clearTimeout(machinesTimer);
         if (DEVICE) { $('settings-ch-machines').hidden = true; return; }
+        listLoading($('machines-rows'), 'machines', 2);
         const r = await fetch(`${API}/server/machines`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
         $('settings-ch-machines').hidden = !r;
         if (!r) return;
@@ -8992,6 +9097,7 @@
             row.append(what, acts);
             rows.append(row);
         }
+        KIT.loading(rows, false, 'machines');
         /* The machine manager: does it answer, since when not, waiting for its owner, the last restart. */
         const g = r.manager;
         const ml = $('manager-line');

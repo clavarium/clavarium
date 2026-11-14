@@ -81,7 +81,7 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     assert.deepEqual(await lists.locator('.binder-tabs [role="tab"]').evaluateAll((tabs) => tabs.map((x) => x.dataset.list)), ['batches']);
 
     /* Taken back, in Assets: the tab goes. */
-    await page.locator('#nav-assets').click();
+    await me.nav('assets');
     await kind.locator('.as-row', { hasText: 'Batches' }).click();
     await page.locator('#assets-detail .as-users:not(.as-picker) .given-row[data-conversation="coder"] button', { hasText: 'None' }).click();
     await me.until('taken back', async () => !(await me.api('/api/binder', { op: 'lists', args: {} })).body.data.find((l) => l.id === 'batches').grants['conversation:coder']);

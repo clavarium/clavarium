@@ -10,7 +10,7 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     const at = join(process.env.FAKE_VM_DIR, 'update');
     const p = me.page;
     /* Run from a working tree: said, nothing offered. */
-    await p.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-updates');
     await me.until('the version is said', async () => /^Clavarium \S+/.test(await p.locator('#updates-version').innerText()));
     assert.equal(await p.locator('#updates-state').innerText(), 'Not installed with install.sh: no updates here.');
@@ -21,7 +21,7 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     writeFileSync(join(at, 'update.conf'), 'MODE=auto\nCHANNEL=latest\nWINDOW=02:00-05:00\nPORT=7717\n');
     writeFileSync(join(at, 'state.json'), JSON.stringify({ version: '0.1.0', releases: [{ id: '0.1.0', version: '0.1.0', current: true }], history: [], checkedAt: new Date().toISOString() }));
     await p.locator('#settings-close').click();
-    await p.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.until('installed', async () => (await p.locator('#updates-version').innerText()) === 'Clavarium 0.1.0');
     assert.equal(await p.locator('#updates-state').innerText(), 'Nothing newer to install · checked just now');
     assert.equal(await p.inputValue('#updates-mode'), 'auto');

@@ -78,8 +78,9 @@ async function walk(t, { phone }) {
         }
     };
     const inChat = async () => (await pressed('#view-chat')) && await shown('#simple');
-    /* On a wide screen the list folds when a conversation is opened (foldOnOpen): « » » brings it back, as a person would. */
-    const listOut = async () => { if (!phone && (await page.locator('#app').getAttribute('data-list')) === 'folded') await page.locator('#fold').click(); };
+    /* On a wide screen the list folds when a conversation, Settings, Assets, Access or « + » is opened (foldOnOpen, 14-11):
+       « » » brings it back, as a person would (bench.mjs unfold). */
+    const listOut = () => me.unfold();
     const openCoder = async () => {
         await listOut();
         await page.locator('#items .item', { hasText: 'coder' }).click();
@@ -240,9 +241,10 @@ async function walk(t, { phone }) {
     }
     /* A NEW CONVERSATION: a page of its own, as Settings; "+ New" stays marked; Back, Escape, Cancel and "<" close it. */
     if (phone) await until('the list', async () => shown('#new'));
-    await bothWays(() => page.locator('#new').click(), async () => (await shown('#newconv')) && new URL(page.url()).searchParams.get('open') === 'new' && (await page.locator('#new').getAttribute('aria-pressed')) === 'true',
+    await bothWays(async () => { await listOut(); await page.locator('#new').click(); }, async () => (await shown('#newconv')) && new URL(page.url()).searchParams.get('open') === 'new' && (await page.locator('#new').getAttribute('aria-pressed')) === 'true',
         async () => !(await shown('#newconv')) && new URL(page.url()).searchParams.get('open') === null && (await page.locator('#new').getAttribute('aria-pressed')) === 'false', 'a new conversation');
     for (const way of ['#newconv-cancel', '#newconv-close']) {
+        await listOut();
         await page.locator('#new').click();
         await until('the page of a new conversation', () => shown('#newconv'));
         assert.equal(await page.locator('#newconv-close').innerText(), '‹ Conversations');
@@ -250,6 +252,7 @@ async function walk(t, { phone }) {
         await until(`${way} closes it`, async () => !(await shown('#newconv')) && new URL(page.url()).searchParams.get('open') === null);
     }
     /* Access: all the devices, a step over the map. */
+    await listOut();
     await page.locator('#nav-access').click();
     await until('the map', async () => (await page.locator('#links-board .lk-node, #links-phone .lk-item').count()) > 0 || await shown('#map-all-devices'));
     await shot(page, `${tag}-access-map`);
@@ -263,7 +266,7 @@ async function walk(t, { phone }) {
     for (const [kind, title, word, opened] of [
         ['device', 'Devices', 'New device', () => shown('#share-compose')],
         ['conversation', 'Conversations', 'New conversation', () => shown('#newconv')],
-        ['asset', 'Assets', 'New asset', async () => (await shown('#assets')) && (await page.locator('#assets-detail .as-kinds button').count()) === 10],
+        ['asset', 'Assets', 'New asset', async () => (await shown('#assets')) && (await page.locator('#assets-detail .as-kinds button').count()) === 11],
     ]) {
         if (phone) await page.locator('#links-phone .lk-kinds button', { hasText: title }).click();
         const plus = page.locator(`#links [data-add="${kind}"] >> visible=true`);
@@ -285,6 +288,7 @@ async function walk(t, { phone }) {
     await page.locator('#sharing-close').click();
     await until('"< Access"', () => shown('#access-map'));
     /* From an asset of the Assets page: Back to that asset. */
+    await listOut();
     await page.locator('#nav-assets').click();
     await page.locator('#assets-rows .as-row[data-asset="folder:notes"]').click();
     await until('notes, in Assets', async () => /a=folder%3Anotes/.test(page.url()));
@@ -299,6 +303,7 @@ async function walk(t, { phone }) {
 
     /* A conversation picked while a page is open: the page gives way, with no step of it left behind. */
     if (!phone) {
+        await listOut();
         await page.locator('#nav-settings').click();
         await until('settings', () => shown('#settings'));
         await openCoder();

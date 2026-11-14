@@ -11,7 +11,8 @@ const shot = async (page, name) => { if (!SHOTS) return; mkdirSync(SHOTS, { recu
 test('the Chat tab of a conversation whose chat is off: said, turned on in one click, its tool asked; its terminal one click away', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('helper');
+    /* The chat is on from the start now (02-11): this one is made without it, unticked in « More ». */
+    await me.create('helper', 'Shell', { chat: false });
     await me.type('echo "The report is ready."');
     await me.sees('\nThe report is ready.');
     assert.equal(await me.page.locator('#simple').isVisible(), false, 'the terminal first, as always');

@@ -8,7 +8,8 @@ import { bench, SKIP } from './bench.mjs';
 test('a chat of 600 messages: the last 200 shown, "Earlier messages" brings 200 more where the reader was, the search finds an old one at its place, and a look after a new message does not fetch everything again', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('notes');
+    /* Made with its chat off (it is on from the start now, 02-11): its thread is written before it is turned on. */
+    await me.create('notes', 'Shell', { chat: false });
     /* Written before the chat is turned on: the server's own copy takes the thread as it was. */
     const bridge = join(b.dir, 'data', 'work', 'notes', '.parley');
     mkdirSync(bridge, { recursive: true });

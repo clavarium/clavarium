@@ -407,6 +407,7 @@ test('its watchdog in its Machine chapter; Settings, Machines: each machine, For
     await me.until('ask', async () => (await me.api('/api/server/machines')).body.manager.mode === 'ask');
     await me.page.locator('#pressure-way button[data-way="sleep"]').click();
     await me.until('sleep', async () => (await me.api('/api/server/machines')).body.pressure === 'sleep');
-    assert.equal(await me.page.locator('#pressure-way button[aria-pressed="true"]').innerText(), 'Sleep');
+    /* The server may say it before the page has painted its answer: waited for, not read at once. */
+    await me.until('Sleep is the one chosen', async () => (await me.page.locator('#pressure-way button[aria-pressed="true"]').innerText()) === 'Sleep');
     assert.deepEqual(me.errors, []);
 });

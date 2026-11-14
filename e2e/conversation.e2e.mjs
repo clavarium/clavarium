@@ -43,6 +43,8 @@ test('a conversation is created from the page, built, and its terminal answers',
     const [tab] = await Promise.all([me.page.context().waitForEvent('page', { timeout: 5000 }), (async () => { await me.page.mouse.move(row.x, row.y); await me.page.waitForTimeout(300); await me.page.mouse.click(row.x, row.y); })()]);
     assert.match(tab.url(), /^https:\/\/example\.com\/sign-in\/a{120}$/);
     await tab.close();
+    /* « + » folded the list (14-11): opened again, it lists the new one. */
+    await me.unfold();
     assert.deepEqual(await me.page.locator('#items .item b').allInnerTexts(), ['first-talk']);
     assert.deepEqual(me.errors, []);
 });

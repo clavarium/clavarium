@@ -40,6 +40,8 @@ test('away from the screen: the question of the tool is answered when all agree,
     await me.page.locator('#answerer-on button[data-on=true]').click();
     await me.until('it is on', async () => /0 answer\(s\) in a row of 5/.test(await me.page.locator('#answerer-state').innerText()));
     await me.page.goBack();
+    /* Settings folded the list (14-11): opened again, to read what its row says. */
+    await me.unfold();
     /* The tool asks; nobody types the answer. */
     await me.type('read -p "Shall I go on? (y/n) " a; echo "it got: $a"');
     await me.sees('it got: y', 30_000);

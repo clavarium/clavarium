@@ -10,9 +10,10 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     await me.create('writer');
     await me.type('pwd; echo "the report" > report.txt; mkdir drafts; echo ok');
     await me.sees('\nok');
-    /* Nothing was attached, nothing was asked of the tool: its work is there, the one thing in its Assets. */
+    /* Nothing was attached, nothing was asked of the tool: its work is there, in its Assets beside the USB device
+       of the browser every conversation may ask for (tethers.mjs, given « propose » to each). */
     await me.files('work');
-    assert.deepEqual(await me.page.locator('#cassets-rows .as-row').evaluateAll((l) => l.map((x) => x.dataset.asset)), ['folder:work']);
+    assert.deepEqual(await me.page.locator('#cassets-rows .as-row').evaluateAll((l) => l.map((x) => x.dataset.asset)), ['folder:work', 'connexion:usb-device']);
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('report.txt'));
     assert.equal(await me.page.locator('#files-import').isVisible(), true, 'and a file can be handed to the tool the same way');
     await me.page.locator('#files-rows .file', { hasText: 'report.txt' }).click();
@@ -102,7 +103,7 @@ test('the work of a conversation moves to a kept folder and back, with a warning
     await me.type('cat early.txt late.txt; echo both-there');
     await me.sees('made before the move\nmade after');
     await me.page.locator('#view-assets').click();
-    await me.until('no folder is shown', async () => /disk of its machine/.test(await me.page.locator('#cassets-rows').innerText()) && (await me.page.locator('#cassets-rows .as-row').count()) === 0);
+    await me.until('no folder is shown', async () => /disk of its machine/.test(await me.page.locator('#cassets-rows').innerText()) && (await me.page.locator('#cassets-rows .as-row[data-asset^="folder:"]').count()) === 0);
     await me.page.locator('#view-terminal').click();
     /* A link made by the tool travels as a link. */
     await me.type('ln -s early.txt link-to-it; echo linked');
