@@ -1345,6 +1345,14 @@
           <button type="button" id="events-more" hidden>Show older</button>
           </div>
         </details>
+        <!-- WHAT IT DID TODAY: the day's jobs (server/jobs.mjs), under way first; each opens to its log. -->
+        <details class="chapter" id="settings-jobs-top" data-chapter="s-jobs">
+          <summary><span class="chapter-title" data-said="set-ch-s-jobs">Jobs</span><span class="chapter-about">Builds, copies, moves, step by step.</span></summary>
+          <div class="chapter-body">
+          <div id="jobs-list" class="jobs-list" aria-live="polite"></div>
+          <p class="hint" id="jobs-said" role="status"></p>
+          </div>
+        </details>
         <!-- WHAT THE SERVER'S PROGRAMS SAID, to read, copy whole or keep (server/serverlogs.mjs);
              and this server started again. -->
         <details class="chapter" id="settings-logs-top" data-chapter="s-logs">

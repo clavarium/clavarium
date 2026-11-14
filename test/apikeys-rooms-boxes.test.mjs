@@ -211,7 +211,8 @@ test('MCP: the tools listed; rooms and boxes refused as the API refuses them; jo
     const mcp = (body) => call(opts, { method: 'POST', path: '/api/ext/mcp', secret: key.secret, body: { jsonrpc: '2.0', id: 1, ...body } });
     const tool = (name, args) => mcp({ method: 'tools/call', params: { name, arguments: args } });
     const listed = (await mcp({ method: 'tools/list' })).body.result.tools.map((x) => x.name);
-    assert.deepEqual(listed, TOOLS.map((x) => x.name));
+    /* All but those that need a scope of the server this key was not given. */
+    assert.deepEqual(listed, TOOLS.map((x) => x.name).filter((n) => !['clavarium_status', 'clavarium_jobs', 'clavarium_job_log', 'clavarium_room_create'].includes(n)));
     for (const n of ['clavarium_rooms', 'clavarium_room_read', 'clavarium_room_say', 'clavarium_boxes', 'clavarium_box_say']) assert.ok(listed.includes(n), n);
     assert.deepEqual((await tool('clavarium_rooms', {})).body.result.structuredContent.rooms.map((r) => r.name), ['La maison']);
     assert.equal((await tool('clavarium_room_read', { room: house.id, last: 5 })).status, 200);

@@ -8340,6 +8340,43 @@
         $('events-more').hidden = got.length < 100;
     }
     $('settings-events-top').addEventListener('toggle', () => { if ($('settings-events-top').open) void paintEvents(); });
+    /* JOBS (jobs.mjs): the day's, under way first, as in the badge's list; a line opened reads its log
+       (GET /api/jobs/log), kept open when the list is read again -- every 5 s while one is under way. */
+    let jobsTimer; const jobsOpen = new Set();
+    const jobClock = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    async function paintJobLog(box, id) {
+        const got = await fetch(`${API}/jobs/log?id=${encodeURIComponent(id)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const list = el('ol', 'job-log');
+        for (const line of got?.log ?? []) { const li = el('li'); const when = el('time', '', jobClock(line.at)); when.dateTime = line.at; li.append(when, el('span', '', line.text)); list.append(li); }
+        if (!list.children.length) list.append(el('li', 'hint', got ? uiSaid('set-jobs-nolog', 'Nothing logged') : uiSaid('set-jobs-unread', 'Cannot be read just now')));
+        box.querySelector('.job-log')?.remove(); box.append(list);
+    }
+    async function paintJobsChapter() {
+        clearTimeout(jobsTimer);
+        if (!$('settings-jobs-top').open) return;
+        const got = await fetch(`${API}/jobs`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!got) { $('jobs-said').textContent = uiSaid('set-jobs-unread', 'Cannot be read just now'); return; }
+        const line = (j, result) => {
+            const box = el('details', 'job-line'); box.dataset.result = result;
+            const sum = el('summary');
+            sum.append(el('span', '', result === 'running' ? '⟳' : result === 'done' ? '✓' : '✗'), el('span', '', j.what),
+                el('small', '', result === 'running' ? (j.step || uiSaid('set-jobs-starting', 'Starting')) : [j.why, j.endedAt ? jobClock(j.endedAt) : ''].filter(Boolean).join(' · ')));
+            box.append(sum);
+            /* Clavarium's own updates have no log here: their story is in Updates. */
+            if (!j.id) { sum.addEventListener('click', (event) => event.preventDefault()); return box; }
+            box.dataset.job = j.id;
+            box.addEventListener('toggle', () => { if (box.open) { jobsOpen.add(j.id); void paintJobLog(box, j.id); } else jobsOpen.delete(j.id); });
+            if (jobsOpen.has(j.id)) box.open = true;
+            return box;
+        };
+        const parts = [];
+        if (got.running.length) parts.push(el('h3', '', uiSaid('set-jobs-running', 'Under way')), ...got.running.map((j) => line(j, 'running')));
+        if (got.done.length) parts.push(el('h3', '', uiSaid('set-jobs-today', 'Today')), ...got.done.map((j) => line(j, j.result === 'done' ? 'done' : 'failed')));
+        $('jobs-list').replaceChildren(...parts);
+        $('jobs-said').textContent = parts.length ? '' : uiSaid('set-jobs-none', 'Nothing today');
+        if (got.running.length) jobsTimer = setTimeout(() => { void paintJobsChapter(); }, 5000);
+    }
+    $('settings-jobs-top').addEventListener('toggle', () => { void paintJobsChapter(); });
     $('events-kind').addEventListener('change', () => { void paintEvents(); });
     let eventsTyping;
     $('events-q').addEventListener('input', () => { clearTimeout(eventsTyping); eventsTyping = setTimeout(() => { void paintEvents(); }, 250); });

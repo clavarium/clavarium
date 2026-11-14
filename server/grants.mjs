@@ -35,7 +35,8 @@
  * in the table: the owner may do everything, always.
  *
  * An API key is not a device and not a conversation: it is given only what
- * its scopes name -- "server:status" (read), "server:rooms" (make rooms), and conversations one by one,
+ * its scopes name -- "server:status" (read), "server:jobs" (read its jobs and their logs), "server:rooms"
+ * (make rooms), and conversations one by one,
  * their chat to read ("r") or to talk in ("rw"), never their terminal ("x")
  * -- rooms one by one, their thread to read ("r") or to post in ("rw"), and
  * voice boxes one by one, their state ("r") or a short text said aloud
@@ -63,10 +64,10 @@
 import { Refusal } from './conversations.mjs';
 
 export const RIGHTS = Object.freeze({ conversation: 'rwxm', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'rw', room: 'rwm', box: 'rw' });
-/* What each of the server's own assets takes: its state is read, rooms are made. */
-const SERVER_RIGHTS = Object.freeze({ 'server:status': 'r', 'server:rooms': 'w' });
+/* What each of the server's own assets takes: its state and its jobs are read, rooms are made. */
+const SERVER_RIGHTS = Object.freeze({ 'server:status': 'r', 'server:jobs': 'r', 'server:rooms': 'w' });
 const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|(pairing|apikey):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
-const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$|^server:(status|rooms)$|^(room|box):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$|^server:(status|jobs|rooms)$|^(room|box):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export const typeOf = (asset) => String(asset).split(':')[0];
 export const nameOf = (asset) => String(asset).slice(String(asset).indexOf(':') + 1);

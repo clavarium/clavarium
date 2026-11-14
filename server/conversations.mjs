@@ -14,9 +14,9 @@ import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { availableParallelism } from 'node:os';
 import { spawn } from 'node:child_process';
-import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, copyFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -938,7 +938,10 @@ export class Conversations {
        from its machine, a manifest first (clavarium-conversation.json: its tool, its name, its size). Nothing
        of the tool is known here: any tool that says where its state is can be exported, imported, moved.
        The machine must run (its home is in it). -> { name: the file's name, stream } */
-    async exportState(name) {
+    /* `toWork` (14-11): the archive written into its own work folder (/work/.clavarium-carry/<toWork>.tgz), that
+       the server reads on its side, rather than sent out through the VM manager's output -- which stalled for good
+       past ~36 KB on the owner's server. Its output is then empty. */
+    async exportState(name, { toWork } = {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         const tool = this.#tools.find((t) => t.id === c.tool);
@@ -949,13 +952,15 @@ export class Conversations {
            (a path it has not made yet left out), the cache left out. */
         /* (Its paths are plain -- letters, digits, . _ / - -- checked by tools.mjs: given as words.) */
         /* A reading of an earlier try that never ended (14-11: three left, each holding its pipe): ended first. */
-        const script = 'for p in $(pgrep -f "^tar -czf - --warning=no-file-changed -C /tmp/"); do kill $p 2>/dev/null; done; m=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+        const script = 'for p in $(pgrep -f "^tar -czf .* clavarium-conversation.json"); do kill $p 2>/dev/null; done; m=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
             + 'ex=""; for a in $2; do ex="$ex --exclude=./$a"; done; ks=""; for a in $3; do if [ -e "$HOME/$a" ]; then ks="$ks ./$a"; fi; done; '
-            + 'rc=0; tar -czf - --warning=no-file-changed -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks || rc=$?; rm -rf "$m"; '
+            + 'out=-; if [ -n "$4" ]; then mkdir -p /work/.clavarium-carry && out="/work/.clavarium-carry/$4.tgz"; fi; '
+            + 'rc=0; tar -czf "$out" --warning=no-file-changed -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks || rc=$?; rm -rf "$m"; '
             /* 1: a file changed while read (its tool writing its log as it is read, 14-11: a live Claude Code): the
                archive is whole all the same -- what was there, read; only a real error (2) fails. */
             + '[ "$rc" -le 1 ]';
-        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' ')]);
+        const id = typeof toWork === 'string' && /^[a-z0-9-]{1,64}$/.test(toWork) ? toWork : '';
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' '), id]);
         const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
         /* What it said when it failed: kept short, for the message that says why (a copy, a move). */
         child.said = '';
@@ -977,19 +982,35 @@ export class Conversations {
 
     /* An exported state unpacked into its home (its tool stopped by the caller): its manifest checked, then each
        part put in place of the old. -> the manifest's { name, at }, or null. */
+    /* `input`: a stream, sent through the VM manager's input; or the path of a file here -- then, when it has a work
+       folder here, put there and read from it in its machine (14-11: the VM manager's channel failed past a few tens
+       of KB on the owner's server, both ways). */
     async #unpack(name, toolId, input) {
+        let viaWork = '';
+        let source = input;
+        const workDir = typeof input === 'string' && this.#store.get(name)?.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        if (workDir) {
+            const id = `in-${Date.now()}`;
+            viaWork = join(workDir, '.clavarium-carry', `${id}.tgz`);
+            mkdirSync(dirname(viaWork), { recursive: true });
+            copyFileSync(input, viaWork);
+            source = id;
+        } else if (typeof input === 'string') source = createReadStream(input);
+        try { return await this.#unpackFrom(name, toolId, source, Boolean(viaWork)); } finally { if (viaWork) rmSync(viaWork, { force: true }); }
+    }
+    async #unpackFrom(name, toolId, input, fromWork) {
         /* Unpacked aside first: its manifest read, its tool checked; then moved into the home. */
         /* Aside in the home itself (never /tmp, which may be memory): then each part moved in place of the old. */
-        const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; tar -xzf - -C "$m"; '
+        const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; if [ -n "$2" ]; then tar -xzf "/work/.clavarium-carry/$2.tgz" -C "$m"; else tar -xzf - -C "$m"; fi; '
             + 'grep -q "\\"kind\\":\\"clavarium-conversation\\"" "$m/clavarium-conversation.json" || { echo "not an exported conversation" >&2; exit 3; }; '
             + 'grep -q "\\"tool\\":\\"$1\\"" "$m/clavarium-conversation.json" || { echo "another tool" >&2; exit 4; }; '
             + 'cat "$m/clavarium-conversation.json"; rm -f "$m/clavarium-conversation.json"; '
             + 'for e in "$m"/.[!.]* "$m"/*; do if [ ! -e "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
-        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', toolId]);
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', toolId, fromWork ? input : '']);
         const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
         const out = []; const err = [];
         child.stdout.on('data', (d) => out.push(d)); child.stderr.on('data', (d) => err.push(d));
-        input.pipe(child.stdin);
+        if (fromWork) child.stdin.end(); else input.pipe(child.stdin);
         child.stdin.on('error', () => { /* it stopped reading: said below */ });
         const code = await new Promise((ok) => child.on('close', ok));
         if (code === 3) throw new Refusal(400, 'This is not an exported conversation.');
@@ -1065,37 +1086,52 @@ export class Conversations {
                 for (let attempt = 0; attempt < 2 && code !== 0; attempt++) {
                     if (attempt) await new Promise((ok) => setTimeout(ok, 10_000));
                     this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
-                    const out = await this.exportState(from);
+                    /* Through its work folder when there is one here (14-11): its folders put back first -- a machine
+                       started outside an opening may have them loose -- then its archive written there, its size read
+                       on this side as it grows. Else, as before, through the VM manager's output. */
+                    const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(from) : '';
+                    const carryId = workDir ? `copy-${to}-${Date.now()}` : '';
+                    const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
+                    if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(from, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+                    const out = await this.exportState(from, inWork ? { toWork: carryId } : {});
                     child = out.child;
                     let read = 0; let lastAt = Date.now(); let stalled = false;
-                    out.stream.on('data', (d) => { read += d.length; lastAt = Date.now(); say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); });
+                    const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); };
+                    if (inWork) out.stream.resume(); else out.stream.on('data', (d) => grew(read + d.length));
+                    const sizing = inWork ? setInterval(() => { try { grew(statSync(inWork).size); } catch { /* not there yet */ } }, 1000) : null;
                     /* Nothing comes for a while: said, with how long; for too long, the reading is ended and why said --
                        never an endless wait nobody can read (14-11: stuck at "36 KB read"). */
                     /* Quiet for 30 s: its machine asked, once, what its reading does -- the file it is on and its state
-                       (D: waiting on the disk), its load, its free memory -- or said not to answer at all. Said with the
-                       wait, and in the end's why (14-11: stuck at 36 KB on the owner's server, never here). */
+                       (D: waiting on the disk), its load, its free memory -- or said not to answer at all. Written to the
+                       copy's job log; the screen and the end's why stay short (14-11: stuck at 36 KB on the owner's server, never here). */
                     let seen = '';
                     /* Each tar and gzip: its state, what the kernel has it wait on (wchan), the file it holds and that
                        file's filesystem -- enough to tell a disk, a network mount or a pipe nobody empties. */
                     const probe = 'for p in $(pgrep -x tar) $(pgrep -x gzip); do f=$(ls -l /proc/$p/fd 2>/dev/null | grep -o "/home/[^ ]*" | tail -1); '
                         + 'echo "$(cat /proc/$p/comm) $p $(cut -d" " -f3 /proc/$p/stat) $(cat /proc/$p/wchan 2>/dev/null) ${f#$HOME/}${f:+ [$(stat -f -c %T "$f" 2>/dev/null)]}"; done; '
                         + 'echo "load $(cut -d" " -f1 /proc/loadavg)"; awk \'/MemAvailable/{print "free " int($2/1024) " MB"}\' /proc/meminfo';
-                    const ask = () => { seen = '…'; this.#vms.exec(from, ['sh', '-c', probe], { timeoutMs: 20_000 }).then((r) => { seen = r.code === 0 ? (r.stdout || '').trim().split('\n').join(', ').slice(0, 200) : 'its machine did not answer'; }, () => { seen = 'its machine did not answer'; }); };
+                    /* What it said goes to the copy's job log (jobs.mjs), read in Settings and by its AI -- not on screen. */
+                    const heard = (said) => { seen = said; this.jobs?.note(to, `Its original's reading: ${said}`); };
+                    const ask = () => { seen = '…'; this.#vms.exec(from, ['sh', '-c', probe], { timeoutMs: 20_000 }).then((r) => { heard(r.code === 0 ? (r.stdout || '').trim().split('\n').join(', ').slice(0, 200) : 'its machine did not answer'); }, () => { heard('its machine did not answer'); }); };
                     const watch = setInterval(() => {
                         const quiet = Math.round((Date.now() - lastAt) / 1000);
                         if (quiet >= COPY_QUIET_MS / 1000) { stalled = true; child.kill('SIGKILL'); return; }
                         if (quiet >= 30 && !seen) ask();
-                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s${seen && seen !== '…' ? ` (${seen})` : ''}`);
+                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s`);
                     }, 5000);
                     const failed = new Promise((ok) => child.on('error', () => ok(-1)));
-                    const file = createWriteStream(carried, { mode: 0o600 });
-                    out.stream.pipe(file);
-                    code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => clearInterval(watch));
+                    const file = inWork ? null : createWriteStream(carried, { mode: 0o600 });
+                    if (file) out.stream.pipe(file);
+                    code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => { clearInterval(watch); if (sizing) clearInterval(sizing); });
+                    /* Written in its work folder: taken from there, and the folder left as it was. */
+                    if (inWork) {
+                        try { if (code === 0 && !stalled) { copyFileSync(inWork, carried); grew(statSync(carried).size); } } finally { rmSync(inWork, { force: true }); }
+                    }
                     if (stalled) {
                         const now = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
-                        throw new Error(`its original stopped sending its tool's memory (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min; its machine is ${now ?? 'in a state that could not be read'}${seen && seen !== '…' ? `; it said: ${seen}` : ''})`);
+                        throw new Error(`its original stopped sending its tool's memory: ${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min, its machine ${now ?? 'unreadable'} (see its job's log in Settings)`);
                     }
-                    await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
+                    if (file) await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
                     if (code !== 255) break;
                 }
                 if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
@@ -1118,7 +1154,7 @@ export class Conversations {
                     if (started.code !== 0) throw new Error(`its machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
                 }
                 this.#store.patch(to, { step: `Putting ${tool.label}'s memory in the copy` });
-                await this.#unpack(to, c.tool, createReadStream(carried));
+                await this.#unpack(to, c.tool, carried);
             }
             this.#store.patch(to, { step: 'Giving it the same accesses' });
             await this.copyRights(from, to);
@@ -1212,7 +1248,7 @@ export class Conversations {
                 /* Not opened while its state is put back: building still, to the end. */
                 this.#store.patch(name, { phase: 'building', step: `Putting ${tool.label}'s state back` });
                 this.drop(name);
-                try { await this.#unpack(name, c.tool, createReadStream(carried)); } catch (error) {
+                try { await this.#unpack(name, c.tool, carried); } catch (error) {
                     this.#store.patch(name, { phase: 'ready', step: undefined });
                     this.ready(name);
                     this.renewed(name, `Moved to the shared machine ${machine}, but ${tool.label}'s state did not come along (${error.message}): it starts afresh. Its old machine is kept, stopped.`, true);

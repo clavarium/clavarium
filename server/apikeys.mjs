@@ -9,6 +9,10 @@
  *   status    read the state: the server's memory, disk and CPU, the
  *             conversations (their free name and state, never what they
  *             say), the versions                              server:status r
+ *   jobs      read what Clavarium does -- conversations built, copied,
+ *             moved, restarted, its own updates of the day -- and each
+ *             job's log, as Settings shows them (jobs.mjs; secrets
+ *             masked)                                         server:jobs r
  *
  *   a conversation, given ONE BY ONE (never "all, and those to come"):
  *     read    read its chat                                   conversation:<name> r
@@ -94,6 +98,8 @@
  *
  *   Authorization: Bearer clv_... on each of these:
  *   GET  /api/ext/v1/status                              the state, as JSON
+ *   GET  /api/ext/v1/jobs                                (jobs) what it does: {running, done}, newest first, without their logs
+ *   GET  /api/ext/v1/jobs/<id>                           (jobs) that job, under way or done today, with its log [{at, text}] (404: unknown)
  *   GET  /api/ext/v1/conversations                       those it may read: {conversations: [{id, name, level, chat}]}
  *   GET  /api/ext/v1/conversations/<name>/messages       ?last=1..200 (50) | ?since=<cursor>: {chat, messages, cursor}
  *   POST /api/ext/v1/conversations/<name>/messages       {text}: posted in its chat, signed with the key's name
@@ -117,7 +123,7 @@
  *   POST /api/ext/v1/binders/<list>/records/<id>/move    (write) {state}: never past a gate a person did not tick
  *   POST /api/ext/v1/binders/<list>/records/<id>/notes   (write) {text}
  *   POST /api/ext/v1/binders/<list>/records/<id>/archive|restore  (write)
- *   POST /api/ext/mcp                   the same as MCP tools (clavarium_status, clavarium_conversations,
+ *   POST /api/ext/mcp                   the same as MCP tools (clavarium_status, clavarium_jobs, clavarium_job_log, clavarium_conversations,
  *                                       clavarium_read, clavarium_say, clavarium_rooms, clavarium_room_read,
  *                                       clavarium_room_say, clavarium_boxes, clavarium_box_say, clavarium_conversation_wake,
  *                                       clavarium_conversation_sleep, clavarium_conversation_stop, clavarium_room_create,
@@ -125,6 +131,8 @@
  *                                       clavarium_reminder_cancel, clavarium_binders, clavarium_binder_records,
  *                                       clavarium_binder_record, clavarium_binder_add, clavarium_binder_edit,
  *                                       clavarium_binder_move, clavarium_binder_note, clavarium_binder_archive), JSON-RPC over HTTP
+ *                                       (Streamable HTTP, stateless, JSON answers; also at /api/ext/v1/mcp). A tool
+ *                                       that needs a scope (status, jobs, create rooms) is listed only to a key given it.
  *   A conversation, room, box or list not given, or not there, is the same 403: a key learns nothing of what it was not given.
  *
  * The front lets /api/ext/ through without sign-on, as it does /c/
@@ -155,6 +163,7 @@ export const EXT_PREFIX = '/api/ext/';
 
 /* The scopes a key may be given: [asset, rights] in the table. */
 export const SCOPES = Object.freeze({ status: { asset: 'server:status', rights: 'r', label: 'Its state (memory, disk, versions)' },
+    jobs: { asset: 'server:jobs', rights: 'r', label: 'Jobs: read what Clavarium does and its logs' },
     'create-rooms': { asset: 'server:rooms', rights: 'w', label: 'Create rooms' } });
 /* What a key may do in one conversation: [rights in the table]. */
 export const LEVELS = Object.freeze({ read: 'r', talk: 'rw', act: 'rwm' });
@@ -531,6 +540,8 @@ export function readPart(get) {
     return { last: String(last), ...(since ? { since } : {}) };
 }
 
+/* A job's id, as jobs.mjs makes it (its conversation and when it started). */
+const JOB_ID = /^[A-Za-z0-9_-]{1,120}$/;
 const MCP_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const MCP_BODY_MAX = 64 * 1024;
 const CONVERSATION_ARG = { type: 'string', description: 'The conversation\'s id, as clavarium_conversations gives it.' };
@@ -539,6 +550,20 @@ export const STATUS_TOOL = {
     title: 'Clavarium status',
     description: 'Read-only state of this Clavarium: server memory, disk and CPU; each conversation with its name and state (asleep, awake, working, needs-you); versions. No conversation content.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
+export const JOBS_TOOL = {
+    name: 'clavarium_jobs',
+    title: 'Jobs of this Clavarium',
+    description: 'Read-only: what this Clavarium does or did today -- conversations built, copied, moved, restarted, and its own updates -- as {running, done}, newest first, each with its id, what, start and end, result. No logs: clavarium_job_log gives one job\'s.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
+export const JOB_LOG_TOOL = {
+    name: 'clavarium_job_log',
+    title: 'Log of a job',
+    description: 'Read-only: one job, under way or done today, with its log (lines {at, text}).',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'The job\'s id, as clavarium_jobs gives it.' } }, required: ['id'], additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
 export const CONVERSATIONS_TOOL = {
@@ -671,8 +696,10 @@ export const BINDER_ARCHIVE_TOOL = tool('clavarium_binder_archive', 'Archive a r
     'Archive a record (or restore it: "restore": true). Never deleted: only a person deletes. The list must have been given to this key to write.',
     { binder: BINDER_ARG, record: RECORD_ARG, restore: { type: 'boolean' } }, ['binder', 'record'], true);
 const BINDER_TOOLS = [BINDERS_TOOL, BINDER_RECORDS_TOOL, BINDER_RECORD_TOOL, BINDER_ADD_TOOL, BINDER_EDIT_TOOL, BINDER_MOVE_TOOL, BINDER_NOTE_TOOL, BINDER_ARCHIVE_TOOL];
-export const TOOLS = [STATUS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE_TOOL, SLEEP_TOOL, STOP_TOOL, REMINDERS_TOOL, REMIND_TOOL, REMINDER_CANCEL_TOOL,
+export const TOOLS = [STATUS_TOOL, JOBS_TOOL, JOB_LOG_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE_TOOL, SLEEP_TOOL, STOP_TOOL, REMINDERS_TOOL, REMIND_TOOL, REMINDER_CANCEL_TOOL,
     ROOMS_TOOL, ROOM_READ_TOOL, ROOM_SAY_TOOL, ROOM_CREATE_TOOL, ROOM_CHANGE_TOOL, ROOM_REMOVE_TOOL, BOXES_TOOL, BOX_SAY_TOOL, ...BINDER_TOOLS];
+/* The tools that need a scope of the server: listed only to a key given it. */
+const TOOL_SCOPES = Object.freeze({ [STATUS_TOOL.name]: 'status', [JOBS_TOOL.name]: 'jobs', [JOB_LOG_TOOL.name]: 'jobs', [ROOM_CREATE_TOOL.name]: 'create-rooms' });
 
 /* Returns true when the request was under /api/ext/ (answered here). `status()`: the state, as statusOf
    makes it. `chats`: { list() -> [{ id, name }], read(name, part) -> talk.of's answer, chatOn(name),
@@ -686,8 +713,9 @@ export const TOOLS = [STATUS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE
    `events`: What happened (events.mjs), where each act is said with the key's name.
    07-11: `reminders`: { of(name) -> { on, plans: [{ id, text, cron, next }] }, set(name, { at, cron, text }, by) -> plan,
    cancel(name, plan) -> bool } -- a conversation's Docket (dockets.mjs). `binder`: { act(op, args, who) -> { ok, text, data } }
-   -- Binder's keeper, asked as the key (an agent): its rules are Binder's. */
-export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, reminders = null, binder = null, events = null, headers = {}, originOk = () => false, version = null }) {
+   -- Binder's keeper, asked as the key (an agent): its rules are Binder's.
+   14-11: `jobs`: { list() -> { running, done }, log(id) -> the job with its log | undefined } (jobs.mjs, withUpdates). */
+export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, reminders = null, binder = null, jobs = null, events = null, headers = {}, originOk = () => false, version = null }) {
     const url = new URL(request.url ?? '/', 'http://local');
     const { pathname } = url;
     if (!pathname.startsWith(EXT_PREFIX) && pathname !== EXT_PREFIX.slice(0, -1)) return false;
@@ -970,8 +998,36 @@ export async function handleExternal(request, response, { keys, status, chats = 
         binderSaid(id, list, `#${record} ${restore === true ? 'restored' : 'archived'}`);
         return { ok: true, record: recordRead(id, list, record).record };
     };
+    /* What Clavarium does (scope "jobs"), its texts masked as a room's are: a log line may quote what a program said. */
+    const mayJobs = (id) => { if (!keys.may(id, 'jobs')) throw Object.assign(new Refusal(403, `This key was not given the scope "${SCOPES.jobs.label}".`), { key: id }); };
+    const jobShown = ({ what, step, why, log, ...job }) => ({ ...job, what: masked(what), ...(step !== undefined ? { step: masked(step) } : {}), ...(why !== undefined ? { why: masked(why) } : {}),
+        ...(Array.isArray(log) ? { log: log.map((l) => ({ at: l.at, text: masked(l.text) })) } : {}) });
+    const jobsListed = (id) => {
+        mayJobs(id);
+        const { running = [], done = [] } = jobs?.list() ?? {};
+        return { running: running.map(jobShown), done: done.map(jobShown) };
+    };
+    const jobRead = (id, job) => {
+        mayJobs(id);
+        const found = typeof job === 'string' && JOB_ID.test(job) ? jobs?.log(job) : undefined;
+        if (!found) throw new Refusal(404, 'No such job (under way, or done today).');
+        return jobShown(found);
+    };
     const ownError = (error, id) => (error instanceof Refusal ? Object.assign(error, { key: error.key ?? id }) : error);
     try {
+        const jobRoute = /^\/v1\/jobs(?:\/([^/]+))?$/.exec(route);
+        if (jobRoute) {
+            if (request.method !== 'GET') return send(405, { error: 'Call this address with GET.' }, { allow: 'GET' });
+            let id;
+            try { id = keys.check(request.headers.authorization, 'jobs'); } catch (error) { return refused(error); }
+            try {
+                let job = '';
+                try { job = jobRoute[1] ? decodeURIComponent(jobRoute[1]) : ''; } catch { job = ''; }
+                const body = jobRoute[1] ? jobRead(id, job) : jobsListed(id);
+                note(id, 200);
+                return send(200, body);
+            } catch (error) { return refused(ownError(error, id)); }
+        }
         if (route === '/v1/status') {
             if (request.method !== 'GET') return send(405, { error: 'Call this address with GET.' }, { allow: 'GET' });
             let id;
@@ -1091,24 +1147,25 @@ export async function handleExternal(request, response, { keys, status, chats = 
                 return send(200, done);
             } catch (error) { return refused(ownError(error, id)); }
         }
-        if (route === '/mcp') {
+        /* MCP at /api/ext/mcp and, beside the API it speaks for, /api/ext/v1/mcp: the same. */
+        if (route === '/mcp' || route === '/v1/mcp') {
             if (request.method !== 'POST') return send(405, { error: 'MCP is spoken with POST here (no event stream).' }, { allow: 'POST' });
             let id;
-            try { id = keys.check(request.headers.authorization); } catch (error) { return refused(error, '/mcp'); }
+            try { id = keys.check(request.headers.authorization); } catch (error) { return refused(error, route); }
             let text = '';
-            for await (const piece of request) { text += piece; if (text.length > MCP_BODY_MAX) { note(id, 413, '/mcp'); return send(413, { error: 'Too long.' }); } }
+            for await (const piece of request) { text += piece; if (text.length > MCP_BODY_MAX) { note(id, 413, route); return send(413, { error: 'Too long.' }); } }
             /* A protocol version said in the header, and none spoken here: refused, as the spec asks (none said: the oldest assumed). */
             const said = request.headers['mcp-protocol-version'];
-            if (typeof said === 'string' && said && !MCP_VERSIONS.includes(said)) { note(id, 400, '/mcp'); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: `Unsupported MCP-Protocol-Version: ${said.slice(0, 20)} (spoken: ${MCP_VERSIONS.join(', ')})` } }); }
+            if (typeof said === 'string' && said && !MCP_VERSIONS.includes(said)) { note(id, 400, route); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: `Unsupported MCP-Protocol-Version: ${said.slice(0, 20)} (spoken: ${MCP_VERSIONS.join(', ')})` } }); }
             let msg;
-            try { msg = JSON.parse(text); } catch { note(id, 400, '/mcp'); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
+            try { msg = JSON.parse(text); } catch { note(id, 400, route); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
             if (!msg || typeof msg !== 'object' || Array.isArray(msg) || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
-                note(id, 400, '/mcp'); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
+                note(id, 400, route); return send(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
             }
             const args = msg.params?.arguments && typeof msg.params.arguments === 'object' && !Array.isArray(msg.params.arguments) ? msg.params.arguments : {};
             /* The journal says which tool, and on which conversation, room or box. */
-            const on = [args.conversation, args.room, args.box, args.binder].find((v) => typeof v === 'string');
-            const what = `/mcp ${msg.method.slice(0, 40)}${msg.method === 'tools/call' ? ` ${String(msg.params?.name ?? '').slice(0, 40)}${on ? ` ${on.slice(0, 36)}` : ''}` : ''}`;
+            const on = [args.conversation, args.room, args.box, args.binder, msg.params?.name === JOB_LOG_TOOL.name ? args.id : undefined].find((v) => typeof v === 'string');
+            const what = `${route} ${msg.method.slice(0, 40)}${msg.method === 'tools/call' ? ` ${String(msg.params?.name ?? '').slice(0, 40)}${on ? ` ${on.slice(0, 36)}` : ''}` : ''}`;
             /* A notification (no id) is taken, never answered. */
             if (msg.id === undefined || msg.id === null) { note(id, 202, what); response.writeHead(202, { ...headers, 'cache-control': 'no-store' }).end(); return true; }
             const answer = (result, code = 200) => { note(id, code, what); return send(200, { jsonrpc: '2.0', id: msg.id, result }); };
@@ -1119,10 +1176,11 @@ export async function handleExternal(request, response, { keys, status, chats = 
                 const asked = String(msg.params?.protocolVersion ?? '');
                 return answer({ protocolVersion: MCP_VERSIONS.includes(asked) ? asked : MCP_VERSIONS[0], capabilities: { tools: { listChanged: false } },
                     serverInfo: { name: 'clavarium', title: 'Clavarium', version: version ?? '0' },
-                    instructions: 'This Clavarium, as far as this key was given it: its state (clavarium_status), the conversations given to it (clavarium_conversations), to read (clavarium_read) or to talk in (clavarium_say); its rooms (clavarium_rooms, clavarium_room_read, clavarium_room_say); its voice boxes (clavarium_boxes; clavarium_box_say says a short text aloud in the home). Where it was given more: a conversation woken, put to sleep, its turn stopped (clavarium_conversation_wake, _sleep, _stop); rooms made, changed, removed (clavarium_room_create, clavarium_room_change, clavarium_room_remove); a conversation\'s reminders seen, set, taken back (clavarium_reminders, clavarium_remind, clavarium_reminder_cancel); binder lists read and written (clavarium_binders, clavarium_binder_records, clavarium_binder_record, clavarium_binder_add, _edit, _move, _note, _archive).' });
+                    instructions: 'This Clavarium, as far as this key was given it: its state (clavarium_status), what it does and each job\'s log (clavarium_jobs, clavarium_job_log), the conversations given to it (clavarium_conversations), to read (clavarium_read) or to talk in (clavarium_say); its rooms (clavarium_rooms, clavarium_room_read, clavarium_room_say); its voice boxes (clavarium_boxes; clavarium_box_say says a short text aloud in the home). Where it was given more: a conversation woken, put to sleep, its turn stopped (clavarium_conversation_wake, _sleep, _stop); rooms made, changed, removed (clavarium_room_create, clavarium_room_change, clavarium_room_remove); a conversation\'s reminders seen, set, taken back (clavarium_reminders, clavarium_remind, clavarium_reminder_cancel); binder lists read and written (clavarium_binders, clavarium_binder_records, clavarium_binder_record, clavarium_binder_add, _edit, _move, _note, _archive).' });
             }
             case 'ping': return answer({});
-            case 'tools/list': return answer({ tools: TOOLS });
+            /* A tool that needs a scope is shown only to a key given it (one called anyway is refused, 403). */
+            case 'tools/list': return answer({ tools: TOOLS.filter((x) => !TOOL_SCOPES[x.name] || keys.may(id, TOOL_SCOPES[x.name])) });
             case 'tools/call': {
                 const name = msg.params?.name;
                 if (!TOOLS.some((x) => x.name === name)) return fail(-32602, `Unknown tool: ${String(name ?? '').slice(0, 60)}`);
@@ -1130,6 +1188,11 @@ export async function handleExternal(request, response, { keys, status, chats = 
                     if (name === STATUS_TOOL.name) {
                         if (!keys.may(id, 'status')) throw new Refusal(403, `This key was not given the scope "${SCOPES.status.label}".`);
                         return result(await status());
+                    }
+                    if (name === JOBS_TOOL.name) return result(jobsListed(id));
+                    if (name === JOB_LOG_TOOL.name) {
+                        if (typeof args.id !== 'string') return fail(-32602, 'id: the id of a job, as clavarium_jobs gives it.');
+                        return result(jobRead(id, args.id));
                     }
                     if (name === CONVERSATIONS_TOOL.name) return result(listed(id));
                     if (name === ROOMS_TOOL.name) return result(roomsListed(id));
@@ -1187,7 +1250,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
             }
         }
         note(null, 404);
-        return send(404, { error: 'Not found. GET /api/ext/v1/status, /api/ext/v1/conversations, /api/ext/v1/rooms, /api/ext/v1/boxes, /api/ext/v1/binders, or MCP at /api/ext/mcp.' });
+        return send(404, { error: 'Not found. GET /api/ext/v1/status, /api/ext/v1/conversations, /api/ext/v1/rooms, /api/ext/v1/boxes, /api/ext/v1/jobs, /api/ext/v1/binders, or MCP at /api/ext/v1/mcp.' });
     } catch (error) {
         if (error instanceof Refusal) return refused(error);
         note(null, 500);

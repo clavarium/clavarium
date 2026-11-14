@@ -8,7 +8,7 @@
 import { cp, lstat } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
 
-export const NOT_COPIED = Object.freeze(['.docket', '.tether', '.binder', '.parley/pulse.json', '.parley/speakers.json', '.parley/restart-asked', '.parley/server.mjs']);
+export const NOT_COPIED = Object.freeze(['.docket', '.tether', '.binder', '.clavarium-carry', '.parley/pulse.json', '.parley/speakers.json', '.parley/restart-asked', '.parley/server.mjs']);
 
 /* Whether a path of the work folder (relative, '' for the folder itself) is copied. */
 export function copied(path) {
