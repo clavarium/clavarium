@@ -3864,6 +3864,7 @@
         const here = conversations.find((x) => x.name === current);
         if (document.activeElement !== $('chat-name')) $('chat-name').value = here?.chatName ?? '';
         void paintTasksBinder(here);
+        void paintChatSplit();
         if (document.activeElement !== $('title-name')) $('title-name').value = shownName(here);
         $('title-box').hidden = $('hide-box').hidden = $('group-box').hidden = DEVICE || !here;
         if (document.activeElement !== $('group-name')) $('group-name').value = here?.group ?? '';
@@ -3940,6 +3941,32 @@
         $('panel-error').hidden = true;
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/tasks-binder`, { binder: $('tasks-binder').value }); await refresh(); void paintTasks(current); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
+    /* WHEN ITS THREAD IS ARCHIVED (server/talk.mjs setSplit): a choice of a few; another value set elsewhere is shown as it is. */
+    const CHAT_SPLITS = [
+        ['messages:2000', () => uiSaid('set-split-2000', 'Every 2,000 messages')],
+        ['messages:5000', () => uiSaid('set-split-5000', 'Every 5,000')],
+        ['days:7', () => uiSaid('set-split-week', 'Every week')],
+        ['days:1', () => uiSaid('set-split-day', 'Every day')],
+        ['off', () => uiSaid('set-split-never', 'Never')],
+    ];
+    const splitKey = (v) => (v === false ? 'off' : v?.days ? `days:${v.days}` : `messages:${v?.messages ?? 5000}`);
+    async function paintChatSplit() {
+        const name = current;
+        const t = talkOf === name ? talk : await readTalk();
+        if (name !== current) return;
+        $('chat-split-row').hidden = !t?.on || t.split === undefined;
+        if ($('chat-split-row').hidden || document.activeElement === $('chat-split')) return;
+        const now = splitKey(t.split);
+        const choices = CHAT_SPLITS.some(([v]) => v === now) ? CHAT_SPLITS : [...CHAT_SPLITS, [now, () => now.replace(':', ' ')]];
+        $('chat-split').replaceChildren(...choices.map(([v, text]) => { const o = document.createElement('option'); o.value = v; o.textContent = text(); o.selected = v === now; return o; }));
+    }
+    $('chat-split').addEventListener('change', async () => {
+        const [kind, n] = $('chat-split').value.split(':');
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk/split`, kind === 'off' ? { off: true } : { [kind]: Number(n) }); await readTalk(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        $('chat-split').blur(); await paintChatSplit();
     });
     $('chat-name-form').addEventListener('submit', async (event) => {
         event.preventDefault();

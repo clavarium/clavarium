@@ -11,6 +11,9 @@ export const SETTINGS_WORDS_FR = {
     'set-ch-s-words': 'Écran du chat', 'set-ch-s-dictation': 'Dictée', 'set-ch-s-shortcuts': 'Raccourcis', 'set-ch-s-thread': 'Événements du chat',
     'set-ch-s-updates': 'Mises à jour', 'set-ch-s-binders': 'Classeurs', 'set-ch-s-events': 'Activité', 'set-ch-s-jobs': 'Tâches', 'set-ch-s-logs': 'Journaux',
     'set-ch-s-usage': 'Usage', 'set-ch-s-backup': 'Sauvegarde', 'set-ch-s-advanced': 'Avancé',
+    /* Chat › when its thread is archived (talk.mjs setSplit). */
+    'set-chat-split': 'Archiver son fil', 'set-split-2000': 'Tous les 2 000 messages', 'set-split-5000': 'Tous les 5 000',
+    'set-split-week': 'Chaque semaine', 'set-split-day': 'Chaque jour', 'set-split-never': 'Jamais',
     'set-check-updates': 'Chercher une mise à jour', 'set-activity': 'Activité', 'set-restart-dots': 'Redémarrer…', 'set-terminal': 'Terminal',
     'set-search': 'Chercher', 'set-why': 'Pourquoi',
     /* Diagnostics › Tâches (jobs.mjs): celles du jour, chacune avec son journal. */

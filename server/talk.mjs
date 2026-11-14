@@ -71,6 +71,9 @@ import { SOCKET } from './tmux.mjs';
 import { isConversationName } from './names.mjs';
 
 export const FOLDER = '.parley';
+/* What the owner may choose for archiving a thread (setSplit): messages from 500 to 100,000, days from half a day to a year. */
+export const SPLIT_MESSAGES = Object.freeze([500, 100_000]);
+export const SPLIT_DAYS = Object.freeze([0.5, 365]);
 const IN_MACHINE = `/work/${FOLDER}`;
 /* Texts this server gives the tool to read (keepText): kept this many days, this many at most of one name. */
 export const KEPT_TEXT_DAYS = 7;
@@ -352,11 +355,12 @@ export class Talk {
         /* The machine's lines go among the messages, where they happened. */
         const lines = (record.system ?? []).map((l) => ({ from: 'system', kind: 'system', choices: [], ...l }));
         const asked = partOf(part);
-        if (asked?.state) return { on: true, possible, tools, wake };
+        /* When its thread is archived (split), with the rest of its chat's state: a small file read. */
+        if (asked?.state) return { on: true, possible, tools, wake, split: this.split(name) };
         if (!asked) {
             const read = this.#parley(name).read();
             const messages = [...read.messages, ...lines].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-SHOWN_MAX);
-            return { on: true, possible, tools, ...read, messages, wake };
+            return { on: true, possible, tools, ...read, messages, wake, split: this.split(name) };
         }
         /* Its own lines change apart from the thread (and their buttons with what was marked seen): their stamp is part of the cursor. */
         const stamp = createHash('sha256').update(JSON.stringify([record.system ?? [], this.#health?.of?.(name)?.seenAt ?? null])).digest('hex').slice(0, 10);
@@ -374,6 +378,26 @@ export class Talk {
     search(name, text) {
         if (!this.of(name).on) throw new Refusal(409, 'Its chat is off.');
         return this.#parley(name).search(String(text ?? '').slice(0, 200));
+    }
+
+    /* WHEN ITS THREAD IS ARCHIVED (Parley's split, "The archive" in its protocol): its older messages go into
+       volumes, nothing deleted, every part still read as one thread. The owner's choice per conversation, kept in
+       its bridge folder (.parley/settings.json): { messages: N } once the thread holds N lines, { days: D } for
+       volumes of D days at most, or false (never). Parley's own default is { messages: 5000 }. */
+    split(name) { this.#known(name); return this.#parley(name).split(); }
+    setSplit(name, { messages, days, off } = {}) {
+        if (this.#known(name).work !== 'kept') throw new Refusal(409, 'Its work folder is not kept here: its chat has no thread to archive.');
+        let value;
+        if (off === true) value = false;
+        else if (messages !== undefined) {
+            if (!Number.isInteger(messages) || messages < SPLIT_MESSAGES[0] || messages > SPLIT_MESSAGES[1]) throw new Refusal(400, `"messages" is a whole number from ${SPLIT_MESSAGES[0]} to ${SPLIT_MESSAGES[1]}.`);
+            value = { messages };
+        } else if (days !== undefined) {
+            if (typeof days !== 'number' || !Number.isFinite(days) || days < SPLIT_DAYS[0] || days > SPLIT_DAYS[1]) throw new Refusal(400, `"days" is a number from ${SPLIT_DAYS[0]} to ${SPLIT_DAYS[1]}.`);
+            value = { days };
+        } else throw new Refusal(400, 'Say {messages}, {days} or {off: true}.');
+        this.#parley(name).setSplit(value);
+        return { split: this.split(name) };
     }
 
     /* What the tool reads of its chat after a restart (REREAD), the owner's choice of WINDOWS. */

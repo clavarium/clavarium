@@ -297,6 +297,8 @@
           <div class="chapter-body">
             <div id="talk-box">
             <form id="chat-name-form" class="set-row" autocomplete="off"><div class="set-what"><label for="chat-name">Its name in the chat</label><small id="chat-name-hint">Empty: "Assistant"</small></div><div class="set-control"><input id="chat-name" maxlength="40" placeholder="Assistant" spellcheck="false"><button type="submit">Save</button></div></form>
+            <!-- WHEN ITS THREAD IS ARCHIVED (Parley's split): older messages go into volumes, none deleted, still read and searched. -->
+            <div class="set-row" id="chat-split-row" hidden><div class="set-what"><label for="chat-split" data-said="set-chat-split">Archive its thread</label></div><div class="set-control"><select id="chat-split"></select></div></div>
             <div class="set-row" id="tasks-binder-row" hidden><div class="set-what"><label for="tasks-binder">Binder beside the chat</label><small class="tip" hidden>Automatic: its first binder of batches</small></div><div class="set-control"><select id="tasks-binder"></select></div></div>
             </div>
             <!-- DICTATION INTO ITS TERMINAL: marked once per message, so that the tool knows it may hold recognition mistakes. -->

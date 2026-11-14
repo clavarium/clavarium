@@ -70,7 +70,7 @@ test('the page asks for the end of its chat, the page before it, then only what 
     const plain = b.talk.of('helper');
     assert.equal(plain.messages.length, 200);
     assert.equal('cursor' in plain, false);
-    assert.deepEqual(Object.keys(b.talk.of('helper', new URLSearchParams({ state: '1' }))).sort(), ['on', 'possible', 'tools', 'wake']);
+    assert.deepEqual(Object.keys(b.talk.of('helper', new URLSearchParams({ state: '1' }))).sort(), ['on', 'possible', 'split', 'tools', 'wake'], 'its state alone, and when its thread is archived');
     /* The files on disk are whole. */
     assert.equal(readFileSync(join(b.bridge, 'from-agent.jsonl'), 'utf8').split('\n').filter(Boolean).length, 300);
 });
