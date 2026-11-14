@@ -184,6 +184,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await page.locator('#newconv-create').click();
             await until(`${name} is live`, async () => (await state()) === 'live', 30_000);
             await sees(tool === 'Shell' ? 'ready>' : 'other>');
+            /* « + » folds the list now (14-11), as any pick that changes the right pane: open again, as tests found it. */
+            if (await page.evaluate(() => document.getElementById('app')?.dataset.list === 'folded' && !document.getElementById('fold').hidden)) await page.locator('#fold').click();
             await fullSize(name);
         }
         /* Waits until the terminal in the machine has the page's size. A screen

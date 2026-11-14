@@ -101,6 +101,16 @@ test('the invitation: typed once in its terminal, English, Parley installed by t
     assert.equal(bare.talk.of('helper').tools, false);
 });
 
+test('the page\'s own send (quick): answered once written, its tool woken after, by itself (14-11)', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    const said = await b.talk.say('helper', 'Short and quick.', undefined, [], undefined, { quick: true });
+    assert.deepEqual(said, { ok: true, told: 'later' });
+    assert.equal(b.talk.of('helper').unread, 1, 'written before the answer');
+    await until('woken all the same', () => b.typed.length === 2);
+    assert.deepEqual(b.typed, [WAKE, 'Enter']);
+});
+
 test('the line that wakes it: typed once until it has read, and the message itself never', async (t) => {
     const b = bench(t);
     await b.talk.set('helper', true);

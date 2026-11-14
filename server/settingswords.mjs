@@ -135,7 +135,7 @@ export const SETTINGS_WORDS_FR = {
     'set-list-not-filed': 'Sans groupe', 'set-list-asks': 'vous demande', 'set-list-waits': 'vous attend',
     'set-list-asks-for': 'le répondeur vous demande', 'set-list-answered': 'a répondu à votre place',
     'set-list-wakeup': '1 réveil', 'set-list-wakeups': '{n} réveils', 'set-list-hidden': 'cachée',
-    'set-list-asleep': 'en veille', 'set-list-stopped': 'arrêtée',
+    'set-list-asleep': 'en veille', 'set-list-stopped': 'arrêtée', 'set-reaching': 'Je la retrouve :',
     'set-lent-page': 'Lue pour sa copie « {t} » · rien à faire', 'set-carry-down': 'Elle doit tourner pour exporter ou importer', 'set-list-starting': 'démarre', 'set-list-restarting': 'redémarre',
     'set-list-moving': 'déplace son travail', 'set-list-failed': 'en échec', 'set-list-you': 'Vous : {text}',
     'set-list-fewer': 'En montrer moins', 'set-list-more': 'En montrer {n} de plus',

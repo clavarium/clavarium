@@ -497,8 +497,13 @@ export class Talk {
     /* The rooms it is in, and who is there (#268): told to its agent, which answers there by their ids. */
     rooms(name, list) { try { this.#parley(name).setRooms(list); } catch { /* its folder is not there yet */ } }
 
+    /* Whether its chat is on, without reading the thread (`of` builds it all: too dear before each message). */
+    #on(name) { return this.#known(name).work === 'kept' && this.#store.get(name)?.on === true; }
+
+    /* `extra.quick` (the page's own send, 14-11): answered as soon as the message is written -- its tool told
+       after, by itself -- so that the message shows at once; the page draws the thread again anyway. */
     async say(name, text, answers, files, via, extra) {
-        if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
+        if (!this.#on(name)) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
         const given = files === undefined || files === null ? [] : files;
         if (!Array.isArray(given) || given.length > FILES_MAX) throw new Refusal(400, `A message has ${FILES_MAX} files at most.`);
         /* Only files put here by `attach`: their paths are this server's, and each is there. Each is
@@ -519,6 +524,7 @@ export class Talk {
         let said = text ?? '';
         if (this.#screen && said) { try { said = await this.#screen(name, said); } catch { said = text ?? ''; } }
         try { this.#parley(name).say(said, answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about, by: extra.by, room: extra.room } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        if (extra?.quick === true) { void this.#wake(name).catch(() => {}); return { ok: true, told: 'later' }; }
         const told = await this.#wake(name);
         return { ...this.of(name), told };
     }
