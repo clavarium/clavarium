@@ -1072,20 +1072,22 @@ export class Conversations {
                     /* Nothing comes for a while: said, with how long; for too long, the reading is ended and why said --
                        never an endless wait nobody can read (14-11: stuck at "36 KB read"). */
                     /* Quiet for 30 s: its machine asked, once, what its reading does -- the file it is on and its state
-                       (D: waiting on the disk), its load, its free memory -- or said not to answer at all. Said with the
-                       wait, and in the end's why (14-11: stuck at 36 KB on the owner's server, never here). */
+                       (D: waiting on the disk), its load, its free memory -- or said not to answer at all. Written to the
+                       copy's job log; the screen and the end's why stay short (14-11: stuck at 36 KB on the owner's server, never here). */
                     let seen = '';
                     /* Each tar and gzip: its state, what the kernel has it wait on (wchan), the file it holds and that
                        file's filesystem -- enough to tell a disk, a network mount or a pipe nobody empties. */
                     const probe = 'for p in $(pgrep -x tar) $(pgrep -x gzip); do f=$(ls -l /proc/$p/fd 2>/dev/null | grep -o "/home/[^ ]*" | tail -1); '
                         + 'echo "$(cat /proc/$p/comm) $p $(cut -d" " -f3 /proc/$p/stat) $(cat /proc/$p/wchan 2>/dev/null) ${f#$HOME/}${f:+ [$(stat -f -c %T "$f" 2>/dev/null)]}"; done; '
                         + 'echo "load $(cut -d" " -f1 /proc/loadavg)"; awk \'/MemAvailable/{print "free " int($2/1024) " MB"}\' /proc/meminfo';
-                    const ask = () => { seen = '…'; this.#vms.exec(from, ['sh', '-c', probe], { timeoutMs: 20_000 }).then((r) => { seen = r.code === 0 ? (r.stdout || '').trim().split('\n').join(', ').slice(0, 200) : 'its machine did not answer'; }, () => { seen = 'its machine did not answer'; }); };
+                    /* What it said goes to the copy's job log (jobs.mjs), read in Settings and by its AI -- not on screen. */
+                    const heard = (said) => { seen = said; this.jobs?.note(to, `Its original's reading: ${said}`); };
+                    const ask = () => { seen = '…'; this.#vms.exec(from, ['sh', '-c', probe], { timeoutMs: 20_000 }).then((r) => { heard(r.code === 0 ? (r.stdout || '').trim().split('\n').join(', ').slice(0, 200) : 'its machine did not answer'); }, () => { heard('its machine did not answer'); }); };
                     const watch = setInterval(() => {
                         const quiet = Math.round((Date.now() - lastAt) / 1000);
                         if (quiet >= COPY_QUIET_MS / 1000) { stalled = true; child.kill('SIGKILL'); return; }
                         if (quiet >= 30 && !seen) ask();
-                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s${seen && seen !== '…' ? ` (${seen})` : ''}`);
+                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s`);
                     }, 5000);
                     const failed = new Promise((ok) => child.on('error', () => ok(-1)));
                     const file = createWriteStream(carried, { mode: 0o600 });
@@ -1093,7 +1095,7 @@ export class Conversations {
                     code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => clearInterval(watch));
                     if (stalled) {
                         const now = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
-                        throw new Error(`its original stopped sending its tool's memory (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min; its machine is ${now ?? 'in a state that could not be read'}${seen && seen !== '…' ? `; it said: ${seen}` : ''})`);
+                        throw new Error(`its original stopped sending its tool's memory: ${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min, its machine ${now ?? 'unreadable'} (see its job's log in Settings)`);
                     }
                     await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
                     if (code !== 255) break;

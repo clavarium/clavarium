@@ -9,10 +9,13 @@ export const SETTINGS_WORDS_FR = {
     'set-ch-s-general': 'Général', 'set-ch-s-about': 'À propos', 'set-ch-s-screen': 'Écran', 'set-ch-s-alerts': 'Alertes',
     'set-ch-s-resources': 'Ressources', 'set-ch-s-operators': 'Administrateurs', 'set-ch-s-network': 'Réseau', 'set-ch-s-remote-screen': 'Écran à distance',
     'set-ch-s-words': 'Écran du chat', 'set-ch-s-dictation': 'Dictée', 'set-ch-s-shortcuts': 'Raccourcis', 'set-ch-s-thread': 'Événements du chat',
-    'set-ch-s-updates': 'Mises à jour', 'set-ch-s-binders': 'Classeurs', 'set-ch-s-events': 'Activité', 'set-ch-s-logs': 'Journaux',
+    'set-ch-s-updates': 'Mises à jour', 'set-ch-s-binders': 'Classeurs', 'set-ch-s-events': 'Activité', 'set-ch-s-jobs': 'Tâches', 'set-ch-s-logs': 'Journaux',
     'set-ch-s-usage': 'Usage', 'set-ch-s-backup': 'Sauvegarde', 'set-ch-s-advanced': 'Avancé',
     'set-check-updates': 'Chercher une mise à jour', 'set-activity': 'Activité', 'set-restart-dots': 'Redémarrer…', 'set-terminal': 'Terminal',
     'set-search': 'Chercher', 'set-why': 'Pourquoi',
+    /* Diagnostics › Tâches (jobs.mjs): celles du jour, chacune avec son journal. */
+    'set-jobs-running': 'En cours', 'set-jobs-today': 'Aujourd\'hui', 'set-jobs-none': 'Rien aujourd\'hui',
+    'set-jobs-starting': 'Démarrage', 'set-jobs-nolog': 'Rien de noté', 'set-jobs-unread': 'Illisible pour le moment',
     /* Diagnostics › « Vérifier les dossiers partagés » (health.mjs, linkguard.mjs). */
     'set-check-folders': 'Vérifier les dossiers partagés', 'set-looking': 'Vérification…',
     'set-fold-ok': '{path} : monté, lisible', 'set-fold-remounted': '{path} : détaché, remonté', 'set-fold-missing': '{path} : inaccessible',

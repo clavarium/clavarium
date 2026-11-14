@@ -1673,6 +1673,19 @@ svg.u-spark .u-oom { fill: var(--danger); stroke: var(--panel); stroke-width: 1.
 .event-conv { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .event-conv button { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 600px) { .event { grid-template-columns: 1fr auto auto; } .event-text, .event-who { grid-column: 1 / -1; } }
+/* Settings, Jobs: one line each, as in the badge's list; opened, its log, one line a step. */
+.jobs-list { display: flex; flex-direction: column; margin: 8px 0; font-size: .875rem; }
+.jobs-list h3 { margin: 10px 0 2px; font-size: .8125rem; color: var(--ink2); }
+.job-line { border-bottom: 1px solid var(--line); }
+.job-line > summary { display: grid; grid-template-columns: 16px 1fr; gap: 2px 8px; padding: 4px 0; cursor: pointer; list-style: none; }
+.job-line > summary::-webkit-details-marker { display: none; }
+.job-line > summary small { grid-column: 2; color: var(--ink2); overflow-wrap: anywhere; }
+.job-line[data-result="done"] > summary > span:first-child { color: var(--ok); }
+.job-line[data-result="failed"] > summary { color: var(--danger); }
+.job-log { list-style: none; margin: 0 0 6px 24px; padding: 0; font-size: .8125rem; }
+.job-log li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 8px; padding: 1px 0; }
+.job-log time { color: var(--ink2); font-variant-numeric: tabular-nums; }
+.job-log span { min-width: 0; overflow-wrap: anywhere; }
 /* The choices of Logs and What happened: as wide as their words, in the colours of the page. */
 .events-pick select, .logs-pick select { width: auto; max-width: 100%; background-color: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
 /* Needs you and Recent: a heading that folds its rows, with how many it holds. */
