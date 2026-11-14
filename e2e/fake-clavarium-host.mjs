@@ -452,7 +452,10 @@ if (area === 'vm') {
         /* A conversation carried elsewhere (#351): the server's own script, run in the machine's home here. */
         if (program === 'sh' && rest[0] === '-c' && (rest[2] === 'export' || rest[2] === 'import')) {
             const homeDir = inVm(vm, '/home/ubuntu'); mkdirSync(homeDir, { recursive: true });
-            const r = spawnSync('sh', rest, { env: { ...process.env, HOME: homeDir }, stdio: 'inherit' });
+            /* Its archive through its work folder (a copy, 14-11): the machine's /work is its work folder as the server
+               sees it -- never this computer's /work. */
+            const script = rest[1].replaceAll('/work/.clavarium-carry', `${join(DATA, 'work', vm.replace(/^clv-/, ''))}/.clavarium-carry`);
+            const r = spawnSync('sh', ['-c', script, ...rest.slice(2)], { env: { ...process.env, HOME: homeDir }, stdio: 'inherit' });
             process.exit(r.status ?? 1);
         }
         /* A copy's first start, and the look that its tool is there: each given

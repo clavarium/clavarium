@@ -199,13 +199,14 @@
         <details class="chapter" id="chapter-machine" data-chapter="machine">
           <summary><span class="chapter-title" data-said="set-ch-machine">Machine</span><span class="chapter-about">Health, size, restart.</span></summary>
           <div class="chapter-body">
+            <!-- WHERE IT RUNS (#221, 14-11): its own machine, or a shared one and who else lives there -- its stop or
+                 restart stops them too; Copy... and Move... open the wizard (#cm, below). -->
+            <div class="set-row" id="where-row" hidden><div class="set-what"><b data-said="set-where">Where it runs</b><small id="where-now"></small></div><div class="set-control"><button type="button" id="where-copy" data-said="set-where-copy">Copy…</button><button type="button" id="where-move" data-said="set-where-move">Move…</button></div></div>
             <!-- ITS CURVES: memory, CPU and disk over time (server/history.mjs). -->
             <div class="curves" id="machine-curves" data-of="" hidden>
               <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>
               <div class="curves-row"></div>
             </div>
-            <!-- IN A SHARED MACHINE (#221): which, and who else lives in it -- its stop or restart stops them too. -->
-            <p id="machine-shared" class="hint machine-shared" hidden></p>
             <p id="machine-restarted" class="hint" role="status" hidden></p>
             <div id="resume-box" hidden>
             <div class="set-row"><div class="set-what"><b>When its tool starts</b><small id="resume-hint">After a wake or restart</small></div><div class="set-control"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div></div>
@@ -234,26 +235,6 @@
               <select id="shared-memory"></select>
               <p class="hint" id="shared-size-hint">Restarts every conversation in it</p>
               <div class="row"><button type="submit" id="shared-size-apply">Change...</button></div>
-            </form>
-            <!-- MOVED INTO A SHARED MACHINE (#221, 12-11): its work and its tool's state along, its own machine deleted. -->
-            <form id="into-shared" autocomplete="off" hidden>
-              <label for="into-shared-name">Into a shared machine</label>
-              <input id="into-shared-name" maxlength="32" list="machine-names" placeholder="assistants" spellcheck="false" autocapitalize="off" autocomplete="off">
-              <label for="into-shared-mb" id="into-shared-mb-label">Its memory</label>
-              <select id="into-shared-mb"><option value="2048">2 GB</option><option value="4096" selected>4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option><option value="16384">16 GB</option></select>
-              <p class="hint" id="into-shared-hint">Trial · work and tool state come along</p>
-              <div class="row"><button type="submit" id="into-shared-apply">Move...</button></div>
-            </form>
-            <!-- A COPY OF IT (#221): its work, its AI's memory, its accesses; the original untouched. -->
-            <form id="copy-it" autocomplete="off" hidden>
-              <label for="copy-title">A copy of it</label>
-              <input id="copy-title" maxlength="60">
-              <label for="copy-where">Its machine</label>
-              <select id="copy-where"><option value="">Its own</option><option value="shared">A shared machine</option></select>
-              <input id="copy-machine" maxlength="32" list="machine-names" placeholder="assistants" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Shared machine" hidden>
-              <select id="copy-mb" aria-label="Its memory" hidden><option value="2048">2 GB</option><option value="4096" selected>4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option><option value="16384">16 GB</option></select>
-              <p class="hint" id="copy-hint">Work, AI memory and accesses · the original untouched</p>
-              <div class="row"><button type="submit" id="copy-apply">Copy...</button></div>
             </form>
             <div id="work-box">
             <div class="panel-top"><b>Where the tool works</b></div>
@@ -1509,6 +1490,42 @@
 <script src="/gitgraph.js"></script>
 <script src="/links.js"></script>
 <div id="jobs" class="jobs-pop" role="dialog" aria-label="Under way" hidden></div>
+<!-- COPY OR MOVE (#221, 14-11): a two-screen wizard over the page -- what and where, then what it does. Confirmed,
+     it closes at once and the job goes on in « under way »; its end said by the toast below. -->
+<dialog id="cm" aria-labelledby="cm-title">
+  <div class="cm-head"><div class="mascot cm-sheep" id="cm-sheep" aria-hidden="true"></div><h2 id="cm-title"></h2></div>
+  <div id="cm-choose">
+    <div class="cm-kinds" role="radiogroup" aria-label="Copy or move">
+      <button type="button" class="cm-card" data-kind="copy" role="radio" aria-checked="true"><b data-said="set-cm-copy">Copy</b><small data-said="set-cm-copy-what">This one stays as it is</small></button>
+      <button type="button" class="cm-card" data-kind="move" role="radio" aria-checked="false"><b data-said="set-cm-move">Move</b><small data-said="set-cm-move-what">The same conversation, another machine</small></button>
+    </div>
+    <p class="cm-label" data-said="set-where">Where it runs</p>
+    <div id="cm-places" class="cm-places" role="radiogroup" aria-label="Where it runs"></div>
+    <div id="cm-new" class="cm-new" hidden>
+      <input id="cm-new-name" maxlength="32" list="machine-names" placeholder="assistants" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Its name">
+      <select id="cm-new-mb" aria-label="Its memory"><option value="2048">2 GB</option><option value="4096" selected>4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option><option value="16384">16 GB</option></select>
+    </div>
+    <p class="cm-why" id="cm-why" role="alert" hidden></p>
+    <div class="cm-acts"><button type="button" id="cm-cancel" data-said="set-cm-cancel">Cancel</button><button type="button" class="primary" id="cm-next" data-said="set-cm-next">Next</button></div>
+  </div>
+  <div id="cm-check" hidden>
+    <div id="cm-copy-part">
+      <label class="cm-label" for="cm-copy-title" data-said="set-cm-copy-name">Name of the copy</label>
+      <input id="cm-copy-title" maxlength="60">
+      <ul class="cm-goes"><li data-said="set-cm-goes-work">Its work folder</li><li data-said="set-cm-goes-memory">Its AI's memory</li><li data-said="set-cm-goes-access">Its accesses</li></ul>
+      <p class="cm-not" data-said="set-cm-not">Not its devices, nor its reminders</p>
+      <p class="cm-box" data-said="set-cm-untouched">This one: untouched (woken or started to read it, then put back as it was)</p>
+      <p class="cm-box" data-said="set-cm-stay">You stay here · « Open it » when it is ready</p>
+    </div>
+    <div id="cm-move-part">
+      <p class="cm-box" data-said="set-cm-stops">Its tool stops for about a minute</p>
+      <p class="cm-box cm-danger" data-said="set-cm-deleted">Its own machine is deleted</p>
+    </div>
+    <div class="cm-acts"><button type="button" id="cm-back" data-said="set-cm-back">Back</button><button type="button" class="primary" id="cm-go"></button></div>
+  </div>
+</dialog>
+<!-- A COPY'S END (14-11): one line under the top bar, « Open it » or « See why ». -->
+<div id="cm-toast" class="cm-toast" role="status" hidden><span id="cm-toast-text"></span><button type="button" id="cm-toast-go" class="primary"></button><button type="button" id="cm-toast-close" class="quiet" aria-label="Close">×</button></div>
 <script src="/features.js"></script>
 <script src="/kit.js"></script>
 <script src="/mail-view.js"></script>

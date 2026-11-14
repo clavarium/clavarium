@@ -80,7 +80,7 @@ test('in a shared machine, its settings: its limit (no cores nor disk of its own
     assert.deepEqual(me.errors, []);
 });
 
-test('in a machine of its own, its settings: moved into a shared machine -- one there offered, a new one asks its memory, asked first', { skip: SKIP }, async (t) => {
+test('in a machine of its own, its settings: Move... into a shared machine -- one there offered first, a new one asks its memory, its machine said deleted', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     await me.page.setViewportSize({ width: 1280, height: 900 });
@@ -99,33 +99,30 @@ test('in a machine of its own, its settings: moved into a shared machine -- one 
     await me.until('in the list', async () => me.page.locator('[data-name="mail"], [data-conversation="mail"]').first().isVisible().catch(() => false), 20_000).catch(() => {});
     await me.page.locator('#folders').click();
     await me.chapter('machine');
-    await me.until('offered', async () => me.page.locator('#into-shared').isVisible());
+    await me.until('offered', async () => me.page.locator('#where-move').isVisible());
     assert.equal(await me.page.locator('#shared-size').isVisible(), false);
-    assert.equal(await me.page.locator('#into-shared-name').inputValue(), 'assist', 'the shared machine there, offered first');
-    assert.equal(await me.page.locator('#into-shared-mb').isVisible(), false, 'its memory is its own');
-    await me.page.fill('#into-shared-name', 'helpers');
-    assert.equal(await me.page.locator('#into-shared-mb').isVisible(), true, 'a new one: its memory asked');
-    if (process.env.WHERE_SHOTS) for (const [w, h, name] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
-        await me.page.setViewportSize({ width: w, height: h });
-        for (const theme of ['dark', 'light']) {
-            await me.page.evaluate((x) => { document.documentElement.dataset.theme = x; }, theme);
-            await me.page.locator('#into-shared').scrollIntoViewIfNeeded();
-            await me.page.screenshot({ path: join(process.env.WHERE_SHOTS, `into-shared-${name}-${theme}.png`) });
-        }
-    }
-    await me.page.setViewportSize({ width: 1280, height: 900 });
-    await me.page.fill('#into-shared-name', 'assist');
-    await me.page.locator('#into-shared-apply').click();
-    await me.until('asked first', async () => /ITS OWN MACHINE IS DELETED/.test(await me.page.locator('#notice').innerText().catch(() => '')));
-    assert.match(await me.page.locator('#notice').innerText(), /« assist »/);
-    await me.page.locator('#notice button', { hasText: 'Move it' }).click();
+    await me.page.locator('#where-move').click();
+    await me.until('the wizard open', async () => me.page.locator('#cm').isVisible());
+    assert.equal(await me.page.locator('#cm-places [aria-checked="true"]').getAttribute('data-place'), 'assist', 'the shared machine there, offered first');
+    assert.equal(await me.page.locator('#cm-new').isVisible(), false, 'its memory is its own');
+    await me.page.locator('#cm-places .cm-card[data-place="new"]').click();
+    await me.page.fill('#cm-new-name', 'helpers');
+    assert.equal(await me.page.locator('#cm-new-mb').isVisible(), true, 'a new one: its memory asked');
+    await me.page.fill('#cm-new-name', 'assist');
+    assert.equal(await me.page.locator('#cm-new-mb').isVisible(), false, 'a name there already: its own memory');
+    await me.page.locator('#cm-next').click();
+    await me.until('its check', async () => me.page.locator('#cm-move-part').isVisible());
+    assert.match(await me.page.locator('#cm-title').innerText(), /« assist »/);
+    assert.match(await me.page.locator('#cm-move-part').innerText(), /Its own machine is deleted/);
+    await me.page.locator('#cm-go').click();
     await me.until('sent', async () => asked !== null);
     assert.deepEqual(asked, { machine: 'assist' });
+    assert.equal(await me.page.locator('#cm').isVisible(), false);
     await me.until('the refusal said', async () => /Stopped here by the test/.test(await me.page.locator('#notice').innerText().catch(() => '')));
     assert.deepEqual(me.errors.filter((e) => !/409/.test(e)), []);
 });
 
-test('its settings: a copy of it -- its own machine by default, a shared one asks its name (a new one, its memory), asked first', { skip: SKIP }, async (t) => {
+test('its settings: Copy... into a shared machine -- its name given, sent, a refusal said in one line; in a shared machine, Move... out is not yet', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     await me.page.setViewportSize({ width: 1280, height: 900 });
@@ -143,31 +140,31 @@ test('its settings: a copy of it -- its own machine by default, a shared one ask
     await me.until('in the list', async () => me.page.locator('[data-name="mail"], [data-conversation="mail"]').first().isVisible().catch(() => false), 20_000).catch(() => {});
     await me.page.locator('#folders').click();
     await me.chapter('machine');
-    await me.until('offered', async () => me.page.locator('#copy-it').isVisible());
-    assert.match(await me.page.locator('#copy-title').inputValue(), /\(copy\)$/);
-    assert.equal(await me.page.locator('#copy-machine').isVisible(), false, 'its own machine by default');
-    await me.page.selectOption('#copy-where', 'shared');
-    assert.equal(await me.page.locator('#copy-machine').inputValue(), 'assist', 'the shared machine there, offered first');
-    assert.equal(await me.page.locator('#copy-mb').isVisible(), false);
-    await me.page.fill('#copy-machine', 'helpers');
-    assert.equal(await me.page.locator('#copy-mb').isVisible(), true, 'a new one: its memory asked');
-    if (process.env.WHERE_SHOTS) for (const [w, h, name] of [[1280, 900, 'desktop'], [900, 1200, 'tablet'], [390, 844, 'phone']]) {
-        await me.page.setViewportSize({ width: w, height: h });
-        for (const theme of ['dark', 'light']) {
-            await me.page.evaluate((x) => { document.documentElement.dataset.theme = x; }, theme);
-            await me.page.locator('#copy-it').scrollIntoViewIfNeeded();
-            await me.page.screenshot({ path: join(process.env.WHERE_SHOTS, `copy-${name}-${theme}.png`) });
-        }
-    }
-    await me.page.setViewportSize({ width: 1280, height: 900 });
-    await me.page.fill('#copy-title', 'Mail two');
-    await me.page.fill('#copy-machine', 'assist');
-    await me.page.locator('#copy-apply').click();
-    await me.until('asked first', async () => /The original is untouched/.test(await me.page.locator('#notice').innerText().catch(() => '')));
-    assert.match(await me.page.locator('#notice').innerText(), /« Mail two »/);
-    await me.page.locator('#notice button', { hasText: 'Copy it' }).click();
+    await me.until('offered', async () => me.page.locator('#where-copy').isVisible());
+    await me.page.locator('#where-copy').click();
+    await me.until('the wizard open', async () => me.page.locator('#cm').isVisible());
+    assert.equal(await me.page.locator('#cm-places [aria-checked="true"]').getAttribute('data-place'), '', 'its own machine by default');
+    await me.page.locator('#cm-places .cm-card[data-place="assist"]').click();
+    await me.page.locator('#cm-next').click();
+    await me.until('its check', async () => me.page.locator('#cm-copy-part').isVisible());
+    assert.match(await me.page.locator('#cm-copy-title').inputValue(), /\(copy\)$/);
+    await me.page.fill('#cm-copy-title', 'Mail two');
+    await me.page.locator('#cm-go').click();
     await me.until('sent', async () => asked !== null);
     assert.deepEqual(asked, { title: 'Mail two', machine: 'assist' });
-    await me.until('the refusal said', async () => /Stopped here by the test/.test(await me.page.locator('#notice').innerText().catch(() => '')));
+    await me.until('the refusal said', async () => /✗ Stopped here by the test/.test(await me.page.locator('#cm-toast').innerText().catch(() => '')));
+    /* Diary, in the shared machine: its own machine for a move is not yet, and nothing can be chosen. */
+    await me.page.locator('#cm-toast-close').click();
+    await me.page.evaluate(() => { document.querySelector('[data-name="diary"], [data-conversation="diary"]')?.click(); });
+    await me.until('diary open', async () => (await me.page.locator('#name').innerText().catch(() => '')) === 'Diary');
+    await me.page.locator('#folders').click();
+    await me.chapter('machine');
+    await me.until('its place said', async () => /Shared machine « assist », alone in it/.test(await me.page.locator('#where-now').innerText().catch(() => '')));
+    /* (Diary is only seen, its machine never made: its page is veiled, its button pressed from the page.) */
+    await me.page.evaluate(() => document.getElementById('where-move').click());
+    await me.until('the wizard open', async () => me.page.locator('#cm').isVisible());
+    assert.deepEqual(await me.page.locator('#cm-places .cm-card').allInnerTexts(), ['Its own machine\nNot yet']);
+    assert.equal(await me.page.locator('#cm-places .cm-card').isDisabled(), true);
+    assert.equal(await me.page.locator('#cm-next').isDisabled(), true);
     assert.deepEqual(me.errors.filter((e) => !/409/.test(e)), []);
 });

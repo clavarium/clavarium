@@ -56,7 +56,8 @@ export async function mcpAdd({ tethers, secrets }, body = {}) {
     const had = known(secrets, ref);
     /* Its key, in the vault, host-only: Tether gets its name. None given: the one it had, or none. */
     let secret = '';
-    if (key) { secrets.set({ name: ref, value: key, hostOnly: true }); secret = ref; }
+    /* A key given where it was signed in with OAuth: the key replaces the tokens, which go. */
+    if (key) { secrets.set({ name: ref, value: key, hostOnly: true }); secret = ref; if (before?.secrets?.token === oauthName(id)) { try { secrets.remove(oauthName(id)); } catch { /* not there */ } } }
     else if (before?.secrets?.token) secret = String(before.secrets.token);
     const r = await tethers.act('mcp-add', { id, name, url, ...(secret ? { secret } : {}), ...(body.header ? { header: String(body.header) } : {}), ...(body.allowHttp === true ? { allowHttp: true } : {}) }, '');
     if (!r.ok) {
@@ -146,9 +147,12 @@ export async function mcpSeen({ tethers }, body = {}) {
     return { seen: Array.isArray(r.data?.seen) ? r.data.seen : [] };
 }
 
-/* A server taken away: its key goes with it (only the one kept for it here). */
+/* The vault's name for a server's OAuth tokens (mcpoauth.mjs): as long as its key's name. */
+export const oauthName = (id) => `${keyName(id).slice(0, -KEY_SUFFIX.length)}_TOK`;
+
+/* A server taken away: its key goes with it, or its OAuth tokens (only those kept for it here). */
 export function forgetKey(secrets, target) {
     const ref = target?.kind === 'mcp' ? String(target.secrets?.token ?? '') : '';
-    if (!ref || ref !== keyName(target.id)) return;
+    if (!ref || (ref !== keyName(target.id) && ref !== oauthName(target.id))) return;
     try { secrets?.remove(ref); } catch { /* not there */ }
 }
