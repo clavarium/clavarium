@@ -310,3 +310,14 @@ test('moved out of a shared machine: a restart of the server meanwhile puts it b
     assert.equal(after.phase, 'ready'); assert.equal(after.sharedMachine, 'assist'); assert.deepEqual(after.machineUser, c.machineUser); assert.equal(after.movingOutOf, undefined);
     assert.match(after.moved, /moving out of the shared machine assist: it stays there/);
 });
+
+test('moved out of a shared machine: its own machine left by an attempt cut short is removed before the room is counted', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist' }); await b.all.built;
+    b.vms.set('clv-mail', 'Running');   /* left by a move cut short */
+    const asked = []; b.all.room = async (x) => { asked.push([x.memoryMb, b.vms.has('clv-mail')]); };
+    b.calls.length = 0;
+    await b.all.moveToOwn('mail'); await b.all.built;
+    assert.deepEqual(asked[0], [1024, false], 'removed before the room was asked');
+    assert.equal(b.store.get('mail').sharedMachine, undefined);
+});

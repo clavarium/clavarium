@@ -1402,6 +1402,10 @@ export class Conversations {
         const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
         if (tool.state && state !== 'Running') throw new Refusal(409, 'Its shared machine is not running: open the conversation first, so that its tool\'s state can come along.', { retry: false });
         const memory = Math.max(tool.memoryMb, Number(c.memoryMb) || tool.memoryMb);
+        /* One of its own left by an attempt cut short (a restart meanwhile): not its machine any more -- removed
+           first, so that the room it takes is counted free (15-11, seen on test-c). */
+        const states = await this.#vms.states().catch(() => null);
+        if (states?.has(vmName(name))) await this.#vms.removeVm(vmName(name)).catch(() => {});
         await this.room({ kind: 'create', memoryMb: memory });
         const act = this.#take(name, 'move');
         this.#cancelStop(name);
