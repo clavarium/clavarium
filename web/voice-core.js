@@ -144,3 +144,26 @@ export function toWav(blocks, rate = RATE) {
     }
     return new Uint8Array(bytes);
 }
+
+/* PHRASES IN THE ORDER THEY WERE SPOKEN: each is transcribed on its own, and a short one comes back before a
+   long one said before it. `order()` takes a place when a phrase ends; that place is later given what to do
+   with its result (or nothing: failed, empty), and runs only once every place before it was given its own. */
+export function inOrder() {
+    let taken = 0;
+    let next = 0;
+    const held = new Map();
+    return () => {
+        const place = taken++;
+        let given = false;
+        return (run) => {
+            if (given) return;
+            given = true;
+            held.set(place, run);
+            while (held.has(next)) {
+                const done = held.get(next);
+                held.delete(next); next++;
+                try { done?.(); } catch { /* one that throws never holds the rest */ }
+            }
+        };
+    };
+}

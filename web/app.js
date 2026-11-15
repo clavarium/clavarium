@@ -2695,6 +2695,7 @@
         $('carry-export-all').title = here?.work !== 'kept' ? uiSaid('set-carry-all-off', 'Its work must be kept here.') : '';
         $('carry-export-all').onclick = allOff ? (event) => { event.preventDefault(); } : null;
         $('carry-import').disabled = down;
+        $('carry-reminders').checked = false; $('carry-reminders').disabled = down;
         $('carry-said').hidden = !down;
         if (down) {
             const start = Object.assign(document.createElement('button'), { type: 'button', className: 'inline', textContent: here.asleep === true ? uiSaid('set-wake-it', 'Wake it') : uiSaid('set-m-start', 'Start') });
@@ -2704,13 +2705,14 @@
         $('carry-import').onclick = () => $('carry-file').click();
         /* Sent; a whole export into a work folder that holds files asks first, then is sent again to replace it.
            What it was given that does not exist here is listed after, to link by hand. */
-        const carryImport = async (name, file, replaceWork) => {
+        const carryImport = async (name, file, replaceWork, reminders) => {
             try {
-                const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/import${replaceWork ? '?replaceWork=1' : ''}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                const query = [replaceWork ? 'replaceWork=1' : '', reminders ? 'reminders=1' : ''].filter(Boolean).join('&');
+                const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/import${query ? `?${query}` : ''}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
                 const said = await r.json().catch(() => ({}));
                 if (!r.ok && said.kind === 'work-not-empty') {
                     show(uiSaid('set-carry-replace', 'Its work folder has files. Replace them all?'), uiSaid('set-carry-replace-go', 'Replace its work'),
-                        () => carryImport(name, file, true), () => { notice.hidden = true; focusTerminal(); });
+                        () => carryImport(name, file, true, reminders), () => { notice.hidden = true; focusTerminal(); });
                     return;
                 }
                 if (!r.ok) throw new Error(said.error ?? `HTTP ${r.status}`);
@@ -2722,10 +2724,10 @@
         $('carry-file').onchange = () => {
             const file = $('carry-file').files?.[0]; $('carry-file').value = '';
             if (!file) return;
-            const name = current;
+            const name = current; const reminders = $('carry-reminders').checked;
             leavePanel();
             show(uiSaid('set-carry-ask', '« {file} » into « {name} »? Its memory is replaced.', { file: file.name, name }),
-                uiSaid('set-carry-go', 'Import'), () => carryImport(name, file, false), () => { notice.hidden = true; focusTerminal(); });
+                uiSaid('set-carry-go', 'Import'), () => carryImport(name, file, false, reminders), () => { notice.hidden = true; focusTerminal(); });
         };
         void paintAnswerer(); paintWakeups(); void paintTalkBox(); void paintShareHere();
         paintMachine(here);

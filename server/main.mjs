@@ -721,6 +721,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        mailbox by its asset, a secret by its name only (never its value), its Tether targets and its lists by theirs. */
     all.accessesOf = async (name) => accessesOf({ folders, secrets, tethers, binders, talk, guide }, name);
     /* ITS IMPORT: each given again where the same id exists here, with the same level (as copyRights does). */
+    all.wakeupsOf = (name) => wakeups.exportOf(name);
+    all.importReminders = (name, work, given) => { copyPlans(work, folders.workFolder(name)); wakeups.importTo(name, given); };
     all.relink = (name, given) => relinkAccesses({ folders, secrets, tethers, binders, talk, guide, gitKeeper }, name, given);
     /* A tool that ended cut for lack of memory: said in the events, to the owner, and in its chat. */
     all.onToolExit = (name, report) => {

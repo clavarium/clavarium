@@ -160,3 +160,28 @@ test('a whole import into an empty work folder needs no asking; another tool\'s 
     spawnSync('tar', ['-czf', other, '-C', m, 'clavarium-conversation.json']);
     await assert.rejects(() => b.all.importState('mail', other), (e) => e.status === 400);
 });
+
+test('a whole export carries its reminders and wake-ups; its import takes them only when asked, never the docket raw', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'kept' }); await b.all.built;
+    b.store.patch('mail', { work: 'kept' });
+    put(join(b.work, 'f'), 'w');
+    put(join(b.work, '.docket/plans.jsonl'), '{"kind":"plan","id":"p1","cron":"0 9 * * *","text":"standup"}\n');
+    b.all.wakeupsOf = () => ({ perHour: 3, items: [{ kind: 'every', on: true, minutes: 30, message: 'look again' }] });
+    const file = await exported(b, 'mail');
+    assert.ok(listOf(file).includes('work/.docket/plans.jsonl'));
+    const manifest = JSON.parse(spawnSync('tar', ['-xzOf', file, 'clavarium-conversation.json'], { encoding: 'utf8' }).stdout);
+    assert.deepEqual(manifest.wakeups, { perHour: 3, items: [{ kind: 'every', on: true, minutes: 30, message: 'look again' }] });
+    const asked = [];
+    b.all.importReminders = async (name, work, wakeups) => { asked.push({ name, plans: readFileSync(join(work, '.docket/plans.jsonl'), 'utf8'), wakeups }); };
+    /* Not asked: its work comes, its docket not (here, its own stays). */
+    rmSync(join(b.work, 'f')); put(join(b.work, '.docket/plans.jsonl'), 'its own\n');
+    await b.all.importState('mail', file, { replaceWork: true });
+    assert.equal(readFileSync(join(b.work, 'f'), 'utf8'), 'w');
+    assert.equal(readFileSync(join(b.work, '.docket/plans.jsonl'), 'utf8'), 'its own\n', 'its own docket kept, the export\'s not put in raw');
+    assert.deepEqual(asked, []);
+    /* Asked: given from the export's work, with its wake-ups. */
+    await b.all.importState('mail', file, { replaceWork: true, reminders: true });
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].name, 'mail'); assert.match(asked[0].plans, /standup/); assert.equal(asked[0].wakeups.perHour, 3);
+});

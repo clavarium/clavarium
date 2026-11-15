@@ -160,6 +160,10 @@ export class Conversations {
        only (never its value); and the same given again on an import, where it exists here -> { linked, missing }. */
     accessesOf = async () => ({});
     relink = async () => ({ linked: [], missing: [] });
+    /* Set by the server: its wake-ups, for a whole export; and on its import, when asked, its reminders (from the
+       export's work folder) and those wake-ups given again (15-11, as a copy does). */
+    wakeupsOf = () => undefined;
+    importReminders = async () => {};
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
@@ -989,7 +993,7 @@ export class Conversations {
         if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
         const tool = this.#tools.find((t) => t.id === c.tool);
         const accesses = await this.accessesOf(name);
-        const manifest = JSON.stringify({ kind: 'clavarium-conversation', version: 2, whole: true, tool: c.tool, name: c.name, ...(c.title ? { title: c.title } : {}), memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB, at: new Date().toISOString(), accesses });
+        const manifest = JSON.stringify({ kind: 'clavarium-conversation', version: 2, whole: true, tool: c.tool, name: c.name, ...(c.title ? { title: c.title } : {}), memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB, at: new Date().toISOString(), accesses, wakeups: this.wakeupsOf(name) });
         const id = `whole-${Date.now()}`;
         /* In its machine: the manifest, then its home as home/ (a link's target left as it is), one block per record
            so that its work can follow it (carry.mjs). Globs off: the words left out are given to tar as they are. */
@@ -1014,8 +1018,9 @@ export class Conversations {
     /* PUT BACK an exported state in this conversation (same tool): its tool stopped, the archive unpacked in
        its home, its tool started again, taking up its last session. -> { tool, from } */
     /* A WHOLE export (exportWhole) puts back its home, its work folder and its accesses: its work only into an empty
-       one, unless `replaceWork` -- what is there is never thrown away silently. -> { tool, from, whole, linked, toLink } */
-    async importState(name, input, { replaceWork = false } = {}) {
+       one, unless `replaceWork` -- what is there is never thrown away silently; its reminders and wake-ups only when
+       asked (`reminders`). -> { tool, from, whole, linked, toLink } */
+    async importState(name, input, { replaceWork = false, reminders = false } = {}) {
         const c = this.#busyCheck(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
         if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
@@ -1049,6 +1054,7 @@ export class Conversations {
                 if (r.code !== 0) throw new Refusal(502, `Not imported: ${firstLine(r.stderr) || `exit ${r.code}`}`);
                 restoreWork(join(stage, 'work'), workDir, replaceWork);
                 const { linked, missing } = await this.relink(name, manifest.accesses ?? {});
+                if (reminders) await Promise.resolve().then(() => this.importReminders(name, join(stage, 'work'), manifest.wakeups)).catch(() => {});
                 return { tool: c.tool, from: { name: manifest.name, at: manifest.at }, whole: true, linked, toLink: missing };
             } finally { this.ready(name); }
         } finally {

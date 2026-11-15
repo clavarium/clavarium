@@ -246,6 +246,27 @@ export class Wakeups {
         return this.of(to);
     }
 
+    /* A WHOLE EXPORT'S WAKE-UPS (15-11): what each is, never its id, its clock or a call from outside (its address
+       is the original's). Given again on its import when asked, each through add(): checked as one written here;
+       one that is not (its folder not attached here) is left out. -> how many */
+    exportOf(name) {
+        const r = this.#record(name);
+        return { perHour: r.perHour, items: r.items.filter((i) => i.kind !== 'call').map(({ kind, on, message, resource, onlyNew, quiet, minutes, at, line }) => ({ kind, on, message, resource, onlyNew, quiet, minutes, at, line })) };
+    }
+    importTo(name, given) {
+        let n = 0;
+        try { if (given?.perHour !== undefined) this.setLimit(name, given.perHour); } catch { /* not a cap */ }
+        for (const i of (Array.isArray(given?.items) ? given.items : []).slice(0, ITEMS_MAX)) {
+            if (!i || typeof i !== 'object' || i.kind === 'call') continue;
+            try {
+                const made = this.add(name, i).items.at(-1);
+                if (i.on === false) this.turn(name, made.id, false);
+                n++;
+            } catch { /* not one this conversation can have */ }
+        }
+        return n;
+    }
+
     #change(name, id, change) {
         this.#known(name);
         const r = this.#record(name);
