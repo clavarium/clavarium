@@ -54,11 +54,11 @@ if [ -f "$chat/server.mjs" ]; then
         || echo "launch: the chat will not say when Claude Code works without a word" >&2
 fi
 # WHAT ITS SCREEN ASKS (02-11), read by the generic screen-watch -- Claude Code's own words, here and only
-# here: not signed in, its sign-in started by itself, its link sent to the person's chat, the code they paste
+# here: not signed in (at its start, or signed out on the way: « Login expired », 15-11), its sign-in started by itself, its link sent to the person's chat, the code they paste
 # there typed back (02-11, tried on a real Claude Code); an update installed told to the agent, which restarts
 # when it suits it (never in the middle of its work). A tool that changes its words: only these lines change.
 node "$(dirname "$0")/screen-watch.mjs" \
-    'type:Not logged in · Run /login=/login' \
+    'type:(Not logged in|Login expired|OAuth token (has )?expired|Invalid API key)[^\n]{0,24}/login=/login' \
     'keys:Select login method:=Enter' \
     'link:https://(claude\.ai|claude\.com|console\.anthropic\.com)/\S*oauth\S*' \
     'code:Paste code here' \

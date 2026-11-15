@@ -288,3 +288,21 @@ test('held a few minutes at most: a line left half typed does not keep the serve
     assert.ok(now >= 5 * 60_000 && now < 6 * 60_000);
     assert.deepEqual(typed, ['hello', 'Enter']);
 });
+
+/* A COPY'S WAKE-UPS (15-11, when asked): its original's, each its own again; a call from outside is not copied. */
+test('a copy takes its wake-ups, new ids and its clock from now; never a call from outside', (t) => {
+    const b = bench(t);
+    const list = () => [{ name: 'worker' }, { name: 'twin' }];
+    const wakeups = new Wakeups({ store: new Store(join(b.dir, 'w2.json')), vms: { exec: async () => ({ code: 0 }) }, conversations: { list, awake: () => [] }, resources: { of: () => [{ name: 'handoff', access: 'write' }], folder: (n) => join(b.dir, n), get: (n) => ({ name: n, type: 'folder' }) }, now: () => new Date(b.world.now) });
+    wakeups.setLimit('worker', 7);
+    wakeups.add('worker', { kind: 'cron', line: '30 7 * * 1-5', message: 'morning round' });
+    wakeups.add('worker', { kind: 'arrival', resource: 'handoff', message: 'look at {files}' });
+    const called = wakeups.add('worker', { kind: 'call', message: 'from the scheduler' });
+    assert.ok(called.address);
+    const got = wakeups.copyTo('worker', 'twin');
+    assert.equal(got.perHour, 7);
+    assert.deepEqual(got.items.map((i) => i.kind).sort(), ['arrival', 'cron']);
+    const ids = new Set(wakeups.of('worker').items.map((i) => i.id));
+    assert.ok(got.items.every((i) => !ids.has(i.id)), 'each its own id');
+    assert.equal(wakeups.of('worker').items.length, 3, 'the original keeps its own');
+});

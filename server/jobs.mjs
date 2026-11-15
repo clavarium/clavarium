@@ -33,6 +33,8 @@ const bare = ({ log, ...job }) => job;
 export function jobWords(c) {
     if (c.phase === 'moving') return `Moving ${titleOf(c)}${c.sharedMachine ? ` into « ${c.sharedMachine} »` : ''}`;
     if (c.phase === 'restarting') return `Restarting ${titleOf(c)}`;
+    if (c.movingTo) return `Moving ${titleOf(c)} into « ${c.movingTo} »`;
+    if (c.movingOutOf) return `Moving ${titleOf(c)} out of « ${c.movingOutOf.sharedMachine} »`;
     if (c.copyOf) return `Copy ${titleOf(c)}${c.sharedMachine ? ` in « ${c.sharedMachine} »` : ''}`;
     return `Building ${titleOf(c)}${c.sharedMachine ? ` in « ${c.sharedMachine} »` : ''}`;
 }
@@ -94,8 +96,10 @@ export class Jobs {
         if (busy || !this.#open.has(name)) return;
         const job = this.#open.get(name);
         this.#open.delete(name);
-        const ok = after?.phase === 'ready';
-        const why = after && !ok && after.error ? String(after.error).slice(0, 300) : '';
+        /* A move that went back (15-11): ready where it was, but not done -- `moveFailed` says why. */
+        const ok = after?.phase === 'ready' && !after.moveFailed;
+        const said = after?.error ?? after?.moveFailed;
+        const why = after && !ok && said ? String(said).slice(0, 300) : '';
         this.#add(name, after ? (ok ? 'Done' : `Failed${why ? `: ${why}` : ''}`) : 'Removed');
         const { log } = this.#logs.get(name);
         this.#logs.delete(name);

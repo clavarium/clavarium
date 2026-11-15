@@ -29,6 +29,9 @@ function bench(t, { prefix = ['vmm'], refuse = () => false } = {}) {
         if (verb === 'stop' || verb === 'suspend') { vms.set(vm, verb === 'stop' ? 'Stopped' : 'Suspended'); return { code: 0, stdout: '', stderr: '' }; }
         if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...vms].map(([name, state]) => ({ name, state })) }), stderr: '' };
         if (verb === 'exec' && line.includes('id -u; id -g')) return { code: 0, stdout: '1001\n1001\n', stderr: '' };
+        /* Its work folder seen from its machine (15-11): a file made at /work there is in its work folder here. */
+        const probe = verb === 'exec' && /: > \/work\/\.clavarium-carry\/(\S+)/.exec(line);
+        if (probe && typeof all.workFolder === 'function') { const w = join(all.workFolder(vm.replace(/^clv-/, '')), '.clavarium-carry'); mkdirSync(w, { recursive: true }); writeFileSync(join(w, probe[1]), ''); return { code: 0, stdout: '', stderr: '' }; }
         if (verb === 'info') return vms.has(vm) ? { code: 0, stdout: JSON.stringify({ info: { [vm]: { state: vms.get(vm) } } }), stderr: '' } : { code: 2, stdout: '', stderr: 'does not exist' };
         return { code: 0, stdout: '', stderr: '' };
     };
@@ -275,4 +278,16 @@ exit 0
     const made = out.findIndex((l) => l.startsWith(`vm launch clv-${r.name}`));
     assert.ok(asleepAgain >= 0 && made >= 0, out.join('\n'));
     assert.ok(asleepAgain < made, 'asleep again before the copy\'s machine is launched');
+});
+
+/* Its reminders and wake-ups (15-11): copied only when asked, the box unticked otherwise. */
+test('a copy takes its reminders and wake-ups only when asked', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool' }); await b.all.built;
+    const asked = []; b.all.copyReminders = async (from, to) => { asked.push(`${from}>${to}`); };
+    const one = await b.all.copy('mail', { title: 'One' }); await b.all.copied;
+    assert.deepEqual(asked, [], 'not asked: not copied');
+    const two = await b.all.copy('mail', { title: 'Two', reminders: true }); await b.all.copied;
+    assert.deepEqual(asked, [`mail>${two.name}`]);
+    assert.equal(b.store.get(one.name).phase, 'ready'); assert.equal(b.store.get(two.name).phase, 'ready');
 });

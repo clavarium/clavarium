@@ -500,7 +500,7 @@ details.chapter.reached { outline: 2px solid var(--brass); outline-offset: 2px; 
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 #machine-size, #shared-size { display: flex; flex-direction: column; gap: 6px; max-width: 30rem; }
 #machine-size label, #shared-size label { font-size: .8125rem; color: var(--ink2); }
-#machine-size select, #shared-size select, #cm :is(select, input) { width: 100%; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
+#machine-size select, #shared-size select, #cm :is(select, input:not([type=checkbox])) { width: 100%; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
 .health-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .health-lines li { padding-left: 1.3em; position: relative; }
 .health-lines li::before { content: ""; position: absolute; left: .2em; top: .45em; width: .55em; height: .55em; border-radius: 50%; background: var(--ok); }
@@ -3122,6 +3122,8 @@ a.button[aria-disabled] { opacity: .5; pointer-events: none; }
 .cm-goes { list-style: none; margin: 2px 0 0; padding: 0; font-size: .875rem; color: var(--ok); }
 .cm-goes li::before { content: "\2713\00a0"; }
 .cm-not { margin: 0; font-size: .75rem; color: var(--ink2); }
+.cm-tick { display: flex; align-items: center; justify-content: flex-start; gap: .5rem; font-size: .85rem; cursor: pointer; }
+#cm .cm-tick input { width: 18px; height: 18px; flex: none; margin: 0; accent-color: var(--brass); }
 .cm-box { margin: 0; padding: 8px 11px; font-size: .875rem; border: 1px solid var(--line); border-radius: 8px; }
 .cm-box.cm-danger { color: var(--danger); border-color: var(--danger); font-weight: 600; }
 .cm-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

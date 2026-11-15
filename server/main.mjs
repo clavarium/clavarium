@@ -41,7 +41,7 @@ import { Secrets, RUNNER } from './secrets.mjs';
 import { scan, secretRef } from './secret-scan.mjs';
 import { Network } from './network.mjs';
 import { Answerer, answererConfig } from './answerer.mjs';
-import { Dockets } from './dockets.mjs';
+import { Dockets, copyPlans } from './dockets.mjs';
 import { PULSE_MS } from 'clavarium-parley/ui';
 import { Wakeups, TypingWatch, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
@@ -680,6 +680,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     all.copyWork = (from, to, onProgress) => copyWorkFolder(folders.workFolder(from), folders.workFolder(to), onProgress);
     /* Where a conversation's work folder is on this side: a copy reads its tool's memory through it (14-11). */
     all.workFolder = (name) => folders.workFolder(name);
+    /* Its reminders and wake-ups, when the copy asked for them (15-11). */
+    all.copyReminders = (from, to) => { copyPlans(folders.workFolder(from), folders.workFolder(to)); wakeups.copyTo(from, to); };
     all.copyRights = async (from, to) => {
         for (const r of folders.of(from)) {
             if (r.access === 'write') gitKeeper?.beforeWriter(r.name, to, true);

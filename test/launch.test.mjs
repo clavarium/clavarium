@@ -214,3 +214,14 @@ test('where a tool keeps its state (#351): paths in its home, without "..", its 
     const tools = loadTools();
     for (const id of ['claude-code', 'opencode', 'codex', 'vibe', 'gemini']) assert.ok(tools.find((t) => t.id === id)?.state?.keep.length, `${id} says where its state is`);
 });
+
+/* Signed out on the way (15-11, the owner's screen): « Login expired · Please run /login » starts its sign-in too. */
+test('claude code: signed out on the way, its sign-in started as at its start', async () => {
+    const { rulesOf, actionsOn } = await import('../config/launch/screen-watch.mjs');
+    const line = readFileSync(new URL('../config/launch/claude-code.sh', import.meta.url), 'utf8').match(/'(type:[^']*\/login=\/login)'/)[1];
+    const rules = rulesOf([line]);
+    for (const said of ['Not logged in · Run /login', '⎿ Login expired · Please run /login', 'OAuth token has expired · Please run /login', 'Invalid API key · Please run /login']) {
+        assert.deepEqual(actionsOn(said, rules, new Set()).map((a) => [a.kind, a.value]), [['type', '/login']], said);
+    }
+    assert.deepEqual(actionsOn('I ran /login yesterday', rules, new Set()), [], 'its words only');
+});

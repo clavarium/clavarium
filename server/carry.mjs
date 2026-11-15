@@ -42,6 +42,8 @@ export function wholeStream(homeTar, workDir, done = () => {}) {
     const home = createReadStream(homeTar, { start: 0, end: size - END - 1 });
     home.on('error', end);
     home.on('end', () => {
+        /* Its home read whole: its part taken away now, before the file ends (15-11, a test saw it still there). */
+        done();
         /* Its work: every file, its carried parts left out; named work/... (a link's target left as it is). */
         child = spawn('tar', ['-cf', '-', '-b', '1', '-C', workDir, `--exclude=./${CARRY}`, '--transform', 's,^\\.,work,S', '.'], { stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.pipe(gzip);

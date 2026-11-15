@@ -149,9 +149,13 @@ test('its settings: Copy... into a shared machine -- its name given, sent, a ref
     await me.until('its check', async () => me.page.locator('#cm-copy-part').isVisible());
     assert.match(await me.page.locator('#cm-copy-title').inputValue(), /\(copy\)$/);
     await me.page.fill('#cm-copy-title', 'Mail two');
+    /* Its reminders and wake-ups (15-11): unticked unless asked; ticked, said to the server. */
+    assert.equal(await me.page.locator('#cm-reminders').isChecked(), false);
+    await me.page.locator('#cm-reminders').check();
+    if (process.env.CM_SHOTS) await me.page.locator('#cm').screenshot({ path: join(process.env.CM_SHOTS, 'cm-copy-reminders.png') });
     await me.page.locator('#cm-go').click();
     await me.until('sent', async () => asked !== null);
-    assert.deepEqual(asked, { title: 'Mail two', machine: 'assist' });
+    assert.deepEqual(asked, { title: 'Mail two', machine: 'assist', reminders: true });
     await me.until('the refusal said', async () => /✗ Stopped here by the test/.test(await me.page.locator('#cm-toast').innerText().catch(() => '')));
     /* Diary, in the shared machine: its own machine for a move is not yet, and nothing can be chosen. */
     await me.page.locator('#cm-toast-close').click();
@@ -163,8 +167,19 @@ test('its settings: Copy... into a shared machine -- its name given, sent, a ref
     /* (Diary is only seen, its machine never made: its page is veiled, its button pressed from the page.) */
     await me.page.evaluate(() => document.getElementById('where-move').click());
     await me.until('the wizard open', async () => me.page.locator('#cm').isVisible());
-    assert.deepEqual(await me.page.locator('#cm-places .cm-card').allInnerTexts(), ['Its own machine\nNot yet']);
-    assert.equal(await me.page.locator('#cm-places .cm-card').isDisabled(), true);
-    assert.equal(await me.page.locator('#cm-next').isDisabled(), true);
+    /* Out of it (15-11): its own machine, the only place offered, chosen; screen 2 says its place there goes --
+       the whole machine, as it is alone in it. */
+    assert.deepEqual(await me.page.locator('#cm-places .cm-card').allInnerTexts(), ['Its own machine']);
+    assert.equal(await me.page.locator('#cm-places .cm-card').getAttribute('aria-checked'), 'true');
+    await me.page.locator('#cm-next').click();
+    await me.until('screen 2', async () => me.page.locator('#cm-check').isVisible());
+    assert.match(await me.page.locator('#cm-title').innerText(), /Move Diary into its own machine/);
+    assert.match(await me.page.locator('#cm-deleted').innerText(), /The shared machine « assist » is deleted/);
+    if (process.env.CM_SHOTS) await me.page.locator('#cm').screenshot({ path: join(process.env.CM_SHOTS, 'cm-out.png') });
+    let out = null;
+    await me.page.route('**/api/conversations/diary/into-machine', (route) => { out = route.request().postDataJSON(); return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Stopped here by the test.' }) }); });
+    await me.page.locator('#cm-go').click();
+    await me.until('asked out', async () => out !== null);
+    assert.deepEqual(out, {}, 'no machine named: out of it, into its own');
     assert.deepEqual(me.errors.filter((e) => !/409/.test(e)), []);
 });
