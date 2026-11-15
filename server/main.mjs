@@ -570,6 +570,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);
+    /* Its guide changed while its tool ran (15-11): its docket tells it to read it again. */
+    guide.told = (name, line) => { if (dockets.on(name)) dockets.post(name, { kind: 'guide-changed', text: line }); };
     /* Restarted with nothing written since (15-11): its docket tells it, once its tool is ready and free. */
     talk.restarted = (name, why) => {
         if (!dockets.on(name)) return false;
