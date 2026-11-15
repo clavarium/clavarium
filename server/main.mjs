@@ -590,6 +590,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             await toolbox.installIn(name).catch(() => {});
             if (!toolbox.stale(name)) continue;
             try { if (talk.event(name, { kind: 'tools-updated', text: 'Tools updated: restart it to use them all. Its work picks up where it was.', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
+            /* Its tool told too, by its docket (15-11, its owner's ask): it takes them up when it suits it, never mid-work. */
+            try { if (dockets.on(name)) dockets.post(name, { kind: 'tools-updated', text: `Clavarium was updated to ${JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}: your tools (parley, docket, the MCP servers given to you) are new. When nothing runs, touch /work/.parley/restart-asked to take them up; your work picks up where it was.` }); } catch { /* its docket may be off */ }
         }
     });
     /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): its tool restarted by this server
