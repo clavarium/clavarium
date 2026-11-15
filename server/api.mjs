@@ -6,7 +6,7 @@
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
- *   GET  /api/conversations/<name>/export        its tool's state, one archive (#351)   POST .../import  put back (same tool)
+ *   GET  /api/conversations/<name>/export[?all=1] its tool's state, or everything of it, one archive (#351)   POST .../import[?replaceWork=1]  put back (same tool)
  *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?, cpus?}: stopped, set, started again (202);
  *                                                asleep: checked and kept for its wake, as `sizeAtWake` (200)
  *   POST /api/conversations/<name>/machine       {action: start|stop|restart|sleep|force|force-now}: done on its machine,
@@ -306,7 +306,9 @@ export async function handleApi(request, response, conversations, headers, resou
            put back into a conversation of the same tool. Downloaded and sent by the person, from the page. */
         const carry = /^\/api\/conversations\/([^/]+)\/(export|import)$/.exec(pathname);
         if (carry && request.method === 'GET' && carry[2] === 'export') {
-            const out = await conversations.exportState(decodeURIComponent(carry[1]));
+            /* ?all=1: everything of it -- its home, its work, what it was given (conversations.exportWhole). */
+            const n = decodeURIComponent(carry[1]);
+            const out = query.get('all') === '1' ? await conversations.exportWhole(n) : await conversations.exportState(n);
             response.writeHead(200, { ...headers, 'content-type': 'application/gzip', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(out.name)}` });
             out.stream.pipe(response);
             response.on('close', () => { try { out.child?.kill(); } catch { /* ended */ } });
@@ -314,7 +316,8 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         if (carry && request.method === 'POST' && carry[2] === 'import') {
             if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
-            return send(200, await conversations.importState(decodeURIComponent(carry[1]), request)), true;
+            /* ?replaceWork=1: a whole export may replace the work folder that holds files (asked first, on the page). */
+            return send(200, await conversations.importState(decodeURIComponent(carry[1]), request, { replaceWork: query.get('replaceWork') === '1' })), true;
         }
         if (pathname.startsWith('/api/files/')) {
             if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' }), true;

@@ -94,6 +94,7 @@ import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs'
 import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
 import { copyWorkFolder } from './copywork.mjs';
+import { accessesOf, relinkAccesses } from './carry.mjs';
 import { Jobs, withUpdates } from './jobs.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -691,6 +692,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         const lines = guide.lines(from);
         if (lines.length) await guide.setLines(to, lines).catch(() => {});
     };
+    /* A WHOLE EXPORT (conversations.exportWhole): what it was given, each by its id -- a folder, a repository or a
+       mailbox by its asset, a secret by its name only (never its value), its Tether targets and its lists by theirs. */
+    all.accessesOf = async (name) => accessesOf({ folders, secrets, tethers, binders, talk, guide }, name);
+    /* ITS IMPORT: each given again where the same id exists here, with the same level (as copyRights does). */
+    all.relink = (name, given) => relinkAccesses({ folders, secrets, tethers, binders, talk, guide, gitKeeper }, name, given);
     /* A tool that ended cut for lack of memory: said in the events, to the owner, and in its chat. */
     all.onToolExit = (name, report) => {
         if (!report?.oom?.length) return;

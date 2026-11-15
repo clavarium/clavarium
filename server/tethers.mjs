@@ -328,6 +328,23 @@ export class Tethers {
         }
     }
 
+    /* WHAT IT WAS GIVEN, for a whole export (carry.mjs): each target by its id, with its level and its allow rules;
+       and the same given again, on an import, to those that exist here -> the ids not found. */
+    grantsOf(name) {
+        return this.#keeper.store.targets().filter((t) => t.kind !== 'device' && t.kind !== 'voicebox' && t.grants?.[`${AGENT}${name}`]?.level)
+            .map((t) => ({ id: t.id, level: t.grants[`${AGENT}${name}`].level, ...(t.grants[`${AGENT}${name}`].rules?.length ? { rules: t.grants[`${AGENT}${name}`].rules } : {}) }));
+    }
+    regrant(name, given = []) {
+        const store = this.#keeper.store; const here = new Set(store.targets().filter((t) => t.kind !== 'device' && t.kind !== 'voicebox').map((t) => t.id));
+        const missing = [];
+        for (const g of given) {
+            if (!here.has(g?.id) || !g.level) { missing.push(g?.id); continue; }
+            store.grant(g.id, `${AGENT}${name}`, g.level);
+            for (const rule of g.rules ?? []) { try { store.allow(g.id, `${AGENT}${name}`, rule); } catch { /* a rule no longer valid: left out */ } }
+        }
+        return missing;
+    }
+
     /* What each conversation was given: { name: count } -- the targets it may use. */
     given() {
         const out = {};

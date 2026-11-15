@@ -2686,6 +2686,12 @@
         $('carry-export').href = `${API}/conversations/${encodeURIComponent(current)}/export`;
         $('carry-export').toggleAttribute('aria-disabled', down);
         $('carry-export').onclick = down ? (event) => { event.preventDefault(); } : null;
+        /* Everything of it (14-11): its work is read here, so only when it is kept here. */
+        const allOff = down || here?.work !== 'kept';
+        $('carry-export-all').href = `${API}/conversations/${encodeURIComponent(current)}/export?all=1`;
+        $('carry-export-all').toggleAttribute('aria-disabled', allOff);
+        $('carry-export-all').title = here?.work !== 'kept' ? uiSaid('set-carry-all-off', 'Its work must be kept here.') : '';
+        $('carry-export-all').onclick = allOff ? (event) => { event.preventDefault(); } : null;
         $('carry-import').disabled = down;
         $('carry-said').hidden = !down;
         if (down) {
@@ -2694,20 +2700,30 @@
             $('carry-said').replaceChildren(uiSaid('set-carry-down', 'It must run to export or import.'), ' ', start);
         }
         $('carry-import').onclick = () => $('carry-file').click();
+        /* Sent; a whole export into a work folder that holds files asks first, then is sent again to replace it.
+           What it was given that does not exist here is listed after, to link by hand. */
+        const carryImport = async (name, file, replaceWork) => {
+            try {
+                const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/import${replaceWork ? '?replaceWork=1' : ''}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                const said = await r.json().catch(() => ({}));
+                if (!r.ok && said.kind === 'work-not-empty') {
+                    show(uiSaid('set-carry-replace', 'Its work folder has files. Replace them all?'), uiSaid('set-carry-replace-go', 'Replace its work'),
+                        () => carryImport(name, file, true), () => { notice.hidden = true; focusTerminal(); });
+                    return;
+                }
+                if (!r.ok) throw new Error(said.error ?? `HTTP ${r.status}`);
+                const done = uiSaid('set-carry-done', 'Imported from « {from} ».', { from: said.from?.name ?? file.name });
+                const toLink = Array.isArray(said.toLink) ? said.toLink.filter(Boolean) : [];
+                show(toLink.length ? `${done} ${uiSaid('set-carry-tolink', 'To link by hand:')} ${toLink.join(', ')}` : done, 'OK', () => { notice.hidden = true; focusTerminal(); });
+            } catch (error) { show(error.message, 'Back to the terminal', enter); }
+        };
         $('carry-file').onchange = () => {
             const file = $('carry-file').files?.[0]; $('carry-file').value = '';
             if (!file) return;
             const name = current;
             leavePanel();
             show(uiSaid('set-carry-ask', '« {file} » into « {name} »? Its memory is replaced.', { file: file.name, name }),
-                uiSaid('set-carry-go', 'Import'), async () => {
-                    try {
-                        const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/import`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
-                        const said = await r.json().catch(() => ({}));
-                        if (!r.ok) throw new Error(said.error ?? `HTTP ${r.status}`);
-                        show(uiSaid('set-carry-done', 'Imported from « {from} ».', { from: said.from?.name ?? file.name }), 'OK', () => { notice.hidden = true; focusTerminal(); });
-                    } catch (error) { show(error.message, 'Back to the terminal', enter); }
-                }, () => { notice.hidden = true; focusTerminal(); });
+                uiSaid('set-carry-go', 'Import'), () => carryImport(name, file, false), () => { notice.hidden = true; focusTerminal(); });
         };
         void paintAnswerer(); paintWakeups(); void paintTalkBox(); void paintShareHere();
         paintMachine(here);

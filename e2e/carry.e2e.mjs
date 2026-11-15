@@ -51,3 +51,45 @@ test('its tool memory: exported from its settings as one file, imported into ano
     await me.page.waitForTimeout(2500);
     assert.deepEqual(me.errors, []);
 });
+
+/* EVERYTHING OF IT (14-11): its whole home and its work folder in one file, imported into another conversation of
+   the same tool; its work folder holding files is replaced only once the person said so. */
+test('everything of it: exported as one file, imported into another conversation, its work replaced when asked', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.page.setViewportSize({ width: 1280, height: 900 });
+    await me.create('whole', 'Shell', { chat: false });
+    mkdirSync(homeOf(b, 'whole'), { recursive: true });
+    writeFileSync(join(homeOf(b, 'whole'), 'notes.txt'), 'kept\n');
+    const workOf = (name) => join(b.dir, 'data', 'work', name);
+    mkdirSync(join(workOf('whole'), 'src'), { recursive: true });
+    writeFileSync(join(workOf('whole'), 'src', 'main.c'), 'int main(){}\n');
+    await me.page.locator('#folders').click();
+    await me.chapter('machine');
+    await me.until('its export', async () => me.page.locator('#carry-export-all').isVisible());
+    assert.equal(await me.page.locator('#carry-export-all').getAttribute('aria-disabled'), null, 'its work is kept here');
+    const [download] = await Promise.all([me.page.waitForEvent('download', { timeout: 30_000 }), me.page.locator('#carry-export-all').click()]);
+    assert.match(download.suggestedFilename(), /^whole-\d{4}-\d{2}-\d{2}\.clavarium-all\.tar\.gz$/);
+    const file = join(b.dir, download.suggestedFilename());
+    await download.saveAs(file);
+    await me.create('other', 'Shell', { chat: false });
+    mkdirSync(homeOf(b, 'other'), { recursive: true });
+    mkdirSync(workOf('other'), { recursive: true });
+    writeFileSync(join(workOf('other'), 'old.txt'), 'old\n');
+    await me.page.locator('#folders').click();
+    await me.chapter('machine');
+    await me.page.locator('#carry-file').setInputFiles(file);
+    await me.until('asked first', async () => /other/.test(await me.page.locator('#notice').innerText().catch(() => '')));
+    await me.page.locator('#notice button', { hasText: /^Import$/ }).click();
+    /* Its work has a file: asked again before it is replaced. */
+    await me.until('asked to replace', async () => /Replace them all/.test(await me.page.locator('#notice').innerText().catch(() => '')), 20_000);
+    assert.ok(existsSync(join(workOf('other'), 'old.txt')), 'nothing replaced before the person said so');
+    await me.page.locator('#notice button', { hasText: /^Replace its work$/ }).click();
+    await me.until('imported', async () => /Imported from « whole »/.test(await me.page.locator('#notice').innerText().catch(() => '')), 30_000);
+    assert.equal(readFileSync(join(homeOf(b, 'other'), 'notes.txt'), 'utf8'), 'kept\n');
+    assert.equal(readFileSync(join(workOf('other'), 'src', 'main.c'), 'utf8'), 'int main(){}\n');
+    assert.ok(!existsSync(join(workOf('other'), 'old.txt')), 'its work replaced');
+    await me.until('its tool back', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'other')?.phase === 'ready');
+    await me.page.waitForTimeout(2500);
+    assert.deepEqual(me.errors, []);
+});

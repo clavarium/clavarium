@@ -12,6 +12,7 @@ import { attachCommand, SOCKET } from './tmux.mjs';
 import { WORK, VM_USER, SHARING_STEP, stepLine, vmName } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
+import { homeExcludes, wholeStream, readManifest, workEmpty, unpackHere, restoreWork, CARRY } from './carry.mjs';
 import { availableParallelism } from 'node:os';
 import { spawn } from 'node:child_process';
 import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, copyFileSync, mkdirSync } from 'node:fs';
@@ -155,6 +156,10 @@ export class Conversations {
        accesses of the original given to the copy (copy, below). */
     copyWork = async () => {};
     copyRights = async () => {};
+    /* Set by the server: what a conversation was given, for a whole export -- each by its id, a secret by its name
+       only (never its value); and the same given again on an import, where it exists here -> { linked, missing }. */
+    accessesOf = async () => ({});
+    relink = async () => ({ linked: [], missing: [] });
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
@@ -971,16 +976,88 @@ export class Conversations {
         return { name: `${name}-${new Date().toISOString().slice(0, 10)}.clavarium.tar.gz`, stream: child.stdout, child };
     }
 
+    /* EVERYTHING OF IT, CARRIED (14-11, its owner's ask): its manifest with what it was given (accesses, by id), its
+       whole home (without HOME_LEFT_OUT, carry.mjs) and its work folder, as one .tar.gz streamed to the person. Its
+       home is written by its machine into its work folder (never through the VM manager's output), then sent from
+       here followed by its work, read here. Its work must be kept on this server. -> { name, stream, child } */
+    async exportWhole(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        if (!workDir) throw new Refusal(409, 'Its work is on its own machine\'s disk: keep it here first (Its files), then export it.');
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        const accesses = await this.accessesOf(name);
+        const manifest = JSON.stringify({ kind: 'clavarium-conversation', version: 2, whole: true, tool: c.tool, name: c.name, ...(c.title ? { title: c.title } : {}), memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB, at: new Date().toISOString(), accesses });
+        const id = `whole-${Date.now()}`;
+        /* In its machine: the manifest, then its home as home/ (a link's target left as it is), one block per record
+           so that its work can follow it (carry.mjs). Globs off: the words left out are given to tar as they are. */
+        const script = 'set -f; m=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+            + 'ex=""; for a in $2; do ex="$ex --exclude=$a"; done; mkdir -p /work/' + CARRY + '; '
+            + 'rc=0; tar -cf "/work/' + CARRY + '/$3.tar" -b 1 --warning=no-file-changed -C "$m" clavarium-conversation.json -C "$HOME" $ex --transform "s,^\\.,home,S" . || rc=$?; rm -rf "$m"; '
+            /* 1: a file changed while read: the archive is whole all the same. */
+            + '[ "$rc" -le 1 ]';
+        const homeTar = join(workDir, CARRY, `${id}.tar`);
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, homeExcludes(tool?.state?.skip ?? []).join(' '), id]);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] });
+        let said = '';
+        child.stderr.on('data', (d) => { said = (said + d).slice(-2000); });
+        const code = await new Promise((ok) => { child.on('error', () => ok(-1)); child.on('close', ok); });
+        const drop = () => rmSync(homeTar, { force: true });
+        if (code !== 0) { drop(); throw new Refusal(502, `Not exported: ${firstLine(said) || `exit ${code}`}`); }
+        let out;
+        try { out = wholeStream(homeTar, workDir, drop); } catch (error) { throw new Refusal(502, `Not exported: ${error.message}`); }
+        return { name: `${name}-${new Date().toISOString().slice(0, 10)}.clavarium-all.tar.gz`, stream: out.stream, child: { kill: out.kill } };
+    }
+
     /* PUT BACK an exported state in this conversation (same tool): its tool stopped, the archive unpacked in
        its home, its tool started again, taking up its last session. -> { tool, from } */
-    async importState(name, input) {
+    /* A WHOLE export (exportWhole) puts back its home, its work folder and its accesses: its work only into an empty
+       one, unless `replaceWork` -- what is there is never thrown away silently. -> { tool, from, whole, linked, toLink } */
+    async importState(name, input, { replaceWork = false } = {}) {
         const c = this.#busyCheck(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
-        if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: nothing can be imported in it.`);
         if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        /* Received first, whole, beside its work when it has one here (the same disk its work goes to). */
+        const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        const id = `up-${Date.now()}`;
+        const aside = workDir ? join(workDir, CARRY) : mkdtempSync(join(tmpdir(), 'clv-import-'));
+        mkdirSync(aside, { recursive: true });
+        const file = join(aside, `${id}.tgz`); const stage = join(aside, id);
+        try {
+            if (typeof input === 'string') copyFileSync(input, file);
+            else await new Promise((ok, fail) => { const w = createWriteStream(file); input.on('error', fail); w.on('error', fail); w.on('finish', ok); input.pipe(w); });
+            const manifest = await readManifest(file).catch((error) => { throw new Refusal(502, `Not imported: ${error.message}`); });
+            if (manifest?.kind !== 'clavarium-conversation') throw new Refusal(400, 'This is not an exported conversation.');
+            if (manifest.tool !== c.tool) throw new Refusal(400, 'This export is of another tool: import it into a conversation with that tool.');
+            if (!manifest.whole) {
+                if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: nothing can be imported in it.`);
+                await this.#stopTool(name);
+                try { return { tool: c.tool, from: await this.#unpack(name, c.tool, file) }; } finally { this.ready(name); }
+            }
+            if (!workDir) throw new Refusal(409, 'Its work is on its own machine\'s disk: keep it here first (Its files), then import into it.');
+            if (!replaceWork && !workEmpty(workDir)) throw Object.assign(new Refusal(409, 'Its work folder is not empty: import again to replace it.'), { kind: 'work-not-empty' });
+            await unpackHere(file, stage).catch((error) => { throw new Refusal(400, `Not imported: ${error.message}`); });
+            rmSync(file, { force: true });
+            await this.#stopTool(name);
+            try {
+                /* Its home: in its machine, each part of home/ in place of the old (as #unpackFrom does). */
+                const script = 'set -e; s="/work/' + CARRY + '/$1/home"; [ -d "$s" ] || exit 0; '
+                    + 'for e in "$s"/.[!.]* "$s"/*; do if [ ! -e "$e" ] && [ ! -L "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
+                const r = await this.#vms.exec(name, ['sh', '-c', script, 'import', id], { timeoutMs: 30 * 60_000 });
+                if (r.code !== 0) throw new Refusal(502, `Not imported: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+                restoreWork(join(stage, 'work'), workDir, replaceWork);
+                const { linked, missing } = await this.relink(name, manifest.accesses ?? {});
+                return { tool: c.tool, from: { name: manifest.name, at: manifest.at }, whole: true, linked, toLink: missing };
+            } finally { this.ready(name); }
+        } finally {
+            rmSync(file, { force: true }); rmSync(stage, { recursive: true, force: true });
+            if (!workDir) rmSync(aside, { recursive: true, force: true });
+        }
+    }
+    async #stopTool(name) {
         this.drop(name);
         await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
-        try { return { tool: c.tool, from: await this.#unpack(name, c.tool, input) }; } finally { this.ready(name); }
     }
 
     /* An exported state unpacked into its home (its tool stopped by the caller): its manifest checked, then each

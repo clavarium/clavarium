@@ -242,11 +242,11 @@
             <p id="work-moved" class="hint" hidden></p>
             <button type="button" id="work-move"></button>
             </div>
-            <!-- CARRIED ELSEWHERE (#351): its tool's state (memory, sessions, settings) as one file; put back here. -->
+            <!-- CARRIED ELSEWHERE (#351): its tool's state (memory, sessions, settings), or everything of it (its home, its work, its accesses), as one file; put back here. -->
             <div id="carry-box">
-            <div class="panel-top"><b data-said="set-carry">Its tool's memory</b></div>
-            <p class="hint" data-said="set-carry-hint">Memory, sessions, settings: to take elsewhere.</p>
-            <div class="row"><a id="carry-export" class="button" download data-said="set-carry-export">Export</a><button type="button" id="carry-import" data-said="set-carry-import">Import...</button><input type="file" id="carry-file" accept=".gz,application/gzip" hidden></div>
+            <div class="panel-top"><b data-said="set-carry">Export / Import</b></div>
+            <p class="hint" data-said="set-carry-hint">Its AI's memory, or everything: to take elsewhere.</p>
+            <div class="row"><a id="carry-export" class="button" download data-said="set-carry-export">Its AI's memory</a><a id="carry-export-all" class="button" download data-said="set-carry-all">Everything (home, work, accesses)</a><button type="button" id="carry-import" data-said="set-carry-import">Import...</button><input type="file" id="carry-file" accept=".gz,application/gzip" hidden></div>
             <p id="carry-said" class="hint" role="status" hidden></p>
             </div>
             <!-- WHEN ITS MACHINE IS SHORT (server/healthreact.mjs): you are told either way. -->
