@@ -671,3 +671,26 @@ test('when its thread is archived: Parley\'s default till the owner chooses; set
     const disk = bench(t, { work: 'disk' });
     assert.throws(() => disk.talk.setSplit('helper', { days: 7 }), (e) => e.status === 409);
 });
+
+/* Restarted and nothing written since (15-11, its owner's ask): its docket says it -- once its tool is READY, as
+   the line above -- and nothing is typed here; once. */
+test('after a restart with nothing written since, its docket is told once the tool is ready; nothing typed', async (t) => {
+    const b = bench(t);
+    b.world.clock = Date.now();
+    await b.talk.set('helper', true);
+    b.world.open = true;
+    const posted = []; b.talk.restarted = (name, why) => { posted.push([name, why]); return true; };
+    b.world.settled = { openFor: 300, quietFor: 0 };
+    b.talk.renewed('helper', 'Its machine was restarted: the tool started again.', true);
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(posted, [], 'not ready: not yet');
+    b.world.settled = { openFor: REREAD_AFTER_MS + 3000, quietFor: SETTLED_MS + 1 };
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await until('posted', () => posted.length === 1);
+    assert.deepEqual(posted, [['helper', 'Its machine was restarted: the tool started again.']]);
+    b.world.clock += 60_000;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(posted.length, 1, 'once');
+    assert.deepEqual(b.typed, [], 'nothing typed: its docket tells it when it is free');
+});

@@ -566,6 +566,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);
+    /* Restarted with nothing written since (15-11): its docket tells it, once its tool is ready and free. */
+    talk.restarted = (name, why) => {
+        if (!dockets.on(name)) return false;
+        try { dockets.post(name, { kind: 'restarted', text: `Your machine was restarted${why ? ` (${String(why).replace(/\.$/, '')})` : ''}. What ran in the background stopped with it: pick up where you were.` }); return true; } catch { return false; }
+    };
     /* What an owner did to a machine (start, stop, sleep, force, restart): in the journal, and a line in its chat. */
     all.machineSaid = (name, text, ok, chat) => {
         events.add({ kind: 'machine', text: `Machine of ${name}: ${text}`, conversation: name });
