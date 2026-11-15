@@ -139,6 +139,27 @@ export class Binders {
             if (level === 'read' || level === 'write') this.#keeper.store.grant(l.id, `${AGENT}${to}`, level, keeper);
         }
     }
+    /* WHAT IT WAS GIVEN, for a whole export (carry.mjs): each list by its id, with its access; and the same given
+       again, on an import, where the list exists here -> the ids not found. */
+    grantsOf(name) {
+        const keeper = { id: 'person:keeper', kind: 'person', name: 'keeper' };
+        const out = [];
+        for (const l of this.#keeper.store.lists(keeper)) {
+            const given = l.grants?.[`${AGENT}${name}`];
+            const level = typeof given === 'string' ? given : given?.access ?? given?.level;
+            if (level === 'read' || level === 'write') out.push({ id: l.id, level });
+        }
+        return out;
+    }
+    regrant(name, given = []) {
+        const keeper = { id: 'person:keeper', kind: 'person', name: 'keeper' };
+        const here = new Set(this.#keeper.store.lists(keeper).map((l) => l.id));
+        const missing = [];
+        for (const g of given) {
+            if (here.has(g?.id) && (g.level === 'read' || g.level === 'write')) this.#keeper.store.grant(g.id, `${AGENT}${name}`, g.level, keeper); else missing.push(g?.id);
+        }
+        return missing;
+    }
     /* FOR API KEYS (apikeys.mjs): every list with who was given it, as a person sees them; a key given a list, or
        taken back, on the list's own access -- as a conversation is. `identity`: the person, as its history says. */
     lists() { return this.#keeper.store.lists({ id: 'person:keeper', kind: 'person', name: 'keeper' }).map((l) => ({ id: l.id, title: l.title, archived: Boolean(l.archived), grants: { ...(l.grants ?? {}) } })); }
