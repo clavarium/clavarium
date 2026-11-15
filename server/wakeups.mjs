@@ -234,6 +234,18 @@ export class Wakeups {
         return once ? { ...this.of(name), address: `${CALL_PATH}${once}` } : this.of(name);
     }
 
+    /* A COPY'S WAKE-UPS (15-11, asked when it is copied): its original's, each its own again (a new id, its clock
+       counted from now); a call from outside is not -- its address is the original's, said once and never again. */
+    copyTo(from, to) {
+        this.#known(from); this.#known(to);
+        const was = this.#record(from);
+        const now = this.#now().toISOString();
+        const items = was.items.filter((i) => i.kind !== 'call').map(({ last, ...i }) => ({ ...i, id: randomUUID(), made: now, last: null, ...(i.fired !== undefined ? { fired: now } : {}) }));
+        const r = this.#record(to);
+        this.#store.put({ ...r, perHour: was.perHour, items: [...r.items, ...items].slice(0, ITEMS_MAX) });
+        return this.of(to);
+    }
+
     #change(name, id, change) {
         this.#known(name);
         const r = this.#record(name);

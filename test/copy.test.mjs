@@ -279,3 +279,15 @@ exit 0
     assert.ok(asleepAgain >= 0 && made >= 0, out.join('\n'));
     assert.ok(asleepAgain < made, 'asleep again before the copy\'s machine is launched');
 });
+
+/* Its reminders and wake-ups (15-11): copied only when asked, the box unticked otherwise. */
+test('a copy takes its reminders and wake-ups only when asked', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool' }); await b.all.built;
+    const asked = []; b.all.copyReminders = async (from, to) => { asked.push(`${from}>${to}`); };
+    const one = await b.all.copy('mail', { title: 'One' }); await b.all.copied;
+    assert.deepEqual(asked, [], 'not asked: not copied');
+    const two = await b.all.copy('mail', { title: 'Two', reminders: true }); await b.all.copied;
+    assert.deepEqual(asked, [`mail>${two.name}`]);
+    assert.equal(b.store.get(one.name).phase, 'ready'); assert.equal(b.store.get(two.name).phase, 'ready');
+});

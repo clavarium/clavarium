@@ -3321,6 +3321,7 @@
         Object.assign(cm, { of: here.name, kind, place: kind === 'copy' || here.sharedMachine ? '' : (sharedMachines().find((m) => m.name !== here.sharedMachine)?.name ?? 'new') });
         $('machine-names').replaceChildren(...sharedMachines().map((m) => Object.assign(document.createElement('option'), { value: m.name })));
         $('cm-copy-title').value = `${here.title ?? here.name} (copy)`;
+        $('cm-reminders').checked = false;
         /* Its sheep: two for a copy (the second slides out of the first), one walking for a move. */
         if (!$('cm-sheep').childElementCount) $('cm-sheep').innerHTML = `<div class="mascot cm-one">${MASCOTS[MASCOT]()}</div><div class="mascot cm-one">${MASCOTS[MASCOT]()}</div>`;
         $('cm-choose').hidden = false; $('cm-check').hidden = true;
@@ -3376,7 +3377,7 @@
         }
         const title = $('cm-copy-title').value.trim() || `${here.title ?? here.name} (copy)`;
         try {
-            const made = await post(`${API}/conversations/${encodeURIComponent(name)}/copy`, { title, ...goes.body });
+            const made = await post(`${API}/conversations/${encodeURIComponent(name)}/copy`, { title, ...goes.body, ...($('cm-reminders').checked ? { reminders: true } : {}) });
             if (made?.name) copiesWatched.add(made.name);
             await refresh();
         } catch (error) { cmToast(`✗ ${error.message}`, 'bad'); }

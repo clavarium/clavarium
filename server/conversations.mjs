@@ -1103,11 +1103,11 @@ export class Conversations {
 
     /* A COPY OF A CONVERSATION (#221, 13-11, its owner's ask: safer than a move -- nothing is destroyed). A new
        conversation, in a machine of its own or a shared one, with what its original has: its work folder (its
-       chat with it), its tool's state (the AI's memory), its settings, and the accesses it was given. Its devices,
-       its reminders and its pending asks are NOT copied: one of the two answers them, the original. Its original is
+       chat with it), its tool's state (the AI's memory), its settings, and the accesses it was given; its reminders
+       and wake-ups only when asked (`reminders`, 15-11). Its devices and its pending asks are NOT copied: one of the two answers them, the original. Its original is
        not touched; asleep, its machine is woken the time to read its tool's state, then put to sleep again.
        -> the copy's record, at once; `this.copied`: the end of it. */
-    async copy(name, { title, machine, machineMb } = {}) {
+    async copy(name, { title, machine, machineMb, reminders = false } = {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, 'It is busy: copy it once it is ready.');
@@ -1127,11 +1127,11 @@ export class Conversations {
         this.#holding.add(made.name);
         this.#store.patch(made.name, { copyOf: name });
         const building = this.built;
-        this.copied = this.#copying(name, made.name, c, tool, building, open);
+        this.copied = this.#copying(name, made.name, c, tool, building, open, reminders === true);
         return this.#store.get(made.name);
     }
 
-    async #copying(from, to, c, tool, building, open = () => {}) {
+    async #copying(from, to, c, tool, building, open = () => {}, reminders = false) {
         const dir = mkdtempSync(join(tmpdir(), 'clv-copy-'));
         const carried = join(dir, 'state.tar.gz');
         let woke = false; let putBack = 'sleep';
@@ -1240,6 +1240,8 @@ export class Conversations {
             }
             this.#store.patch(to, { step: 'Giving it the same accesses' });
             await this.copyRights(from, to);
+            /* Its reminders and wake-ups too, when asked (15-11): an unticked box on the copy's last screen. */
+            if (reminders && typeof this.copyReminders === 'function') await Promise.resolve().then(() => this.copyReminders(from, to)).catch(() => {});
             this.#holding.delete(to);
             if (!this.#store.get(to)) return undefined;
             this.#store.patch(to, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined });

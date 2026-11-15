@@ -149,9 +149,13 @@ test('its settings: Copy... into a shared machine -- its name given, sent, a ref
     await me.until('its check', async () => me.page.locator('#cm-copy-part').isVisible());
     assert.match(await me.page.locator('#cm-copy-title').inputValue(), /\(copy\)$/);
     await me.page.fill('#cm-copy-title', 'Mail two');
+    /* Its reminders and wake-ups (15-11): unticked unless asked; ticked, said to the server. */
+    assert.equal(await me.page.locator('#cm-reminders').isChecked(), false);
+    await me.page.locator('#cm-reminders').check();
+    if (process.env.CM_SHOTS) await me.page.locator('#cm').screenshot({ path: join(process.env.CM_SHOTS, 'cm-copy-reminders.png') });
     await me.page.locator('#cm-go').click();
     await me.until('sent', async () => asked !== null);
-    assert.deepEqual(asked, { title: 'Mail two', machine: 'assist' });
+    assert.deepEqual(asked, { title: 'Mail two', machine: 'assist', reminders: true });
     await me.until('the refusal said', async () => /✗ Stopped here by the test/.test(await me.page.locator('#cm-toast').innerText().catch(() => '')));
     /* Diary, in the shared machine: its own machine for a move is not yet, and nothing can be chosen. */
     await me.page.locator('#cm-toast-close').click();

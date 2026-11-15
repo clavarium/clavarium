@@ -24,12 +24,28 @@
  * The folder is the work folder's .docket, beside .parley: the tool writes
  * there, so nothing in it is trusted (the library bounds and cleans it).
  */
-import { mkdirSync, lstatSync } from 'node:fs';
+import { mkdirSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Docket, WAKE } from 'clavarium-docket/host';
 import { verbs } from 'clavarium-docket/server';
 
 export { WAKE };
 export const FOLDER = '.docket';
+
+/* A COPY'S REMINDERS (15-11, asked when it is copied): the reminders its original's tool set (plans.jsonl in its
+   docket folder), those still to come -- a repeating one, or one due later -- written in the copy's; one taken
+   back, or past, is not. Its events and their answers stay the original's. -> how many. */
+export function copyPlans(fromWork, toWork, now = Date.now()) {
+    const lines = (file) => { try { return readFileSync(join(fromWork, FOLDER, file), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
+    const off = new Set(lines('plans-off.jsonl').map((o) => o.plan));
+    const kept = lines('plans.jsonl').filter((p) => p.kind === 'plan' && !off.has(p.id) && (p.cron || (p.due && Date.parse(p.due) > now)));
+    if (!kept.length) return 0;
+    mkdirSync(join(toWork, FOLDER), { recursive: true });
+    let zone = null; try { zone = readFileSync(join(fromWork, FOLDER, 'zone'), 'utf8'); } catch { /* none */ }
+    if (zone !== null) writeFileSync(join(toWork, FOLDER, 'zone'), zone);
+    writeFileSync(join(toWork, FOLDER, 'plans.jsonl'), kept.map((p) => JSON.stringify(p)).join('\n') + '\n', { flag: 'a' });
+    return kept.length;
+}
 export const TICK_MS = 5000;
 /* An event not acknowledged is told again after this long, the tool idle... */
 export const AGAIN_MS = 30 * 60_000;
