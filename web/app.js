@@ -8047,7 +8047,13 @@
         if (!view) return;
         fillCompanions($('companion-general'), [['', 'None']], view.general, null);
         $('companion-general-hint').textContent = companionWarn(view, view.general) || 'Signs the tools in with its browser';
+        $('companion-clicks').checked = view.clicks === true;
     }
+    $('companion-clicks').addEventListener('change', async () => {
+        $('companion-general-error').hidden = true;
+        try { await post(`${API}/signin-companion`, { clicks: $('companion-clicks').checked }); } catch (error) { $('companion-general-error').textContent = error.message; $('companion-general-error').hidden = false; }
+        await paintCompanionGeneral();
+    });
     $('companion-general').addEventListener('change', async () => {
         $('companion-general-error').hidden = true;
         try { await post(`${API}/signin-companion`, { companion: $('companion-general').value }); } catch (error) { $('companion-general-error').textContent = error.message; $('companion-general-error').hidden = false; }

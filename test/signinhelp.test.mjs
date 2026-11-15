@@ -203,3 +203,17 @@ test('no code, a failure, no answer in time, or the person asking: the link goes
     assert.equal(b.route('alpha').route, 'person');
     assert.deepEqual(readdirSync(join(b.work('beta'), '.docket')).filter((n) => n.startsWith('signin-')), [], 'no link left in its folder');
 });
+
+/* Its owner's go (15-11): the companion clicks Authorize itself; off unless said. */
+test('the companion clicks Authorize itself only when its owner allowed it', async (t) => {
+    const b = bench(t);
+    b.help.setGeneral('beta');
+    assert.equal(b.help.view().clicks, false, 'off unless said');
+    assert.throws(() => b.help.setClicks('yes'), /true or false/);
+    b.help.setClicks(true);
+    b.ask('alpha'); await b.help.tick();
+    const [e] = b.waiting('beta');
+    assert.match(e.text, /Your owner allowed you: on that page only, click the button that authorizes/);
+    assert.doesNotMatch(e.text, /Click Authorize in your browser/);
+    assert.equal(b.help.view().clicks, true);
+});

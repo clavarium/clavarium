@@ -82,7 +82,7 @@ export class SigninHelp {
         this.#work = workFolder; this.#browsers = browsers; this.#post = post; this.#type = type; this.#event = event; this.#now = now;
     }
 
-    #settings() { const s = this.#store.get() ?? {}; return { general: typeof s.general === 'string' ? s.general : '', per: s.per && typeof s.per === 'object' ? { ...s.per } : {} }; }
+    #settings() { const s = this.#store.get() ?? {}; return { general: typeof s.general === 'string' ? s.general : '', per: s.per && typeof s.per === 'object' ? { ...s.per } : {}, clicks: s.clicks === true }; }
     #exists(name) { return this.#conversations().some((c) => c.name === name); }
     #usable(name) { try { return (this.#browsers(name) ?? []).filter((b) => ACTS(b.level)); } catch { return []; } }
 
@@ -90,12 +90,19 @@ export class SigninHelp {
     view() {
         const s = this.#settings();
         const named = new Set([s.general, ...Object.values(s.per)].filter((c) => c && c !== NONE));
-        return { general: s.general, per: s.per, browsers: Object.fromEntries([...named].map((c) => [c, this.#usable(c).map((b) => b.id)])) };
+        return { general: s.general, per: s.per, clicks: s.clicks, browsers: Object.fromEntries([...named].map((c) => [c, this.#usable(c).map((b) => b.id)])) };
     }
     /* '' for none. */
     setGeneral(companion) {
         if (typeof companion !== 'string' || (companion && !this.#exists(companion))) throw new Refusal(400, 'Give a conversation, or nothing for none.');
         this.#store.set({ ...this.#settings(), general: companion });
+        return this.view();
+    }
+    /* THE COMPANION CLICKS « AUTHORIZE » ITSELF (15-11, its owner's go): off unless its owner says so; then the
+       person has nothing to do. Only that button, on the page the link opened -- nothing else is clicked. */
+    setClicks(on) {
+        if (typeof on !== 'boolean') throw new Refusal(400, 'Say true or false.');
+        this.#store.set({ ...this.#settings(), clicks: on });
         return this.view();
     }
     /* null: as the general one; NONE: none for it; else that conversation -- never itself. */
@@ -175,7 +182,9 @@ export class SigninHelp {
             /* The link itself is not in the event (an event is shown to the companion's owner): only where it is. */
             const at = `/work/${DOCKET}/${file}`;
             event = this.#post(companion, { kind: KIND, text: `Sign in « ${name} » (${tool.label}) with your browser. 1) tether browser ${target} open "$(head -n1 ${at})" `
-                + '2) Tell your person, one line: "Click Authorize in your browser". '
+                + (this.#settings().clicks
+                    ? '2) Your owner allowed you: on that page only, click the button that authorizes (Authorize, Allow, Continue, Accept) -- nothing else, no other page. '
+                    : '2) Tell your person, one line: "Click Authorize in your browser". ')
                 + (code ? `3) Read the code the page then shows (tether browser ${target} html --readable). 4) docket done ID "<the code>": the code alone, never in a chat. ` : '3) Once the page says it is done: docket done ID "ok". ')
                 + 'Over 10 min old, or not possible: docket failed ID "why".', data: { conversation: name, tool: tool.id, link: at, browser: target } });
             if (!this.#own(docket)) throw new Error('its docket folder is not its own');
