@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanDictation, withoutLoop, transcribe, voiceConfig, Dictation, PROVIDERS, dictationProblem, isPrivateHost, withoutCharLoop, withoutPhantoms, capToDuration, wavSeconds, languageOf, deviceLanguage } from '../server/voice.mjs';
-import { Detector, Segmenter, toWav, loudness, levelOf, levelBars, LEVEL_BARS, LEVEL_DOT, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS } from '../web/voice-core.js';
+import { Detector, Segmenter, toWav, loudness, levelOf, levelBars, LEVEL_BARS, LEVEL_DOT, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS, inOrder } from '../web/voice-core.js';
 
 const wav = Buffer.from(toWav([new Float32Array(BLOCK).fill(0.1)]));
 
@@ -364,4 +364,29 @@ test('the level as five bars: newest in the middle, lower at the sides, a dot wh
     assert.deepEqual(levelBars([1, 0, 0]), [LEVEL_DOT, LEVEL_DOT, 1, LEVEL_DOT, LEVEL_DOT], 'a new sound starts in the middle');
     assert.deepEqual(levelBars([0, 0, 1]), [0.68, LEVEL_DOT, LEVEL_DOT, LEVEL_DOT, 0.68], 'and moves outwards');
     assert.deepEqual(levelBars(NaN), levelBars(0));
+});
+
+test('dictated phrases come out in the order they were spoken, whatever order their transcriptions return in', () => {
+    const order = inOrder();
+    const typed = [];
+    const first = order(); const second = order(); const third = order(); const fourth = order();
+    third(() => typed.push('three'));
+    second(() => typed.push('two'));
+    assert.deepEqual(typed, [], 'a later phrase waits for the long one said before it');
+    first(() => typed.push('one'));
+    assert.deepEqual(typed, ['one', 'two', 'three']);
+    fourth(() => typed.push('four'));
+    assert.deepEqual(typed, ['one', 'two', 'three', 'four']);
+    first(() => typed.push('again'));
+    assert.deepEqual(typed, ['one', 'two', 'three', 'four'], 'a place is given once');
+});
+
+test('a phrase that failed or that throws never holds back the ones after it', () => {
+    const order = inOrder();
+    const typed = [];
+    const failed = order(); const throwing = order(); const last = order();
+    last(() => typed.push('last'));
+    throwing(() => { throw new Error('no terminal'); });
+    failed(null);
+    assert.deepEqual(typed, ['last']);
 });

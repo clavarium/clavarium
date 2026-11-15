@@ -4,7 +4,7 @@
    machine's part (its home) is in conversations.mjs (exportWhole, importState).
 
    The archive, in this order:
-     clavarium-conversation.json   its manifest (version 2, `whole`): its tool, its title, its sizes, its accesses
+     clavarium-conversation.json   its manifest (version 2, `whole`): its tool, its title, its sizes, its accesses, its wake-ups
      home/...                      its home, without what is rebuilt or thrown away (HOME_LEFT_OUT)
      work/...                      its work folder, read here (it is kept on this server) */
 import { spawn } from 'node:child_process';
@@ -92,12 +92,14 @@ export function unpackHere(file, into) {
 }
 
 /* ITS WORK PUT BACK, here: what it holds now thrown away only when asked (`replace`), then each entry of the
-   export's work/ moved in (the same disk: a rename). */
+   export's work/ moved in (the same disk: a rename). Its docket (.docket) is neither: the one here stays its
+   own, and the export's reminders come only when asked (`reminders`, conversations.mjs importState). */
+const DOCKET_DIR = '.docket';
 export function restoreWork(from, workDir, replace) {
-    if (replace) for (const e of readdirSync(workDir)) if (e !== CARRY) rmSync(join(workDir, e), { recursive: true, force: true });
+    if (replace) for (const e of readdirSync(workDir)) if (e !== CARRY && e !== DOCKET_DIR) rmSync(join(workDir, e), { recursive: true, force: true });
     let entries = [];
     try { entries = readdirSync(from); } catch { return; }
-    for (const e of entries) if (e !== CARRY) renameSync(join(from, e), join(workDir, e));
+    for (const e of entries) if (e !== CARRY && e !== DOCKET_DIR) renameSync(join(from, e), join(workDir, e));
 }
 
 /* WHAT IT WAS GIVEN, for a whole export, each by its id: a folder, a repository or a mailbox by its asset

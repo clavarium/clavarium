@@ -1,7 +1,7 @@
 /* DICTATION IN THE PAGE: the microphone stays open, each spoken phrase is
    transcribed and handed to whoever listens. The page types it into the
    terminal. See voice-core.js for how a phrase is found. */
-import { RATE, BLOCK, BLOCK_MS, Detector, Segmenter, loudness, levelOf, levelBars, toWav } from './voice-core.js';
+import { RATE, BLOCK, BLOCK_MS, Detector, Segmenter, loudness, levelOf, levelBars, toWav, inOrder } from './voice-core.js';
 
 /* The operator's pages ask /api; a paired device asks /c/api/<its pairing>,
    known once it has signed in (the page writes it on the document). */
@@ -28,17 +28,19 @@ async function listen(on, { to } = {}) {
     const detector = new Detector();
     let pending = 0;
     let closed = false;
+    const order = inOrder();
     const tell = () => { if (!closed) on.state(pending > 0 ? 'transcribing' : segmenter.speaking ? 'hearing' : detector.ready() ? 'listening' : 'calibrating'); };
     const segmenter = new Segmenter({
         onStart: () => { on.speech?.(); tell(); },
         onPhrase: async (blocks) => {
             pending++; tell();
+            const place = order();
             try {
                 const r = await fetch(withLanguage(to ?? `${api()}/voice`), { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: toWav(blocks) });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'The phrase could not be transcribed.');
-                if (!closed && j.text) on.phrase(j.text);
-            } catch (error) { if (!closed) on.error(error.message); }
+                place(j.text ? () => { if (!closed) on.phrase(j.text); } : null);
+            } catch (error) { place(null); if (!closed) on.error(error.message); }
             pending--; tell();
         },
     });

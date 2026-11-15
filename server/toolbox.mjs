@@ -28,6 +28,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync, renameSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { NODE_STEPS } from './tools.mjs';
 import { fileURLToPath } from 'node:url';
 import { APP, ARCHIVES, MACHINE_TOOLS, archiveName, locked, packageDir, packageVersion } from './parley.mjs';
 
@@ -58,6 +59,7 @@ export const parleySource = (options = {}) => toolSource(MACHINE_TOOLS.find((t) 
 
 /* "sha512-<base64>", as npm writes an integrity. */
 const NO_NPM = 'there is no npm in this machine';
+const NODE_STEP_MS = 15 * 60_000;
 export const integrityOf = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
@@ -192,8 +194,13 @@ export class Toolbox {
         const exec = (argv, timeoutMs = 30_000) => this.#vms.exec(conversation, argv, { timeoutMs }).catch(() => ({ code: 1, stdout: '', stderr: '' }));
         const there = async () => { const v = await exec([tool.name, '--version']); return v.code === 0 && v.stdout.trim() === tool.version; };
         if (await there()) return '';
-        /* A machine without node (a plain shell): said once, until it is built again or restarted. */
-        if ((await exec(['which', 'npm'])).code !== 0) return NO_NPM;
+        /* A machine without node (a plain shell, a tool whose recipe has none): node first, as a tool's "node"
+           step gives it; still none, said once, until it is built again or restarted. */
+        if ((await exec(['which', 'npm'])).code !== 0) {
+            const why = await this.#node(conversation);
+            if (why) return why;
+            if ((await exec(['which', 'npm'])).code !== 0) return NO_NPM;
+        }
         /* The archive as the machine reads it, against the index; /tools mounted again once if it is not there. */
         const sum = async () => /^([0-9a-f]{64})\s/.exec((await exec(['sha256sum', '--', tool.path], 60_000)).stdout ?? '')?.[1];
         let seen = await sum();
@@ -203,6 +210,15 @@ export class Toolbox {
         const r = await exec(['sudo', '-n', 'npm', 'install', '-g', '--offline', '--no-audit', '--no-fund', tool.path], 180_000);
         if (r.code !== 0) return `npm: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
         if (!(await there())) return `installed, but "${tool.name} --version" does not say the version of the index`;
+        return '';
+    }
+
+    /* NODE IN A MACHINE WITHOUT IT: the steps of tools.mjs (its checksum checked before it is unpacked). '' or why not. */
+    async #node(conversation) {
+        for (const [i, step] of NODE_STEPS.entries()) {
+            const r = await this.#vms.exec(conversation, step.argv, { input: step.input, timeoutMs: NODE_STEP_MS }).catch(() => ({ code: 1, stdout: '', stderr: '' }));
+            if (r.code !== 0) return `node could not be installed (step ${i + 1}): ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
+        }
         return '';
     }
 

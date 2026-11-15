@@ -6,7 +6,7 @@
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
- *   GET  /api/conversations/<name>/export[?all=1] its tool's state, or everything of it, one archive (#351)   POST .../import[?replaceWork=1]  put back (same tool)
+ *   GET  /api/conversations/<name>/export[?all=1] its tool's state, or everything of it, one archive (#351)   POST .../import[?replaceWork=1&reminders=1]  put back (same tool)
  *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?, cpus?}: stopped, set, started again (202);
  *                                                asleep: checked and kept for its wake, as `sizeAtWake` (200)
  *   POST /api/conversations/<name>/machine       {action: start|stop|restart|sleep|force|force-now}: done on its machine,
@@ -321,7 +321,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (carry && request.method === 'POST' && carry[2] === 'import') {
             if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
             /* ?replaceWork=1: a whole export may replace the work folder that holds files (asked first, on the page). */
-            return send(200, await conversations.importState(decodeURIComponent(carry[1]), request, { replaceWork: query.get('replaceWork') === '1' })), true;
+            return send(200, await conversations.importState(decodeURIComponent(carry[1]), request, { replaceWork: query.get('replaceWork') === '1', reminders: query.get('reminders') === '1' })), true;
         }
         if (pathname.startsWith('/api/files/')) {
             if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' }), true;

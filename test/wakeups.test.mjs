@@ -306,3 +306,25 @@ test('a copy takes its wake-ups, new ids and its clock from now; never a call fr
     assert.ok(got.items.every((i) => !ids.has(i.id)), 'each its own id');
     assert.equal(wakeups.of('worker').items.length, 3, 'the original keeps its own');
 });
+
+/* A WHOLE EXPORT'S WAKE-UPS (15-11): what each is, carried in its manifest; given again on its import when asked. */
+test('a whole export carries what its wake-ups are, never a call from outside; its import gives them again, each checked as one written here', (t) => {
+    const b = bench(t);
+    const list = () => [{ name: 'worker' }, { name: 'there' }];
+    const attached = { worker: ['handoff'], there: [] };
+    const wakeups = new Wakeups({ store: new Store(join(b.dir, 'w3.json')), vms: { exec: async () => ({ code: 0 }) }, conversations: { list, awake: () => [] }, resources: { of: (c) => attached[c].map((name) => ({ name, access: 'write' })), folder: (n) => join(b.dir, n), get: (n) => ({ name: n, type: 'folder' }) }, now: () => new Date(b.world.now) });
+    wakeups.setLimit('worker', 7);
+    const cron = wakeups.add('worker', { kind: 'cron', line: '30 7 * * 1-5', message: 'morning round' }).items[0];
+    wakeups.turn('worker', cron.id, false);
+    wakeups.add('worker', { kind: 'every', minutes: 30, message: 'look again' });
+    wakeups.add('worker', { kind: 'arrival', resource: 'handoff', message: 'look at {files}' });
+    wakeups.add('worker', { kind: 'call', message: 'from the scheduler' });
+    const carried = JSON.parse(JSON.stringify(wakeups.exportOf('worker')));
+    assert.equal(carried.perHour, 7);
+    assert.deepEqual(carried.items.map((i) => i.kind), ['cron', 'every', 'arrival'], 'never a call from outside');
+    assert.ok(carried.items.every((i) => i.id === undefined && i.token === undefined && i.fired === undefined), 'what it is, not its id nor its clock');
+    assert.equal(wakeups.importTo('there', { ...carried, items: [...carried.items, { kind: 'call', message: 'x' }, { kind: 'cron', line: 'rm -rf', message: 'bad' }] }), 2, 'its folder is not attached here: that one left out, as the bad ones');
+    const got = wakeups.of('there');
+    assert.equal(got.perHour, 7);
+    assert.deepEqual(got.items.map((i) => [i.kind, i.on]), [['cron', false], ['every', true]]);
+});
