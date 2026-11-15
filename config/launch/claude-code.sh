@@ -57,7 +57,10 @@ fi
 # here: not signed in (at its start, or signed out on the way: « Login expired », 15-11), its sign-in started by itself, its link sent to the person's chat, the code they paste
 # there typed back (02-11, tried on a real Claude Code); an update installed told to the agent, which restarts
 # when it suits it (never in the middle of its work). A tool that changes its words: only these lines change.
+# Since 15-11 (#362) its sign-in rules are those of config/tools.json ("signin.screen", --tool): the lines
+# below are the fallback of an older server, and its notice. The link may go to another conversation (screen-watch.mjs).
 node "$(dirname "$0")/screen-watch.mjs" \
+    --tool claude-code \
     'type:(Not logged in|Login expired|OAuth token (has )?expired|Invalid API key)[^\n]{0,24}/login=/login' \
     'keys:Select login method:=Enter' \
     'link:https://(claude\.ai|claude\.com|console\.anthropic\.com)/\S*oauth\S*' \

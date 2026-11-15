@@ -11,6 +11,7 @@
  * and the checksum comes from this repository, never from the network. */
 import { readFileSync } from 'node:fs';
 import { VM_USER } from './vm.mjs';
+import { rulesOf } from '../config/launch/screen-watch.mjs';
 
 export const NODE_VERSION = 'v24.20.0';
 export const NODE_SHA256 = '2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2';
@@ -45,6 +46,11 @@ export const NPM_WRITABLE = [
 
 const isArgv = (x) => Array.isArray(x) && x.length > 0 && x.every((a) => typeof a === 'string' && a !== '');
 const ID = /^[a-z][a-z0-9-]{0,30}$/;
+/* The sign-in rules of a tool's screen (signin.screen, 15-11): how many, how long, of which kinds. */
+const SCREEN_RULES_MAX = 20; const SCREEN_RULE_MAX = 400;
+const SCREEN_KINDS = new Set(['link', 'keys', 'type', 'code']);
+/* What the machine is given of them: { toolId: [rule, ...] }, written to /tools/launch/screen-rules.json (toolbox.mjs). */
+export const screenRules = (tools) => Object.fromEntries(tools.filter((t) => t.signin?.screen).map((t) => [t.id, [...t.signin.screen]]));
 const INSTRUCTIONS = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+){0,7}$/;
 
 export function readTools(text) {
@@ -77,7 +83,20 @@ export function readTools(text) {
         if (t.signin !== undefined) {
             const domains = (list) => Array.isArray(list) && list.length > 0 && list.every((d) => typeof d === 'string' && /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(d));
             if (!domains(t.signin.senders) || !domains(t.signin.links)) throw new Error(`${t.id}: signin needs "senders" and "links", lists of domain names`);
-            signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]) });
+            /* Optional (15-11, #362): WHAT ITS SCREEN SAYS when it must sign in -- the rules of screen-watch
+               (config/launch/screen-watch.mjs), "KIND:PATTERN[=VALUE]" with KIND link, keys, type or code, each one
+               rule as screen-watch reads it. Given to the machine in /tools/launch/screen-rules.json: a tool that
+               changes its words is followed here, its launcher unchanged. `link` patterns are also checked, by the
+               server, against "links" before a link is handed to another conversation (signinhelp.mjs). */
+            let screen;
+            if (t.signin.screen !== undefined) {
+                const rules = t.signin.screen;
+                if (!Array.isArray(rules) || rules.length === 0 || rules.length > SCREEN_RULES_MAX || rules.some((r) => typeof r !== 'string' || r.length > SCREEN_RULE_MAX || rulesOf([r]).length !== 1 || !SCREEN_KINDS.has(rulesOf([r])[0].kind))) {
+                    throw new Error(`${t.id}: signin "screen" is a list of screen-watch rules, "link:", "keys:", "type:" or "code:" each`);
+                }
+                screen = Object.freeze([...rules]);
+            }
+            signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]), ...(screen ? { screen } : {}) });
         }
         /* Optional: the command that starts it taking up its last session
            ("claude --continue"); used instead of `command` once it has run on

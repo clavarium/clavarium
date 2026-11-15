@@ -34,6 +34,7 @@ node "$here/toml-block.mjs" .vibe/config.toml tools "$block" \
 # WHAT ITS SCREEN ASKS, read by the generic screen-watch -- Vibe's own words: an update told to the
 # agent, which restarts when it suits it.
 node "$here/screen-watch.mjs" \
+    --tool vibe \
     'notice:(new version|update) (is )?available[^\n]{0,120}=Your tool has an update: when nothing runs, touch /work/.parley/restart-asked to take it up.' \
     </dev/null >/dev/null 2>&1 &
 exec "$@"

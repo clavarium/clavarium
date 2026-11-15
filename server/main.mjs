@@ -26,7 +26,8 @@ import { handleApi } from './api.mjs';
 import { Conversations, DRAWN_MS, Refusal } from './conversations.mjs';
 import { Store, JsonFile } from './store.mjs';
 import { Instance } from './instance.mjs';
-import { loadTools } from './tools.mjs';
+import { loadTools, screenRules } from './tools.mjs';
+import { SigninHelp, typeInto } from './signinhelp.mjs';
 import { Vms, runner } from './vm.mjs';
 import { Resources, WORK_TAB } from './resources.mjs';
 import { download } from './files.mjs';
@@ -338,7 +339,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const gitAccess = new GitAccess({ vault, dataDir, ...(gitSsh ? { ssh: gitSsh } : {}) });
     /* The tools every machine sees at /tools, read-only: see toolbox.mjs. */
     /* With /tools/CLAVARIUM.md in it: where a tool is, the same for all (guide.mjs). */
-    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: () => commonText(), launched: new Store(`${dataDir}/launched.json`),
+    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: () => commonText(), launched: new Store(`${dataDir}/launched.json`), screens: screenRules(tools),
         launches: (name) => Boolean(tools.find((t) => t.id === all.list().find((c) => c.name === name)?.tool)?.launch) });
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess, toolbox });
     /* The ready-made machine new conversations are copied from, kept fresh
@@ -470,13 +471,16 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let bridge;
     /* A wake-up typed is said in its chat (talk, made below: called only once a wake-up fires). */
     /* Where its chat is on, what wakes a tool is an event it acknowledges: see dockets.mjs. */
+    let signinHelp = null;
     const dockets = new Dockets({ store: new Store(`${dataDir}/dockets.json`), resources: folders,
         say: (name, line) => wakeups.say(name, line),
         event: (name, line) => talk.event(name, line),
         alert: (message) => { void alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }); },
         /* Not in a turn: its pulse ended, or is old (Parley's own measure). */
         idle: (name) => { const p = talk.pulse(name); return !(p?.busy === true && Date.now() - Date.parse(p.at) < PULSE_MS); },
-        awake: () => all.awake(), chatOn: (name) => talk.isOn(name) });
+        awake: () => all.awake(), chatOn: (name) => talk.isOn(name),
+        /* A sign-in a companion did for another conversation (signinhelp.mjs, made below): its answer typed there. */
+        acked: (name, e) => signinHelp?.acked(name, e) });
     const typingWatch = new TypingWatch();
     const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), docket: dockets, typing: (name) => typingWatch.busy(name),
         fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
@@ -566,6 +570,13 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);
+    /* Its guide changed while its tool ran (15-11): its docket tells it to read it again. */
+    guide.told = (name, line) => { if (dockets.on(name)) dockets.post(name, { kind: 'guide-changed', text: line }); };
+    /* Restarted with nothing written since (15-11): its docket tells it, once its tool is ready and free. */
+    talk.restarted = (name, why) => {
+        if (!dockets.on(name)) return false;
+        try { dockets.post(name, { kind: 'restarted', text: `Your machine was restarted${why ? ` (${String(why).replace(/\.$/, '')})` : ''}. What ran in the background stopped with it: pick up where you were.` }); return true; } catch { return false; }
+    };
     /* What an owner did to a machine (start, stop, sleep, force, restart): in the journal, and a line in its chat. */
     all.machineSaid = (name, text, ok, chat) => {
         events.add({ kind: 'machine', text: `Machine of ${name}: ${text}`, conversation: name });
@@ -573,6 +584,16 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     };
     /* A Tether call waiting for the owner is said in its conversation's thread, with Accept / Refuse. */
     tethers.announce = (name, event) => { try { return talk.event(name, event); } catch { return null; } };
+    /* DELEGATED SIGN-IN (15-11, #362): a tool that must sign in is signed in by another conversation's browser
+       (its companion), the code it reads typed back into that tool: see signinhelp.mjs. */
+    signinHelp = new SigninHelp({ store: new JsonFile(`${dataDir}/signin-companion.json`, {}),
+        conversations: () => all.list(), tools: () => tools, awake: () => all.awake(), chatOn: (name) => talk.isOn(name),
+        workFolder: (name) => folders.workFolder(name),
+        browsers: (name) => { try { return tethers.store().targets().filter((t) => t.kind === 'browser').map((t) => ({ id: t.id, level: t.grants?.[`conversation:${name}`]?.level ?? '' })).filter((b) => b.level); } catch { return []; } },
+        post: (name, event) => dockets.post(name, event), type: (name, text) => typeInto(vms, name, text),
+        event: (name, line) => talk.event(name, line) });
+    const stopSigninHelp = signinHelp.start();
+    all.signinHelp = signinHelp;
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
     /* A mail cited by its reference, opened on a device that may read its mailbox (mailref.mjs). */
@@ -585,6 +606,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             await toolbox.installIn(name).catch(() => {});
             if (!toolbox.stale(name)) continue;
             try { if (talk.event(name, { kind: 'tools-updated', text: 'Tools updated: restart it to use them all. Its work picks up where it was.', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
+            /* Its tool told too, by its docket (15-11, its owner's ask): it takes them up when it suits it, never mid-work. */
+            try { if (dockets.on(name)) dockets.post(name, { kind: 'tools-updated', text: `Clavarium was updated to ${JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}: your tools (parley, docket, the MCP servers given to you) are new. When nothing runs, touch /work/.parley/restart-asked to take them up; your work picks up where it was.` }); } catch { /* its docket may be off */ }
         }
     });
     /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): its tool restarted by this server
@@ -858,7 +881,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         screen: await quick(screenNow(), 1500, null), catalogue: await quick(catalogue.providers().catch(() => []), 1500, []),
     }) });
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); clearInterval(stopSigninHelp); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
     browsers.attach(server, WebSocketServer); server.on('close', () => browsers.shutdown());

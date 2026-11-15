@@ -29,6 +29,9 @@
  *                                                {} (no machine): out of its shared machine, into one of its own (15-11)
  *   POST /api/conversations/<name>/copy          {title?, machine?, machineMb?, reminders?}: a copy -- its work, its tool's state, its accesses (its reminders and wake-ups when asked); it untouched (202)
  *   POST /api/conversations/<name>/rebuild       {reset?, confirm?}: built again; reset (confirm: its name) for a working one too
+ *   POST /api/signin-companion                   {companion}: the conversation that signs the others' tools in with its browser ('' none; 15-11); {clicks}: it clicks Authorize itself
+ *   POST /api/conversations/<name>/signin-companion  {companion}: its own (a conversation, "none"), or null for the general one; never itself
+ *   POST /api/conversations/<name>/signin-link   its sign-in handed to a companion: shown to the person instead
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
@@ -410,6 +413,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/git-hosts' && gitAccess) return send(200, gitAccess.hosts()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/instance' && instance) return send(200, instance.about()), true;
+            /* The sign-in companions (signinhelp.mjs, 15-11): the general one, each conversation's own, their browsers. */
+            if (pathname === '/api/signin-companion' && conversations.signinHelp) return send(200, conversations.signinHelp.view()), true;
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
             /* Settings, Updates (updates.mjs): what runs, what is out, the mode, what happened. */
             if (pathname === '/api/updates' && updates) return send(200, updates.about()), true;
@@ -1000,6 +1005,12 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const later = /^\/api\/conversations\/([^/]+)\/machine\/cancel$/.exec(pathname);
         if (later) return send(200, conversations.cancelResize(decodeURIComponent(later[1]))), true;
+        /* DELEGATED SIGN-IN (signinhelp.mjs, 15-11): the companion of all, of one conversation, and the link shown to the person instead. */
+        if (pathname === '/api/signin-companion' && conversations.signinHelp) return send(200, body.clicks !== undefined ? conversations.signinHelp.setClicks(body.clicks) : conversations.signinHelp.setGeneral(body.companion)), true;
+        const companionOf = /^\/api\/conversations\/([^/]+)\/signin-companion$/.exec(pathname);
+        if (companionOf && conversations.signinHelp) return send(200, conversations.signinHelp.setFor(decodeURIComponent(companionOf[1]), body.companion ?? null)), true;
+        const linkOf = /^\/api\/conversations\/([^/]+)\/signin-link$/.exec(pathname);
+        if (linkOf && conversations.signinHelp) return send(200, conversations.signinHelp.showLink(decodeURIComponent(linkOf[1]))), true;
         const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);

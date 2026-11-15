@@ -91,7 +91,7 @@ export function commonText() {
         /* Dictation into the terminal is marked once per message (app.js); in the chat, parley read says it. */
         '- A message in your terminal that starts with a microphone sign (U+1F3A4), or that parley read says was dictated, came by voice: a word may be misheard; when a key word seems wrong, ask rather than guess.',
         /* The commands, the one path every assistant has, MCP or not (#352): MCP tools, where given, are the same. */
-        '- Commands installed (each with --help): parley (the chat), docket (what woke you, your reminders), binder (the lists you were given), tether (your accesses, alone: what you were given; a server of tools: tether mcp TARGET, then tether mcp TARGET TOOL \'{json}\'). The same may also be among your tools (MCP).',
+        '- Commands installed (each with --help): parley (the chat), docket (what woke you, your reminders), binder (lists, "classeur": yours too), tether (your accesses, alone: what you were given; a server of tools: tether mcp TARGET, then tether mcp TARGET TOOL \'{json}\'). The same may also be among your tools (MCP).',
         '- The rest is yours to explore (ls, --help).',
         '',
     ].join('\n');
@@ -133,7 +133,7 @@ export function ownText({ name, tool, shared, workKept, resources = [], chat, on
     /* Its docket (dockets.mjs): what wakes it waits there until it says done or failed. */
     if (chat) out.push('- What wakes you (a file arrived, the clock, a call) waits in your docket: when told "run docket", run it, do each, then docket done ID or docket failed ID "why". To be reminded later: docket remind --at "2026-10-23 09:00" (or --in 2h, --cron "0 9 * * 1") "what for". docket --help says all.');
     /* Its lists (binders.mjs): kept on the server, asked for through .binder; a person approves. */
-    out.push('- Lists kept with the person (batches, tasks, customers...): binder shows those you were given; add, note, attach, move them; a gate waits for the person\'s tick. binder --help says all.');
+    out.push('- Lists kept with the person (batches, tasks, customers, people...; "classeur", "fiches" in French): the binder command, in your terminal, not an MCP tool. binder shows those you were given; binder new TEMPLATE "name" makes one (templates: simple, people, customers, development, batches, priorities, roadmap); add, note, attach, move cards; a gate waits for the person\'s tick. binder --help says all.');
     /* Its binder of batches is shown beside the chat (web/app.js): the person ticks there. */
     if (chat) out.push('- When you work in batches: keep them in a binder of batches, shown beside the chat. None yet: make it once (binder new batches; MCP: new-list, template batches). Then one card each (binder add Batches "title"), kept up to date; start only those the person ticked.');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
@@ -240,20 +240,30 @@ export class Guide {
     async setLines(name, input) {
         this.#known(name);
         const lines = readLines(input);
-        if (lines.length) this.#store.put({ name, lines }); else this.#store.remove(name);
+        { const { lines: _old, ...kept } = this.#store.get(name) ?? { name }; this.#store.put(lines.length ? { ...kept, name, lines } : { ...kept, name }); }
         await this.changed(name);
         return this.about(name);
     }
 
     /* ---- into the machine ---- */
-    async #writeOwn(name) {
+    async #writeOwn(name, fresh = false) {
         const text = this.own(name);
         /* In a shared machine, its own file, readable by its own user only: its door shows it at OWN_PATH (#221). */
         const shared = this.#vms.shared?.(name) === true;
         const r = await this.#vms.exec(name, ['sudo', '-n', 'install', '-D', '-m', shared ? '0440' : '0444', '-o', 'root', '-g', shared ? sharedUser(name) : 'root', '/dev/stdin', shared ? ownGuideFile(name) : OWN_PATH], { input: text, timeoutMs: 30_000 });
         if (r.code !== 0) throw new Error(`its guide could not be written: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         this.#written.set(name, text);
+        /* WHAT IT READ (15-11, its owner's ask: a tool kept on with its old setup did not know it changed): its
+           guide as written, the common part with it; changed since it last read it, its docket tells it -- not at
+           its start (`fresh`), when it reads it anyway. */
+        const seen = sha(`${commonText()}\n${text}`);
+        const was = this.#store.get(name)?.read;
+        if (was === seen) return;
+        if (was && !fresh && typeof this.told === 'function') { try { this.told(name, TELL_AGAIN); } catch { /* its docket may be off */ } }
+        this.#store.put({ ...(this.#store.get(name) ?? { name }), read: seen });
     }
+    /* Set by the server (15-11): its docket told that its guide changed. (name, line) */
+    told = null;
 
     /* The marked block in the tool's own instruction file. Resolves with
        'written', 'same', or throws with why it was left alone. */
@@ -275,7 +285,7 @@ export class Guide {
        in the way of an opening: what fails is said in the server's log. */
     async prepared(name, woke) {
         try {
-            if (woke || this.#written.get(name) !== this.own(name)) await this.#writeOwn(name);
+            if (woke || this.#written.get(name) !== this.own(name)) await this.#writeOwn(name, woke);
             /* Once per machine start, and once after this server started. */
             if (woke || !this.#pointed.has(name)) { await this.pointer(name); this.#pointed.add(name); }
         } catch (error) { this.#written.delete(name); console.error(`${name}: ${error.message}`); }
@@ -294,7 +304,7 @@ export class Guide {
     async tellAgain(name) {
         this.#known(name);
         if (!this.#conversations.awake?.().includes(name)) throw new Refusal(409, 'It is asleep: open it first.');
-        try { await this.#writeOwn(name); await this.pointer(name); this.#pointed.add(name); }
+        try { await this.#writeOwn(name, true); await this.pointer(name); this.#pointed.add(name); }
         catch (error) { throw new Refusal(502, `Its machine could not be given its guide: ${error.message}`); }
         if (!(await this.#say(name, TELL_AGAIN))) throw new Refusal(502, 'The line could not be typed: is its tool running?');
         return { ...this.about(name), told: TELL_AGAIN };

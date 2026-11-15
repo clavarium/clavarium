@@ -72,6 +72,12 @@
         "claude.ai",
         "claude.com",
         "anthropic.com"
+      ],
+      "screen": [
+        "type:(Not logged in|Login expired|OAuth token (has )?expired|Invalid API key)[^\\n]{0,24}/login=/login",
+        "keys:Select login method:=Enter",
+        "link:https://(claude\\.ai|claude\\.com|console\\.anthropic\\.com)/\\S*oauth\\S*",
+        "code:Paste code here"
       ]
     }
   },
@@ -117,7 +123,24 @@
         "opencode-ai"
       ],
       "npm-writable"
-    ]
+    ],
+    "signin": {
+      "senders": [
+        "anthropic.com",
+        "claude.com",
+        "claude.ai"
+      ],
+      "links": [
+        "claude.ai",
+        "claude.com",
+        "anthropic.com"
+      ],
+      "note": "15-11: screen rules from its Anthropic sign-in plugin (opencode-anthropic-auth 0.0.13: the link, then \"Paste the authorization code here\"); not tried on a real OpenCode screen; OpenCode has no launcher yet, so nothing reads them.",
+      "screen": [
+        "link:https://(claude\\.ai|console\\.anthropic\\.com)/oauth/authorize\\S*",
+        "code:Paste the authorization code here"
+      ]
+    }
   },
   {
     "id": "guichet",
@@ -210,7 +233,21 @@
       ],
       "npm-writable"
     ],
-    "launch": "codex.sh"
+    "launch": "codex.sh",
+    "signin": {
+      "senders": [
+        "openai.com"
+      ],
+      "links": [
+        "openai.com",
+        "chatgpt.com"
+      ],
+      "note": "15-11: the links codex.sh watched (02-11); a device sign-in shows a one-time code beside its link, handed over with it.",
+      "screen": [
+        "link:https://auth\\.openai\\.com/\\S+",
+        "link:https://chatgpt\\.com/\\S*auth\\S*"
+      ]
+    }
   },
   {
     "id": "vibe",
@@ -271,7 +308,19 @@
         "/opt/vibe/bin/vibe",
         "/usr/local/bin/vibe"
       ]
-    ]
+    ],
+    "signin": {
+      "senders": [
+        "mistral.ai"
+      ],
+      "links": [
+        "mistral.ai"
+      ],
+      "note": "15-11: screen rule from mistral-vibe 3.1.2 (browser sign-in at console.mistral.ai, which it then polls: no code to type); its own words on the screen not tried.",
+      "screen": [
+        "link:https://(console|auth)\\.mistral\\.ai/\\S+"
+      ]
+    }
   },
   {
     "id": "gemini",

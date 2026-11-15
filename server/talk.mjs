@@ -166,6 +166,8 @@ export const EVENT_LEVELS = Object.freeze({
     'docket-failed': 'needs-you',
     'docket-unhandled': 'needs-you',
     'docket-reminder': 'trace',
+    /* Its tool signs in through another conversation's browser (signinhelp.mjs, 15-11): handed over, signed in, or back to the person. */
+    'signin-help': 'news',
     /* A Tether call its agent asks the owner to allow (tethers.mjs): offered in the thread with
        Accept / Refuse, the same block a machine problem uses. Its closing line (decided here, from
        Assets, or by the agent) is a trace that carries the call's id, so the buttons close with it. */
@@ -705,12 +707,15 @@ export class Talk {
     /* Its machine was restarted, or built again (conversations.mjs): said in
        the thread, and, the tool having started again with nothing of the
        chat in mind, REREAD is typed with the person's next message (never alone). */
+    /* Set by the server (15-11): its machine restarted and nothing written since -- posted to its docket, which
+       tells it once it is free. (name, why) -> whether it was posted. */
+    restarted = null;
     renewed(name, text, started = true) {
         const r = this.#store.get(name);
         if (r?.on !== true) return;
         if (text) this.event(name, started ? { kind: 'restarted', text, topic: 'Restarted' } : { kind: 'machine-problem', text, tone: 'bad', topic: 'Machine', actions: ['restart', 'terminal'] });
         if (started) {
-            this.#store.put({ ...this.#store.get(name), reread: true });
+            this.#store.put({ ...this.#store.get(name), reread: true, renewedText: text || undefined });
             this.#nextTry.set(`reread:${name}`, this.#now() + this.#rereadAfter);
         }
     }
@@ -723,7 +728,10 @@ export class Talk {
         /* Typed only when the person has written since: a line typed while the tool
            reloads a long session after a restart sat in its input box, never sent
            (seen on a real deployment). By then the tool has long been ready. */
-        if (this.#parley(name).unread() === 0) return later(RETRY_MS);
+        /* Nothing written since (15-11, its owner's ask): its docket says it was restarted instead -- once its
+           tool is ready, as below -- and the docket tells it when it is free; never a line typed into a reload. */
+        const told = this.#parley(name).unread() === 0;
+        if (told && typeof this.restarted !== 'function') return later(RETRY_MS);
         if (!this.#conversations.awake().includes(name)) return later(RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return later(TYPING_QUIET_MS - quiet + 100);
@@ -735,6 +743,11 @@ export class Talk {
                 const wait = Math.max(this.#rereadAfter - s.openFor, s.openFor < READY_MAX_MS ? SETTLED_MS - s.quietFor : 0);
                 if (wait > 0) return later(wait + 100);
             }
+        }
+        if (told) {
+            if (!this.restarted(name, r.renewedText ?? '')) return later(RETRY_MS);
+            this.#store.put({ ...this.#store.get(name), reread: false, renewedText: undefined });
+            return 'told';
         }
         if (!(await this.#type(name, this.rereadLine()).catch(() => false))) return later(RETRY_MS);
         /* Reading the whole thread, it reads what waits too: that line is not typed after it. */

@@ -296,3 +296,18 @@ test('in a shared machine its own part goes to its own file, which its door show
     assert.match(b.guide.own('writer'), /you are its user c-writer, NOT root \(no sudo\)/, 'told it has no sudo there');
     assert.ok(!b.guide.own('other').includes('NOT root'));
 });
+
+/* Its guide changed while its tool ran (15-11): its docket tells it, once; not at its start, when it reads it anyway. */
+test('a guide changed while its tool runs is told by its docket, once; not at its start', async (t) => {
+    const b = bench(t);
+    const told = []; b.guide.told = (name, line) => told.push([name, line]);
+    await b.guide.prepared('writer', true);
+    assert.deepEqual(told, [], 'its start: it reads it anyway');
+    await b.guide.setLines('writer', 'Answer in French.');
+    assert.deepEqual(told, [['writer', TELL_AGAIN]], 'changed: told');
+    await b.guide.prepared('writer', false);
+    assert.equal(told.length, 1, 'the same guide: not told again');
+    await b.guide.setLines('writer', '');
+    assert.equal(told.length, 2, 'changed again: told again');
+    assert.deepEqual(b.guide.lines('writer'), []);
+});

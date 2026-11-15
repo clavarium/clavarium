@@ -76,7 +76,9 @@ test('the folder is made by the host program, then filled: each archive, and an 
     await b.box.prepare();
     assert.deepEqual(readdirSync(files).sort(), [...index.tools.map((x) => x.file), 'index.json', 'launch'].sort());
     /* The launchers, as they are in config/launch of this code. */
-    assert.deepEqual(readdirSync(join(files, 'launch')).sort(), readdirSync(new URL('../config/launch', import.meta.url)).sort());
+    /* ...and beside them the tools' sign-in screen rules (15-11, #362): none given here, an empty map. */
+    assert.deepEqual(readdirSync(join(files, 'launch')).sort(), [...readdirSync(new URL('../config/launch', import.meta.url)), 'screen-rules.json'].sort());
+    assert.deepEqual(JSON.parse(readFileSync(join(files, 'launch', 'screen-rules.json'), 'utf8')), {});
     /* The host program refuses: said, and nothing is offered. */
     const refused = bench(t, { make: 78 });
     await assert.rejects(refused.box.prepare(), /could not be made: REFUSED: the tools folder is not what it should be/);
