@@ -82,3 +82,15 @@ test('a log has 300 lines at most, its newest, each 300 characters at most; at m
     assert.equal(jobs.list([]).done.length, 50);
     assert.deepEqual(jobs.log(jobs.list([]).done[0].id).log.map((l) => l.text), ['Done']);
 });
+
+/* A move that went back (15-11): ready where it was, but the job failed, with why. */
+test('a move gone back: its job failed, its why said, though it is ready where it was', () => {
+    const jobs = new Jobs();
+    const c = { name: 'mail', phase: 'building', movingOutOf: { sharedMachine: 'duo' } };
+    jobs.seen(undefined, c);
+    jobs.seen(c, { name: 'mail', phase: 'ready', moveFailed: 'Not moved: its work folder is not shown in its machine.' });
+    const [end] = jobs.list().done;
+    assert.equal(end.what, 'Moving mail out of « duo »');
+    assert.equal(end.result, 'failed');
+    assert.match(end.why, /Not moved: its work folder/);
+});

@@ -29,6 +29,9 @@ function bench(t, { prefix = ['vmm'], refuse = () => false } = {}) {
         if (verb === 'stop' || verb === 'suspend') { vms.set(vm, verb === 'stop' ? 'Stopped' : 'Suspended'); return { code: 0, stdout: '', stderr: '' }; }
         if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...vms].map(([name, state]) => ({ name, state })) }), stderr: '' };
         if (verb === 'exec' && line.includes('id -u; id -g')) return { code: 0, stdout: '1001\n1001\n', stderr: '' };
+        /* Its work folder seen from its machine (15-11): a file made at /work there is in its work folder here. */
+        const probe = verb === 'exec' && /: > \/work\/\.clavarium-carry\/(\S+)/.exec(line);
+        if (probe && typeof all.workFolder === 'function') { const w = join(all.workFolder(vm.replace(/^clv-/, '')), '.clavarium-carry'); mkdirSync(w, { recursive: true }); writeFileSync(join(w, probe[1]), ''); return { code: 0, stdout: '', stderr: '' }; }
         if (verb === 'info') return vms.has(vm) ? { code: 0, stdout: JSON.stringify({ info: { [vm]: { state: vms.get(vm) } } }), stderr: '' } : { code: 2, stdout: '', stderr: 'does not exist' };
         return { code: 0, stdout: '', stderr: '' };
     };

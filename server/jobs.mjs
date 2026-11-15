@@ -96,8 +96,10 @@ export class Jobs {
         if (busy || !this.#open.has(name)) return;
         const job = this.#open.get(name);
         this.#open.delete(name);
-        const ok = after?.phase === 'ready';
-        const why = after && !ok && after.error ? String(after.error).slice(0, 300) : '';
+        /* A move that went back (15-11): ready where it was, but not done -- `moveFailed` says why. */
+        const ok = after?.phase === 'ready' && !after.moveFailed;
+        const said = after?.error ?? after?.moveFailed;
+        const why = after && !ok && said ? String(said).slice(0, 300) : '';
         this.#add(name, after ? (ok ? 'Done' : `Failed${why ? `: ${why}` : ''}`) : 'Removed');
         const { log } = this.#logs.get(name);
         this.#logs.delete(name);

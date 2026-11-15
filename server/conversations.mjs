@@ -15,7 +15,7 @@ import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { homeExcludes, wholeStream, readManifest, workEmpty, unpackHere, restoreWork, CARRY } from './carry.mjs';
 import { availableParallelism } from 'node:os';
 import { spawn } from 'node:child_process';
-import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, copyFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, copyFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -1174,6 +1174,7 @@ export class Conversations {
                     const carryId = workDir ? `copy-${to}-${Date.now()}` : '';
                     const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
                     if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(from, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+                    if (inWork && !(await this.#workShown(from, workDir))) throw new Error('its original\'s work folder is not shown in its machine: open the original once, then copy it again');
                     const out = await this.exportState(from, inWork ? { toWork: carryId } : {});
                     child = out.child;
                     let read = 0; let lastAt = Date.now(); let stalled = false;
@@ -1284,9 +1285,24 @@ export class Conversations {
         this.#cancelStop(name);
         const now = new Date().toISOString();
         /* `movingTo`: what a restart of this server finds, to put it back in its own machine, as it was (14-11). */
-        this.#store.patch(name, { phase: 'building', step: `Moving to the shared machine ${machine}`, buildingSince: now, progress: buildProgress(now), movingTo: machine, movingFromMb: c.memoryMb });
+        this.#store.patch(name, { phase: 'building', step: `Moving to the shared machine ${machine}`, buildingSince: now, progress: buildProgress(now), movingTo: machine, movingFromMb: c.memoryMb, moveFailed: undefined });
         this.built = this.#moving(name, c, tool, machine, size, memory, state).finally(() => this.#give(name, act));
         return this.#store.get(name);
+    }
+
+    /* ITS WORK FOLDER SEEN FROM ITS MACHINE (15-11): a file made there is found here -- else what is written for the
+       server to read stays inside the machine (a work folder unmounted by a move cut short). Shown again once if not. */
+    async #workShown(name, workDir) {
+        const seen = async () => {
+            const id = `probe-${Date.now()}`;
+            await this.#vms.exec(name, ['sh', '-c', `mkdir -p /work/.clavarium-carry && : > /work/.clavarium-carry/${id}`], { timeoutMs: 30_000 }).catch(() => {});
+            const there = existsSync(join(workDir, '.clavarium-carry', id));
+            rmSync(join(workDir, '.clavarium-carry', id), { force: true });
+            return there;
+        };
+        if (await seen()) return true;
+        await this.#vms.workMount(name, this.#uid, this.#gid).catch(() => {});
+        return seen();
     }
 
     /* ITS TOOL'S STATE, TAKEN ALONG for a move (12-11, 15-11): through its work folder, as a copy reads it (14-11),
@@ -1299,6 +1315,7 @@ export class Conversations {
         const carryId = workDir ? `move-${name}-${Date.now()}` : '';
         const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
         if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(name, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+        if (inWork && !(await this.#workShown(name, workDir))) return 'its work folder is not shown in its machine: open the conversation once, then move it again.';
         const { stream, child } = await this.exportState(name, inWork ? { toWork: carryId } : {});
         let read = 0; let lastAt = Date.now(); let stalled = false;
         const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); this.#store.patch(name, { step: `Taking ${tool.label}'s state along: ${sizeWords(read)}` }); };
@@ -1323,7 +1340,7 @@ export class Conversations {
         const carried = join(dir, 'state.tar.gz');
         const back = (why) => {
             /* Back to its own machine, as it was (stopped: the next opening wakes it). */
-            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingTo: undefined, movingFromMb: undefined });
+            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingTo: undefined, movingFromMb: undefined, moveFailed: `Not moved: ${why}` });
             this.#fresh.add(name); this.#mountAgain.add(name);
             try { this.renewed(name, `Not moved to the shared machine ${machine}: ${why} It stays in its own machine, as it was.`, false); } catch { /* told, nothing more */ }
         };
@@ -1388,7 +1405,7 @@ export class Conversations {
         this.#cancelStop(name);
         const now = new Date().toISOString();
         /* `movingOutOf`: what a restart of this server finds, to put it back in its shared machine (constructor). */
-        this.#store.patch(name, { phase: 'building', step: `Moving out of the shared machine ${c.sharedMachine}`, buildingSince: now, progress: buildProgress(now), movingOutOf: { sharedMachine: c.sharedMachine, machineMb: c.machineMb, machineUser: c.machineUser, memoryMb: c.memoryMb } });
+        this.#store.patch(name, { phase: 'building', step: `Moving out of the shared machine ${c.sharedMachine}`, buildingSince: now, progress: buildProgress(now), movingOutOf: { sharedMachine: c.sharedMachine, machineMb: c.machineMb, machineUser: c.machineUser, memoryMb: c.memoryMb }, moveFailed: undefined });
         this.built = this.#movingOut(name, c, tool, memory, state).finally(() => this.#give(name, act));
         return this.#store.get(name);
     }
@@ -1404,7 +1421,7 @@ export class Conversations {
             if (!this.#store.get(name)) return undefined;
             this.#store.patch(name, { sharedMachine: undefined });
             if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== undefined) await this.#vms.removeVm(vmName(name)).catch(() => {});
-            this.#store.patch(name, { ...was, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingOutOf: undefined });
+            this.#store.patch(name, { ...was, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingOutOf: undefined, moveFailed: `Not moved: ${why}` });
             if (left) await this.#vms.workMount(name, this.#uid, this.#gid).catch(() => {});
             this.#fresh.add(name); this.#mountAgain.add(name);
             try { this.renewed(name, `Not moved out of the shared machine ${shared}: ${why} It stays there, as it was.`, false); } catch { /* told, nothing more */ }
