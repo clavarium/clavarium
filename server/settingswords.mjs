@@ -181,7 +181,7 @@ export const SETTINGS_WORDS_FR = {
     'set-cm-goes-work': 'Son dossier de travail', 'set-cm-goes-memory': 'La mémoire de son IA', 'set-cm-goes-access': 'Ses accès',
     'set-cm-not': 'Ni ses appareils, ni ses rappels', 'set-cm-untouched': 'Celle-ci intacte : lue, puis remise en l\'état',
     'set-cm-stay': 'Vous restez ici · « Ouvrir » une fois prête', 'set-cm-stops': 'Son outil s\'arrête environ une minute',
-    'set-cm-deleted': 'Sa propre machine est supprimée', 'set-cm-back': 'Retour', 'set-cm-copy-go': 'La copier', 'set-cm-move-go': 'La déplacer',
+    'set-cm-deleted': 'Sa propre machine est supprimée', 'set-cm-stops-out': 'Son outil s\'arrête quelques minutes', 'set-cm-shared-deleted': 'La machine partagée « {m} » est supprimée', 'set-cm-place-deleted': 'Sa place dans « {m} » est supprimée', 'set-cm-back': 'Retour', 'set-cm-copy-go': 'La copier', 'set-cm-move-go': 'La déplacer',
     'set-cm-ready': 'Copie prête', 'set-cm-open': 'Ouvrir', 'set-cm-failed': 'Pas copiée', 'set-cm-see-why': 'Voir pourquoi',
     'set-carry': 'Exporter / Importer', 'set-carry-hint': 'Mémoire de son IA, ou tout : à emporter.',
     'set-carry-export': 'Mémoire de son IA', 'set-carry-all': 'Tout (dossier perso, travail, accès)', 'set-carry-all-off': 'Son travail doit être gardé ici.',

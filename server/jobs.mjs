@@ -33,6 +33,8 @@ const bare = ({ log, ...job }) => job;
 export function jobWords(c) {
     if (c.phase === 'moving') return `Moving ${titleOf(c)}${c.sharedMachine ? ` into « ${c.sharedMachine} »` : ''}`;
     if (c.phase === 'restarting') return `Restarting ${titleOf(c)}`;
+    if (c.movingTo) return `Moving ${titleOf(c)} into « ${c.movingTo} »`;
+    if (c.movingOutOf) return `Moving ${titleOf(c)} out of « ${c.movingOutOf.sharedMachine} »`;
     if (c.copyOf) return `Copy ${titleOf(c)}${c.sharedMachine ? ` in « ${c.sharedMachine} »` : ''}`;
     return `Building ${titleOf(c)}${c.sharedMachine ? ` in « ${c.sharedMachine} »` : ''}`;
 }

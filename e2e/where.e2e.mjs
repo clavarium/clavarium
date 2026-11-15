@@ -163,8 +163,19 @@ test('its settings: Copy... into a shared machine -- its name given, sent, a ref
     /* (Diary is only seen, its machine never made: its page is veiled, its button pressed from the page.) */
     await me.page.evaluate(() => document.getElementById('where-move').click());
     await me.until('the wizard open', async () => me.page.locator('#cm').isVisible());
-    assert.deepEqual(await me.page.locator('#cm-places .cm-card').allInnerTexts(), ['Its own machine\nNot yet']);
-    assert.equal(await me.page.locator('#cm-places .cm-card').isDisabled(), true);
-    assert.equal(await me.page.locator('#cm-next').isDisabled(), true);
+    /* Out of it (15-11): its own machine, the only place offered, chosen; screen 2 says its place there goes --
+       the whole machine, as it is alone in it. */
+    assert.deepEqual(await me.page.locator('#cm-places .cm-card').allInnerTexts(), ['Its own machine']);
+    assert.equal(await me.page.locator('#cm-places .cm-card').getAttribute('aria-checked'), 'true');
+    await me.page.locator('#cm-next').click();
+    await me.until('screen 2', async () => me.page.locator('#cm-check').isVisible());
+    assert.match(await me.page.locator('#cm-title').innerText(), /Move Diary into its own machine/);
+    assert.match(await me.page.locator('#cm-deleted').innerText(), /The shared machine « assist » is deleted/);
+    if (process.env.CM_SHOTS) await me.page.locator('#cm').screenshot({ path: join(process.env.CM_SHOTS, 'cm-out.png') });
+    let out = null;
+    await me.page.route('**/api/conversations/diary/into-machine', (route) => { out = route.request().postDataJSON(); return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Stopped here by the test.' }) }); });
+    await me.page.locator('#cm-go').click();
+    await me.until('asked out', async () => out !== null);
+    assert.deepEqual(out, {}, 'no machine named: out of it, into its own');
     assert.deepEqual(me.errors.filter((e) => !/409/.test(e)), []);
 });

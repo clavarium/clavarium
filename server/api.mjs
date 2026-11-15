@@ -25,7 +25,8 @@
  *   POST /api/binder/suggest                {id}: at most three quick actions for that card -> {actions: [{key, label, why, on, ask?}]}
  *   POST /api/mailboxes/<name>/live          {smtp, email?}: that mailbox connected live too (send, move...), its password reused
  *   POST /api/conversations/<name>/erase         {confirm: <its name>}: deleted for good -- its machine and its work files
- *   POST /api/conversations/<name>/into-machine  {machine, machineMb?}: moved into a shared machine (#221), its tool's state along (202)
+ *   POST /api/conversations/<name>/into-machine  {machine, machineMb?}: moved into a shared machine (#221), its tool's state along (202);
+ *                                                {} (no machine): out of its shared machine, into one of its own (15-11)
  *   POST /api/conversations/<name>/copy          {title?, machine?, machineMb?}: a copy -- its work, its tool's state, its accesses; it untouched (202)
  *   POST /api/conversations/<name>/rebuild       {reset?, confirm?}: built again; reset (confirm: its name) for a working one too
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
@@ -1031,6 +1032,7 @@ export async function handleApi(request, response, conversations, headers, resou
         /* Moved into a shared machine (#221): one there already, or a new one of the size given. */
         const moving = /^\/api\/conversations\/([^/]+)\/into-machine$/.exec(pathname);
         if (moving) {
+            if (body?.machine === undefined) return send(202, await conversations.moveToOwn(decodeURIComponent(moving[1]))), true;
             const machineMb = body?.machineMb === undefined ? undefined : Number(body.machineMb);
             return send(202, await conversations.moveToShared(decodeURIComponent(moving[1]), { machine: body?.machine, machineMb })), true;
         }

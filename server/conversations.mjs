@@ -176,6 +176,7 @@ export class Conversations {
             /* A move into a shared machine cut short (14-11): back in its own machine, as it was -- never « build it
                again », which would make its own machine anew and lose its tool's memory. */
             if (c.phase === 'building' && c.movingTo) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, sharedMachine: undefined, machineMb: undefined, machineUser: undefined, ...(c.movingFromMb ? { memoryMb: c.movingFromMb } : {}), movingTo: undefined, movingFromMb: undefined, stopped: true, moved: `The server restarted while it was moving to the shared machine ${c.movingTo}: it stays in its own machine, as it was. Move it again when you like.` });
+            else if (c.phase === 'building' && c.movingOutOf) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, ...c.movingOutOf, movingOutOf: undefined, stopped: true, moved: `The server restarted while it was moving out of the shared machine ${c.movingOutOf.sharedMachine}: it stays there. Move it again when you like.` });
             else if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
             if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restartingSince: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
             /* An action cut short: said as such, never left running on the page. */
@@ -1288,6 +1289,34 @@ export class Conversations {
         return this.#store.get(name);
     }
 
+    /* ITS TOOL'S STATE, TAKEN ALONG for a move (12-11, 15-11): through its work folder, as a copy reads it (14-11),
+       written to `carried`. -> undefined, or why it could not be. */
+    async #takeState(name, c, tool, carried) {
+        this.#store.patch(name, { step: `Taking ${tool.label}'s state along` });
+        /* Through its work folder, as a copy reads it (14-11): the VM manager's output stalls past ~36 KB on
+           the owner's server -- a move then waited for ever. Its size read as it grows, said; quiet too long: ended. */
+        const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        const carryId = workDir ? `move-${name}-${Date.now()}` : '';
+        const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
+        if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(name, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+        const { stream, child } = await this.exportState(name, inWork ? { toWork: carryId } : {});
+        let read = 0; let lastAt = Date.now(); let stalled = false;
+        const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); this.#store.patch(name, { step: `Taking ${tool.label}'s state along: ${sizeWords(read)}` }); };
+        const sizing = setInterval(() => {
+            if (inWork) { try { grew(statSync(inWork).size); } catch { /* not there yet */ } }
+            if (Date.now() - lastAt >= COPY_QUIET_MS) { stalled = true; child.kill('SIGKILL'); }
+        }, 1000);
+        const failed = new Promise((ok) => child.on('error', () => ok(-1)));
+        const file = inWork ? null : createWriteStream(carried, { mode: 0o600 });
+        if (file) { stream.on('data', (d) => grew(read + d.length)); stream.pipe(file); } else stream.resume();
+        const code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => clearInterval(sizing));
+        if (file) await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
+        if (inWork) { try { if (code === 0 && !stalled) copyFileSync(inWork, carried); } finally { rmSync(inWork, { force: true }); } }
+        if (stalled) return `its tool's state stopped coming (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min).`;
+        if (code !== 0) return `its tool's state could not be taken (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`;
+        return undefined;
+    }
+
     async #moving(name, c, tool, machine, size, memory, state) {
         const old = vmName(name);
         const dir = mkdtempSync(join(tmpdir(), 'clv-move-'));
@@ -1302,28 +1331,8 @@ export class Conversations {
             this.drop(name);
             if (state === 'Running') await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
             if (tool.state) {
-                this.#store.patch(name, { step: `Taking ${tool.label}'s state along` });
-                /* Through its work folder, as a copy reads it (14-11): the VM manager's output stalls past ~36 KB on
-                   the owner's server -- a move then waited for ever. Its size read as it grows, said; quiet too long: ended. */
-                const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
-                const carryId = workDir ? `move-${name}-${Date.now()}` : '';
-                const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
-                if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(name, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
-                const { stream, child } = await this.exportState(name, inWork ? { toWork: carryId } : {});
-                let read = 0; let lastAt = Date.now(); let stalled = false;
-                const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); this.#store.patch(name, { step: `Taking ${tool.label}'s state along: ${sizeWords(read)}` }); };
-                const sizing = setInterval(() => {
-                    if (inWork) { try { grew(statSync(inWork).size); } catch { /* not there yet */ } }
-                    if (Date.now() - lastAt >= COPY_QUIET_MS) { stalled = true; child.kill('SIGKILL'); }
-                }, 1000);
-                const failed = new Promise((ok) => child.on('error', () => ok(-1)));
-                const file = inWork ? null : createWriteStream(carried, { mode: 0o600 });
-                if (file) { stream.on('data', (d) => grew(read + d.length)); stream.pipe(file); } else stream.resume();
-                const code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => clearInterval(sizing));
-                if (file) await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
-                if (inWork) { try { if (code === 0 && !stalled) copyFileSync(inWork, carried); } finally { rmSync(inWork, { force: true }); } }
-                if (stalled) return back(`its tool's state stopped coming (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min).`);
-                if (code !== 0) return back(`its tool's state could not be taken (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
+                const why = await this.#takeState(name, c, tool, carried);
+                if (why) return back(why);
             }
             if (state !== undefined) {
                 this.#store.patch(name, { step: 'Stopping its own machine' });
@@ -1358,6 +1367,95 @@ export class Conversations {
             await this.#vms.removeVm(old).catch(() => {});
             this.renewed(name, `Moved to the shared machine ${machine}: its work folder${tool.state ? `, ${tool.label}'s state` : ''} and this chat came along. Its own machine is deleted.`, true);
             return undefined;
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
+
+    /* OUT OF ITS SHARED MACHINE, INTO ONE OF ITS OWN (#221, 15-11): the move the other way. Its tool's state carried
+       (as into a shared machine), its programs there ended and its work taken out of its place, its own machine built
+       as a new one's, the state put back, then its place in the shared machine removed -- its user and home there, or
+       the whole machine when it was the last in it. Anything wrong before its own machine is ready: back in the shared
+       machine, as it was (its place there kept until the end). -> the record, at once; `this.built`: the end of it. */
+    async moveToOwn(name) {
+        const c = this.#busyCheck(name);
+        if (!c.sharedMachine) throw new Refusal(409, 'It has a machine of its own already.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
+        const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (tool.state && state !== 'Running') throw new Refusal(409, 'Its shared machine is not running: open the conversation first, so that its tool\'s state can come along.', { retry: false });
+        const memory = Math.max(tool.memoryMb, Number(c.memoryMb) || tool.memoryMb);
+        await this.room({ kind: 'create', memoryMb: memory });
+        const act = this.#take(name, 'move');
+        this.#cancelStop(name);
+        const now = new Date().toISOString();
+        /* `movingOutOf`: what a restart of this server finds, to put it back in its shared machine (constructor). */
+        this.#store.patch(name, { phase: 'building', step: `Moving out of the shared machine ${c.sharedMachine}`, buildingSince: now, progress: buildProgress(now), movingOutOf: { sharedMachine: c.sharedMachine, machineMb: c.machineMb, machineUser: c.machineUser, memoryMb: c.memoryMb } });
+        this.built = this.#movingOut(name, c, tool, memory, state).finally(() => this.#give(name, act));
+        return this.#store.get(name);
+    }
+
+    async #movingOut(name, c, tool, memory, state) {
+        const shared = c.sharedMachine;
+        const was = { sharedMachine: shared, machineMb: c.machineMb, machineUser: c.machineUser, memoryMb: c.memoryMb };
+        const dir = mkdtempSync(join(tmpdir(), 'clv-move-'));
+        const carried = join(dir, 'state.tar.gz');
+        let left = false;
+        const back = async (why) => {
+            /* Back in its shared machine, as it was: its own machine, if begun, removed; its work shown there again. */
+            if (!this.#store.get(name)) return undefined;
+            this.#store.patch(name, { sharedMachine: undefined });
+            if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== undefined) await this.#vms.removeVm(vmName(name)).catch(() => {});
+            this.#store.patch(name, { ...was, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingOutOf: undefined });
+            if (left) await this.#vms.workMount(name, this.#uid, this.#gid).catch(() => {});
+            this.#fresh.add(name); this.#mountAgain.add(name);
+            try { this.renewed(name, `Not moved out of the shared machine ${shared}: ${why} It stays there, as it was.`, false); } catch { /* told, nothing more */ }
+            return undefined;
+        };
+        try {
+            this.drop(name);
+            if (state === 'Running') await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+            if (tool.state) {
+                const why = await this.#takeState(name, c, tool, carried);
+                if (why) return back(why);
+            }
+            if (state === 'Running') {
+                /* Its programs there ended, its work taken out of its place: nothing of it runs there any more. */
+                this.#store.patch(name, { step: `Leaving the shared machine ${shared}` });
+                await this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: 30_000 }).catch(() => {});
+                await this.#vms.workUnmount(name).catch(() => {});
+                left = true;
+            }
+            /* Its own machine, as a new conversation's: built with its name, held before its tool starts. */
+            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: memory, step: 'Starting the machine' });
+            /* One left behind by an attempt cut short: not this conversation's any more. */
+            if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== undefined) await this.#vms.removeVm(vmName(name)).catch(() => {});
+            this.#holding.add(name);
+            try { await this.#build(name, tool, memory); } finally { this.#holding.delete(name); }
+            const now = this.#store.get(name);
+            if (!now) return undefined; /* archived meanwhile */
+            if (now.phase === 'failed') return back(`${String(now.error ?? 'its own machine could not be made.').replace(/\.?$/, '.')}`);
+            let lost = '';
+            if (tool.state) {
+                this.#store.patch(name, { step: `Putting ${tool.label}'s state back` });
+                try { await this.#unpack(name, c.tool, carried); } catch (error) { lost = error.message; }
+            }
+            this.#store.patch(name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, toolStarted: false, movingOutOf: undefined });
+            this.ready(name);
+            /* There for good: its place in the shared machine goes -- the whole machine with the last one in it. */
+            const others = this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared);
+            if (others.length) {
+                const there = this.#vms.run;
+                await there(['vm', 'unshare', vmName(shared), name]).catch(() => {});
+                if (left) {
+                    await there(['vm', 'exec', vmName(shared), '--', 'sudo', '-n', 'userdel', '--remove', `c-${name}`], { timeoutMs: 60_000 }).catch(() => {});
+                    await there(['vm', 'exec', vmName(shared), '--', 'sudo', '-n', 'rm', '-f', `/etc/clavarium/limits/${name}`], { timeoutMs: 30_000 }).catch(() => {});
+                }
+            } else await this.#vms.removeVm(vmName(shared)).catch(() => {});
+            this.renewed(name, lost
+                ? `Moved out of the shared machine ${shared} into a machine of its own, but ${tool.label}'s state did not come along (${lost}): it starts afresh.`
+                : `Moved out of the shared machine ${shared} into a machine of its own: its work folder${tool.state ? `, ${tool.label}'s state` : ''} and this chat came along.`, true);
+            return undefined;
+        } catch (error) {
+            return back(`${String(error?.message ?? error).replace(/\.?$/, '.')}`);
         } finally { rmSync(dir, { recursive: true, force: true }); }
     }
 

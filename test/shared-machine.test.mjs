@@ -252,3 +252,61 @@ test('a shared machine\'s build moves the page\'s steps on (preparing, installin
     if (p) seen.add(p.steps[p.at]);
     for (const id of ['preparing', 'installing']) assert.ok(seen.has(id) || (p && p.steps.indexOf(id) < p.at), `${id} reached (${[...seen]})`);
 });
+
+/* OUT OF A SHARED MACHINE (#221, 15-11): into one of its own, built as a new one's; its place there removed at the
+   end -- the whole machine when it was the last in it. */
+test('moved out of a shared machine: its own machine built, its place there removed at the end, the others kept', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist', memoryMb: 1536 }); await b.all.built;
+    b.all.create({ name: 'diary', tool: 'tool', machine: 'assist' }); await b.all.built;
+    await assert.rejects(b.all.moveToOwn('nobody'), /No such|not/);
+    b.calls.length = 0;
+    const told = []; b.all.renewed = (n, text) => told.push(text);
+    const r = await b.all.moveToOwn('mail');
+    assert.equal(r.phase, 'building'); assert.equal(r.movingOutOf.sharedMachine, 'assist');
+    await assert.rejects(b.all.moveToOwn('mail'), /not ready|busy/, 'one move at a time');
+    await b.all.built;
+    const out = b.calls.join('\n');
+    assert.match(out, /^vm exec clv-assist -- sudo -n pkill -KILL -u c-mail$/m, 'its programs there ended');
+    assert.match(out, /^vm sumount clv-assist mail work$/m, 'its work taken out of its place');
+    assert.match(out, /^vm launch clv-mail 1536$/m, 'its own machine, its memory');
+    assert.match(out, /^vm mount clv-mail work mail 1000 1000$/m, 'its work shown in its own machine');
+    assert.match(out, /^vm unshare clv-assist mail$/m);
+    assert.match(out, /^vm exec clv-assist -- sudo -n userdel --remove c-mail$/m, 'its user there removed');
+    assert.ok(out.indexOf('userdel') > out.indexOf('vm launch clv-mail'), 'removed only once its own machine is there');
+    assert.doesNotMatch(out, /^vm delete clv-assist$/m, 'the shared machine kept: another lives in it');
+    const c = b.store.get('mail');
+    assert.equal(c.phase, 'ready'); assert.equal(c.sharedMachine, undefined); assert.equal(c.machineMb, undefined); assert.equal(c.machineUser, undefined); assert.equal(c.movingOutOf, undefined); assert.equal(c.memoryMb, 1536);
+    assert.match(told.at(-1), /Moved out of the shared machine assist into a machine of its own/);
+    await assert.rejects(b.all.moveToOwn('mail'), /machine of its own already/);
+    /* The last one out: the shared machine goes with it. */
+    b.calls.length = 0;
+    await b.all.moveToOwn('diary'); await b.all.built;
+    assert.match(b.calls.join('\n'), /^vm delete clv-assist$/m);
+    assert.deepEqual([...b.vms.keys()].sort(), ['clv-diary', 'clv-mail']);
+});
+
+test('moved out of a shared machine: its own machine not made -> back in the shared machine, as it was', async (t) => {
+    const b = bench(t, { refuse: (line) => /^vm launch clv-mail /.test(line) });
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist' }); await b.all.built;
+    const before = b.store.get('mail');
+    const told = []; b.all.renewed = (n, text) => told.push(text);
+    await b.all.moveToOwn('mail'); await b.all.built;
+    const c = b.store.get('mail');
+    assert.equal(c.phase, 'ready'); assert.equal(c.sharedMachine, 'assist'); assert.deepEqual(c.machineUser, before.machineUser); assert.equal(c.movingOutOf, undefined);
+    const out = b.calls.join('\n');
+    assert.doesNotMatch(out, /userdel --remove c-mail|^vm unshare clv-assist mail$/m, 'its place there kept');
+    assert.match(out.slice(out.lastIndexOf('vm sumount')), /^vm smount clv-assist mail work mail/m, 'its work shown there again');
+    assert.match(told.at(-1), /Not moved out of the shared machine assist: .*It stays there/);
+});
+
+test('moved out of a shared machine: a restart of the server meanwhile puts it back there', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist' }); await b.all.built;
+    const c = b.store.get('mail');
+    b.store.patch('mail', { phase: 'building', sharedMachine: undefined, machineUser: undefined, movingOutOf: { sharedMachine: 'assist', machineMb: c.machineMb, machineUser: c.machineUser, memoryMb: c.memoryMb } });
+    new Conversations({ store: b.store, vms: new Vms(async () => ({ code: 0, stdout: '', stderr: '' }), ['vmm']), tools: TOOLS, uid: 1000, gid: 1000 });
+    const after = b.store.get('mail');
+    assert.equal(after.phase, 'ready'); assert.equal(after.sharedMachine, 'assist'); assert.deepEqual(after.machineUser, c.machineUser); assert.equal(after.movingOutOf, undefined);
+    assert.match(after.moved, /moving out of the shared machine assist: it stays there/);
+});

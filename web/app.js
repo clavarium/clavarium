@@ -3267,11 +3267,13 @@
     /* The places it may go, for a copy or a move of this one; the one chosen kept if it still is one. */
     function cmPlaces(here) {
         const machines = sharedMachines().filter((m) => !(cm.kind === 'move' && m.name === here.sharedMachine));
-        if (cm.kind === 'move' && here.sharedMachine) return { cards: [cmCard('', uiSaid('set-where-own', 'Its own machine'), uiSaid('set-cm-not-yet', 'Not yet'), { disabled: true })], open: [] };
-        const open = [...(cm.kind === 'copy' ? [''] : []), ...machines.map((m) => m.name), 'new'];
+        /* Out of a shared machine (15-11): into one of its own, first; or into another shared one. */
+        const own = cm.kind === 'copy' || Boolean(here.sharedMachine);
+        const open = [...(own ? [''] : []), ...(cm.kind === 'move' && here.sharedMachine ? [] : [...machines.map((m) => m.name), 'new'])];
         if (!open.includes(cm.place)) cm.place = open[0];
         const cards = [];
-        if (cm.kind === 'copy') cards.push(cmCard('', uiSaid('set-where-own', 'Its own machine')));
+        if (own) cards.push(cmCard('', uiSaid('set-where-own', 'Its own machine')));
+        if (cm.kind === 'move' && here.sharedMachine) return { cards, open };
         for (const m of machines) {
             const small = [m.who.length ? uiSaid('set-cm-with', 'With {who}', { who: m.who.join(', ') }) : '', m.mb ? sizeWords(m.mb) : ''].filter(Boolean).join(' · ');
             cards.push(cmCard(m.name, uiSaid('set-cm-shared', 'Shared machine « {m} »', { m: m.name }), small));
@@ -3316,7 +3318,7 @@
         const here = conversations.find((x) => x.name === current);
         if (DEVICE || !here || here.phase !== 'ready') return;
         if (cm.of !== here.name) { $('cm-new-name').value = ''; $('cm-copy-title').value = ''; }
-        Object.assign(cm, { of: here.name, kind, place: kind === 'copy' ? '' : (sharedMachines().find((m) => m.name !== here.sharedMachine)?.name ?? 'new') });
+        Object.assign(cm, { of: here.name, kind, place: kind === 'copy' || here.sharedMachine ? '' : (sharedMachines().find((m) => m.name !== here.sharedMachine)?.name ?? 'new') });
         $('machine-names').replaceChildren(...sharedMachines().map((m) => Object.assign(document.createElement('option'), { value: m.name })));
         $('cm-copy-title').value = `${here.title ?? here.name} (copy)`;
         /* Its sheep: two for a copy (the second slides out of the first), one walking for a move. */
@@ -3346,6 +3348,11 @@
         $('cm-new-line')?.remove();
         if (goes.machine && !goes.known) $('cm-check').prepend(Object.assign(document.createElement('p'), { id: 'cm-new-line', className: 'cm-not', textContent: uiSaid('set-cm-new-line', 'A new shared machine · {size}', { size: sizeWords(goes.machineMb) }) }));
         $('cm-copy-part').hidden = cm.kind !== 'copy'; $('cm-move-part').hidden = cm.kind !== 'move';
+        /* Out of a shared machine (15-11): its own machine is built, its place there removed -- the machine itself with the last one in it. */
+        const out = cm.kind === 'move' && here.sharedMachine;
+        const alone = out && !conversations.some((x) => x.name !== here.name && x.sharedMachine === here.sharedMachine);
+        $('cm-stops').textContent = out ? uiSaid('set-cm-stops-out', 'Its tool stops for a few minutes') : uiSaid('set-cm-stops', 'Its tool stops for about a minute');
+        $('cm-deleted').textContent = !out ? uiSaid('set-cm-deleted', 'Its own machine is deleted') : alone ? uiSaid('set-cm-shared-deleted', 'The shared machine « {m} » is deleted', { m: here.sharedMachine }) : uiSaid('set-cm-place-deleted', 'Its place in « {m} » is deleted', { m: here.sharedMachine });
         $('cm-go').textContent = cm.kind === 'copy' ? uiSaid('set-cm-copy-go', 'Copy it') : uiSaid('set-cm-move-go', 'Move it');
         $('cm-go').className = 'primary';
         $('cm-choose').hidden = true; $('cm-check').hidden = false;
