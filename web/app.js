@@ -1993,6 +1993,8 @@
             paintChips();
             paintHealth();
             if (!DEVICE) void paintGauge();
+            /* The chats of the others, kept for a switch at once (15-11): what moved, fetched in the background. */
+            if (!DEVICE) void keepChats();
             const now = mark(conversations.find((x) => x.name === current));
             paintActions();
             if (before !== now || now.startsWith('building') || now.startsWith('restarting') || now.startsWith('moving')) enter(true);
@@ -3564,6 +3566,40 @@
        send, the words of this device's language, and how a file is opened. */
     let talk = { on: false, messages: [] };
     let talkOf = '';
+    /* KEPT CHATS (15-11): another conversation opened shows its chat at once, never a blank one while it
+       comes. This page keeps, in memory only, each one's chat state and the end of its thread: fetched in
+       the background, one at a time, for those of the list whose chat is on; again only when the list says
+       it moved, and then only what changed (the server's cursor). The chat open keeps its own copy as it
+       looks again. Opened, the copy is drawn at once, then the whole window is fetched and put in its place. */
+    const KEPT_LAST = 50;
+    const kept = new Map();
+    /* Kept once loaded: an import() asked again resolves only after the next frame, a blank one. */
+    let parleyLoaded = null;
+    const parleyUi = () => (parleyLoaded ? Promise.resolve(parleyLoaded) : import(new URL('vendor/parley-ui.js', new URL(DEVICE ? '/c/' : '/', location.href)).href).then((m) => { parleyLoaded = m; return m; }));
+    const keptOf = (name) => { if (!kept.has(name)) kept.set(name, { state: null, thread: null, mark: '' }); return kept.get(name); };
+    let keeping = false;
+    async function keepChats() {
+        if (DEVICE || keeping || document.hidden) return;
+        keeping = true;
+        try {
+            for (const n of [...kept.keys()]) if (!conversations.some((x) => x.name === n && x.talk)) kept.delete(n);
+            const { since } = await parleyUi();
+            for (const c of [...conversations]) {
+                if (!c.talk || c.phase !== 'ready' || c.name === threadOf) continue;
+                const mark = JSON.stringify(c.talk);
+                const was = kept.get(c.name);
+                if (was?.mark === mark && was.thread) continue;
+                const cursor = typeof was?.thread?.cursor === 'string' && was.thread.cursor ? was.thread.cursor : null;
+                const ask = (params) => fetch(talkPath(c.name, '', params)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+                const [state, got] = await Promise.all([ask({ state: 1 }), ask({ last: KEPT_LAST, ...(cursor ? { since: cursor } : {}) })]);
+                /* Opened meanwhile: its chat keeps its own copy. */
+                if (c.name === threadOf) continue;
+                if (state && state.on !== true) { kept.delete(c.name); continue; }
+                if (!state || !Array.isArray(got?.messages)) continue;
+                kept.set(c.name, { state, thread: cursor ? since(was.thread, got) : got, mark });
+            }
+        } finally { keeping = false; }
+    }
     let chatView = 'simple';
     try { chatView = localStorage.getItem('clavarium-chat-view') === 'detailed' ? 'detailed' : 'simple'; } catch { /* a private window */ }
     /* "Send when I stop", for dictation in the chat: kept by this device. */
@@ -3605,6 +3641,7 @@
         /* Asked for the one before, answered once another was open: not taken for this one's. */
         if (name !== current) return talk;
         talk = got; talkOf = name;
+        if (talk.on) keptOf(name).state = talk; else kept.delete(name);
         return talk;
     }
     async function paintThread() {
@@ -3639,7 +3676,7 @@
         thread?.destroy(); thread = null; threadOf = '';
         const name = current;
         /* From where this page is: a device's page lives under /c/, and nothing else is open to it. */
-        const [{ mount }, words] = await Promise.all([import(new URL('vendor/parley-ui.js', new URL(DEVICE ? '/c/' : '/', location.href)).href), readWords()]);
+        const [{ mount, since }, words] = await Promise.all([parleyUi(), readWords()]);
         if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
         /* The short-lived secrets live in this conversation now (secret-scan.mjs): the chat shows each as
@@ -3656,12 +3693,34 @@
             return data.since === true ? { ...data, messages: [...data.messages.filter((m) => m.from !== 'system'), ...lines.values()] } : data;
         };
         let first = true;
+        const shaped = (data, asked) => Promise.resolve(withLines(data, asked)).then(machineLines).then((d) => withMachine(d, name)).then((d) => { refreshSecrets(); if (first) { first = false; fadeIn(box); } return d; });
+        /* Kept (15-11): its first look is the copy this page kept, drawn at once; the next one asks the whole
+           window again (the copy may be a shorter one, or old), and it takes its place. Then as before. */
+        let keptFirst = kept.get(name)?.thread ?? null;
+        let whole = false;
+        const keepThread = (data, asked) => {
+            if (!Array.isArray(data?.messages) || asked.before || threadOf !== name) return data;
+            const k = keptOf(name);
+            k.thread = data.since === true ? (k.thread ? since(k.thread, data) : null) : data;
+            k.mark = '';
+            return data;
+        };
         thread = mount(box, {
             words, view: chatView,
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             /* A part of the thread: its end at first, then what changed, the page before on demand (Parley's window). */
             window: windowFor(chatWindow),
-            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)).then((data) => { refreshSecrets(); if (first) { first = false; fadeIn(box); } return data; }),
+            load: (asked = {}) => {
+                if (keptFirst && !asked.since && !asked.before) {
+                    const data = keptFirst; keptFirst = null; whole = true;
+                    setTimeout(() => { if (thread && threadOf === name) void thread.refresh(); }, 0);
+                    return shaped(data, asked);
+                }
+                const { since: _since, ...all } = asked;
+                const ask = whole && asked.since ? all : asked;
+                whole = false;
+                return fetch(talkPath(name, '', ask)).then((r) => r.json()).then((data) => keepThread(data, ask)).then((data) => shaped(data, ask));
+            },
             /* The whole thread searched, however little of it is shown. */
             search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
@@ -3892,7 +3951,13 @@
         if (!current) return;
         const name = current;
         const mine = ++opening;
-        await readTalk();
+        /* Kept (15-11): its chat drawn at once from the copy this page has; its state asked meanwhile, and
+           the chat taken down only if it is off now. */
+        const k = kept.get(name);
+        if (k?.state?.on && k.thread) {
+            talk = k.state; talkOf = name;
+            void readTalk().then(() => { if (mine === opening && name === current && !talk.on) void paintThread(); });
+        } else await readTalk();
         if (mine !== opening || name !== current) return;
         const want = talk.on || noTerminal() ? true : simplePref;
         if (want !== simple) { simple = want; simpleFilesAt = 0; }
