@@ -2732,6 +2732,7 @@
         void paintGuide(here);
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
+        void paintCompanionHere();
         await paintSignIn();
     }
     /* ---------- chapters (a conversation's settings, and Settings): folded or not ---------- */
@@ -3743,7 +3744,7 @@
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (tetherAct(id, () => thread?.refresh?.())) return; else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id === 'signinlink') void signinLinkToMe(); else if (tetherAct(id, () => thread?.refresh?.())) return; else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -3877,7 +3878,7 @@
     /* "commits:<repository>.<to>.<from>.<n>": those commits, in the review ("See the 3 commits"). A commit a
        line names (7 to 40 hexadecimal characters, a digit among them) is a link to its review, on a line about
        a repository; the agent's own messages are never read for this. */
-    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse', flash: 'Plug it in and start' };
+    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', signinlink: 'Show me the link', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse', flash: 'Plug it in and start' };
     const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
     /* A Tether call an agent asked the owner to allow, offered right in the thread: allow:<id> / deny:<id>. */
     const DEMANDE = /^(allow|deny|always|flash):[0-9a-f-]{36}$/;
@@ -3894,7 +3895,7 @@
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
-        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || id === 'seen-done' || DEMANDE.test(id) || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
+        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || id === 'seen-done' || id === 'signinlink' || DEMANDE.test(id) || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
         const label = (id) => { const n = Number(COMMITS.exec(id)?.[4] ?? 0); return n ? (n === 1 ? 'See the commit' : `See the ${n} commits`) : ACTIONS[kindOf(id)]; };
         const linksOf = (m) => {
             const repo = DEVICE ? null : (m.actions ?? []).map((id) => /^review:([a-z0-9][a-z0-9-]*)$/.exec(id)?.[1]).find(Boolean);
@@ -3909,6 +3910,8 @@
         /* A problem of its machine that went away since (machine-ok): nothing left to see or to do on its line. */
         const fixedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'machine-ok').map((m) => String(m.at ?? '')).sort().pop() ?? '';
         const FIXED_GOES = new Set(['seen', 'room', 'disk', 'memory']);
+        /* "Show me the link" on a sign-in handed over, until the next line of that sign-in says how it went. */
+        const signinAt = data.messages.filter((m) => m.from === 'system' && m.event === 'signin-help').map((m) => String(m.at ?? '')).sort().pop() ?? '';
         /* A Tether demande decided (here, from Assets, or by the agent) is marked done in the thread,
            carrying its id: Accept / Refuse are then offered no more on the line that asked. */
         const settled = new Map(data.messages.filter((m) => m.from === 'system' && m.event === 'tether-done' && m.brief).map((m) => [String(m.brief), m]));
@@ -3922,7 +3925,7 @@
             if (!may(String(r.yes?.id ?? ''))) { const { yes: _y, no: _n, others: _o, ...shown } = r; return shown; }
             return r;
         };
-        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1))))
+        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1)))).filter((id) => !(id === 'signinlink' && String(m.at ?? '') < signinAt))
             .map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
         return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m), ...(m.request && typeof m.request === 'object' ? { request: requestOf(m) } : {}) } : m)) };
     }
@@ -4162,6 +4165,7 @@
         ['docket-failed', 'Could not be handled', 'Said failed by the tool, with why'],
         ['docket-unhandled', 'Not handled', 'Told three times, never said done'],
         ['docket-reminder', 'Reminder set', 'A reminder the tool set itself'],
+        ['signin-help', 'Sign-in', 'Signed in through another conversation'],
         ['tether-notice', 'Later news', 'A mail came back, an invitation was declined'],
         ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
         ['machine-ok', 'Machine well again', 'What was wrong with it went away'],
@@ -7812,7 +7816,7 @@
             : 'Development mode: anyone on this machine is the operator';
         $('settings-address').textContent = `Address: ${platform.address ?? 'not declared'}`;
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
-        void paintInstance();
+        void paintInstance(); void paintCompanionGeneral();
         if ($('settings-wifi-top').open) void paintWifi();
         if ($('settings-mesh-top').open) void paintScreen();
         if ($('settings-usage-top').open) void paintUsage();
@@ -8026,6 +8030,51 @@
             if (!installName()) pointManifest('');
         } catch (error) { $('instance-error').textContent = error.message; $('instance-error').hidden = false; }
     });
+
+    /* ---------- the sign-in companion (server/signinhelp.mjs, 15-11, #362) ---------- */
+    /* The conversation whose browser signs the tools in: one for all in Settings, and each conversation's own
+       (or none) in its settings. Never itself; one with no browser given is said so. */
+    const COMPANION_NONE = 'none';
+    const readCompanions = () => fetch(`${API}/signin-companion`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const companionWarn = (view, name) => (name && name !== COMPANION_NONE && !(view.browsers?.[name] ?? []).length ? 'No browser given to it yet' : '');
+    function fillCompanions(select, first, value, except) {
+        select.replaceChildren(...first.map(([v, t]) => new Option(t, v)), ...conversations.filter((c) => c.name !== except).map((c) => new Option(shownName(c), c.name)));
+        select.value = [...select.options].some((o) => o.value === value) ? value : first[0][0];
+    }
+    async function paintCompanionGeneral() {
+        if (DEVICE) return;
+        const view = await readCompanions();
+        if (!view) return;
+        fillCompanions($('companion-general'), [['', 'None']], view.general, null);
+        $('companion-general-hint').textContent = companionWarn(view, view.general) || 'Signs the tools in with its browser';
+    }
+    $('companion-general').addEventListener('change', async () => {
+        $('companion-general-error').hidden = true;
+        try { await post(`${API}/signin-companion`, { companion: $('companion-general').value }); } catch (error) { $('companion-general-error').textContent = error.message; $('companion-general-error').hidden = false; }
+        await paintCompanionGeneral();
+    });
+    async function paintCompanionHere() {
+        $('companion-here-row').hidden = DEVICE;
+        if (DEVICE || !current) return;
+        const name = current;
+        const view = await readCompanions();
+        if (!view || name !== current) return;
+        const general = view.general && view.general !== name ? conversations.find((c) => c.name === view.general) : null;
+        const own = view.per?.[name] ?? '';
+        fillCompanions($('companion-here'), [['', general ? `As in Settings: ${shownName(general)}` : 'As in Settings: none'], [COMPANION_NONE, 'None']], own, name);
+        $('companion-here-hint').textContent = companionWarn(view, own || (general ? view.general : '')) || 'Signs its tool in with its browser';
+    }
+    $('companion-here').addEventListener('change', async () => {
+        const v = $('companion-here').value;
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin-companion`, { companion: v === '' ? null : v }); } catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        await paintCompanionHere();
+    });
+    /* The button of the line "Signing in through « B »...": the link shown to the person instead. */
+    async function signinLinkToMe() {
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin-link`, {}); } catch { /* already over: the thread says how */ }
+        void thread?.refresh?.();
+    }
 
     /* ---------- Updates: what runs, what is out, how it updates itself (server/updates.mjs) ---------- */
     let updatesTimer; let updatesBusy = false;

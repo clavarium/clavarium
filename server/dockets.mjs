@@ -52,11 +52,16 @@ export const AGAIN_MS = 30 * 60_000;
 /* ...this many times at most (the first included); then its chat says so. */
 export const TOLD_MAX = 3;
 
+/* AN ANSWER NEVER SHOWN (15-11, #362): the note of a sign-in a companion did for another conversation is
+   the code it read (signinhelp.mjs) -- typed into that tool, never said in a chat nor shown to the owner. */
+const SECRET_KINDS = new Set(['signin-help']);
+const hidden = (event) => SECRET_KINDS.has(event?.kind);
+const HIDDEN = '(not shown)';
 /* One line in the chat: what was handled, cut short; the docket keeps it whole. */
 const cut = (text, max) => { const s = String(text ?? '').replace(/\s+/g, ' ').trim(); return s.length > max ? `${s.slice(0, max - 1)}…` : s; };
 
 export class Dockets {
-    #resources; #store; #say; #event; #alert; #idle; #awake; #chatOn; #now; #every; #zone;
+    #resources; #store; #say; #event; #alert; #idle; #awake; #chatOn; #now; #every; #zone; #acked;
     #listening = new Map(); #zoned = new Set(); #busy = false;
     /* The reminders a key set: plan id -> its name, for the line its chat shows. */
     #setBy = new Map();
@@ -65,9 +70,10 @@ export class Dockets {
        in its chat (Talk.event). `alert({title, body, url})`: the owner's devices. `idle(name)`: not in a
        turn (its pulse). `awake()`: the conversations whose machine runs. `chatOn(name)`. `now()`: ms. */
     /* `zone`: the time zone the tool's times are read in -- this server's, as its wake-ups' (a machine runs in UTC). */
+    /* `acked(name, e)`: told of every answer of its tool, { event, ack } (signinhelp.mjs reads its own kind). */
     constructor({ store, resources, say, event = () => {}, alert = () => {}, idle = () => true, awake = () => [], chatOn = () => false, now = () => Date.now(), listenEveryMs = 2000,
-        zone = Intl.DateTimeFormat().resolvedOptions().timeZone }) {
-        this.#zone = zone; this.#store = store; this.#resources = resources; this.#say = say; this.#event = event; this.#alert = alert; this.#idle = idle; this.#awake = awake; this.#chatOn = chatOn; this.#now = now; this.#every = listenEveryMs;
+        zone = Intl.DateTimeFormat().resolvedOptions().timeZone, acked = () => {} }) {
+        this.#acked = acked; this.#zone = zone; this.#store = store; this.#resources = resources; this.#say = say; this.#event = event; this.#alert = alert; this.#idle = idle; this.#awake = awake; this.#chatOn = chatOn; this.#now = now; this.#every = listenEveryMs;
     }
 
     #dir(name) { return `${this.#resources.workFolder(name)}/${FOLDER}`; }
@@ -105,7 +111,7 @@ export class Dockets {
         return {
             on: true,
             plans: s.plans.filter((p) => !p.off && p.next !== null && !(p.due !== undefined && s.events.some((e) => e.plan === p.id))).map((p) => ({ id: p.id, text: p.text, cron: p.cron ?? null, next: new Date(p.next).toISOString(), tz: p.tz })),
-            events: s.events.slice(-20).reverse().map((e) => ({ id: e.id, at: e.at, from: e.from, kind: e.kind, text: e.text, state: e.state, ...(e.ack ? { note: e.ack.note } : {}), told: told[e.id]?.count ?? 0 })),
+            events: s.events.slice(-20).reverse().map((e) => ({ id: e.id, at: e.at, from: e.from, kind: e.kind, text: e.text, state: e.state, ...(e.ack ? { note: hidden(e) ? HIDDEN : e.ack.note } : {}), told: told[e.id]?.count ?? 0 })),
             waiting: s.waiting,
         };
     }
@@ -135,6 +141,8 @@ export class Dockets {
 
     /* What the tool did: said in its chat; a failure alerts its owner. */
     #heard(name, e) {
+        if (e.type === 'acked') { try { void Promise.resolve(this.#acked(name, { event: e.event, ack: e.ack })).catch(() => {}); } catch { /* a hook that fails stops nothing */ } }
+        if (e.type === 'acked' && e.ack.kind === 'done' && hidden(e.event)) { this.#line(name, { kind: 'docket-done', text: 'Handled: a sign-in for another conversation.', topic: 'Handled', brief: 'Sign-in' }); return; }
         if (e.type === 'acked' && e.ack.kind === 'done') this.#line(name, { kind: 'docket-done', text: `Handled: ${cut(e.event.text, 80)}${e.ack.note ? ` -- ${cut(e.ack.note, 120)}` : ''}`, topic: 'Handled', brief: e.event.text.slice(0, 60) });
         if (e.type === 'acked' && e.ack.kind === 'failed') {
             this.#line(name, { kind: 'docket-failed', text: `Could not be handled: ${e.event.text} -- ${e.ack.note}`, tone: 'warn', topic: 'Not handled' });

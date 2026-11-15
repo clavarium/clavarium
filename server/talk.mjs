@@ -166,6 +166,8 @@ export const EVENT_LEVELS = Object.freeze({
     'docket-failed': 'needs-you',
     'docket-unhandled': 'needs-you',
     'docket-reminder': 'trace',
+    /* Its tool signs in through another conversation's browser (signinhelp.mjs, 15-11): handed over, signed in, or back to the person. */
+    'signin-help': 'news',
     /* A Tether call its agent asks the owner to allow (tethers.mjs): offered in the thread with
        Accept / Refuse, the same block a machine problem uses. Its closing line (decided here, from
        Assets, or by the agent) is a trace that carries the call's id, so the buttons close with it. */
