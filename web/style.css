@@ -1254,6 +1254,41 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as-settings dt { color: var(--ink2); padding-right: 16px; }
 .as-settings dd { text-align: right; font-weight: 600; overflow-wrap: anywhere; }
 .as-settings dt:nth-last-of-type(1), .as-settings dd:last-of-type { border-bottom: 0; }
+/* A CALENDAR'S AGENDA (16-11, app.js agendaPart): its week, day by day; an event opened shows its facts. Read only. */
+.ag-bar { display: flex; gap: 4px; }
+.ag-bar button { padding: 4px 10px; }
+.as-agenda { display: flex; flex-direction: column; gap: 6px; }
+.as-agenda[aria-busy="true"] .ag-days { opacity: .6; }
+.ag-days { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); padding: 8px 12px; }
+.ag-day { display: flex; flex-direction: column; gap: 2px; }
+.ag-dayhead { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; font-size: .8125rem; color: var(--ink2); text-transform: capitalize; }
+.ag-day[data-today] .ag-dayhead { color: var(--ink); }
+.ag-event { border-radius: 6px; }
+.ag-event[open] { background: var(--panel); }
+.ag-row { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 5px 6px; cursor: pointer; list-style: none; border-radius: 6px; }
+.ag-row::-webkit-details-marker { display: none; }
+/* The panels' own details (#assets, #panel) give a summary a button's look and a "+ ": not an event's row. */
+#assets .ag-event > summary.ag-row, #panel .ag-event > summary.ag-row, .ag-event > summary.ag-row { display: grid; padding: 5px 6px; border: 0; background: none; font-weight: inherit; align-self: stretch; min-height: 0; }
+#assets .ag-event > summary.ag-row::before, #panel .ag-event > summary.ag-row::before, .ag-event > summary.ag-row::before { content: none; }
+.ag-row:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.ag-row:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+.ag-time { font-variant-numeric: tabular-nums; color: var(--ink2); font-size: .8125rem; white-space: nowrap; }
+.ag-what { display: flex; flex-direction: column; min-width: 0; }
+.ag-title { font-weight: 600; overflow-wrap: anywhere; }
+.ag-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-event[data-show="tentative"] .ag-title { font-style: italic; }
+.ag-event[data-show="free"] .ag-title { font-weight: 400; color: var(--ink2); }
+.ag-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; padding: 4px 6px 8px calc(4.5em + 14px); font-size: .8125rem; }
+.ag-facts dt { color: var(--ink2); }
+.ag-facts dd { margin: 0; overflow-wrap: anywhere; }
+.ag-facts a { color: var(--brass-ink); }
+.ag-now { display: flex; align-items: center; gap: 6px; color: var(--brass-ink); font-size: .6875rem; font-weight: 600; text-transform: uppercase; }
+.ag-now::after { content: ""; flex: 1; border-top: 1.5px solid var(--brass-ink); }
+@media (max-width: 600px) {
+  .ag-days { padding: 6px 8px; }
+  .ag-row { grid-template-columns: 3.8em minmax(0, 1fr); gap: 6px; }
+  .ag-facts { padding-left: 6px; }
+}
 .as-foot { margin-top: 10px; }
 .as-form { display: flex; flex-direction: column; gap: 8px; }
 .as-form h3 { margin: 0; font-size: 1.125rem; }

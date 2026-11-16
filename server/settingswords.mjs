@@ -299,6 +299,14 @@ export const SETTINGS_WORDS_FR = {
     'set-ml-answers': 'Répond', 'set-ml-last': 'redémarré {t}', 'set-ml-mute': 'Ne répond pas', 'set-ml-asked': 'attend votre accord',
     'set-ml-force-q': 'Forcer l’arrêt de {name} ? Rien n’est sauvé.',
     'set-ml-hang': 'S’il bloque', 'set-ml-hang-what': 'Nuit : de 0 h à 7 h', 'set-ml-night': 'La nuit', 'set-ml-always': 'Toujours', 'set-ml-ask': 'Me demander',
+    /* A calendar's agenda, in its asset panel (agenda.mjs, 16-11). */
+    'set-ag-title': 'Agenda', 'set-ag-prev': 'Semaine précédente', 'set-ag-next': 'Semaine suivante', 'set-ag-today': 'Aujourd\'hui',
+    'set-ag-now': 'Maintenant', 'set-ag-allday': 'Journée', 'set-ag-reading': 'Lecture…', 'set-ag-again': 'Réessayer',
+    'set-ag-failed': 'Agenda illisible pour le moment.', 'set-ag-none': 'Aucun événement cette semaine', 'set-ag-free-day': 'Rien aujourd\'hui',
+    'set-ag-more': 'Certains événements ne sont pas affichés', 'set-ag-partial': 'Heures de début seules, pour l\'instant',
+    'set-ag-when': 'Quand', 'set-ag-where': 'Où', 'set-ag-link': 'Lien', 'set-ag-join': 'Rejoindre en ligne', 'set-ag-organizer': 'Organisateur',
+    'set-ag-guests': 'Invités', 'set-ag-shown': 'Affiché comme', 'set-ag-show-free': 'Libre', 'set-ag-show-tentative': 'Provisoire',
+    'set-ag-show-away': 'Absent', 'set-ag-show-elsewhere': 'Ailleurs',
     'set-ml-short': 'Manque de mémoire', 'set-ml-short-what': 'La plus grosse machine', 'set-ml-force': 'Forcer l’arrêt', 'set-ml-sleep': 'Mettre en veille', 'set-ml-alert': 'Alerter seulement',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});
