@@ -4,6 +4,7 @@
 (() => {
     const CLOSE_ENDED = 1000;
     const CLOSE_TAKEN = 4001;
+    const CLOSE_ASLEEP = 4004;
     const CLOSE_FAILED = 1011;
     const RETRY_MS = 1500;
     const NAME = /^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
@@ -821,11 +822,16 @@
     /* When this wait began (kept across the tries made by the page itself), and whether the server repaired it meanwhile. */
     let waitingSince = 0;
     let repairedFor = '';
+    let resumeWait = false;
     const disconnect = () => { wanted = false; clearSlow(); socket?.close(); socket = undefined; stopVoice?.(); };
 
     /* `again`: a try made by the page itself, within the same wait. */
+    /* `resume`: the page comes back by itself (a dropped connection, the server restarted): a machine asleep stays so. */
     function connect(options) {
         const again = options?.again === true;
+        /* Tries the page makes by itself within that wait keep it: a server still restarting refuses a few first. */
+        const resume = options?.resume === true || (again && resumeWait);
+        resumeWait = resume;
         disconnect();
         if (!NAME.test(current)) return;
         const name = current;
@@ -835,7 +841,7 @@
         say('connecting', 'connecting');
         fit.fit();
         const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-        const where = DEVICE ? `/c/terminal?d=${pairing}&c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`;
+        const where = DEVICE ? `/c/terminal?d=${pairing}&c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}`;
         const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
@@ -904,7 +910,11 @@
         };
         mine.onclose = (event) => {
             if (socket !== mine || !wanted) return;       /* we moved on, or closed it ourselves */
-            if (event.code === CLOSE_TAKEN) {
+            if (event.code === CLOSE_ASLEEP) {
+                say('asleep', 'waiting');
+                show(uiSaid('set-asleep-page', 'Asleep. It wakes only when you wake it.'), uiSaid('set-wake-it', 'Wake it'), connect); mascot('asleep');
+                if (DEVICE) void refresh();
+            } else if (event.code === CLOSE_TAKEN) {
                 say('open elsewhere', 'waiting');
                 show('This conversation is now open on another screen.', 'Use it here', connect);
             } else if (event.code === CLOSE_ENDED) {
@@ -939,7 +949,7 @@
             } else {
                 say('reconnecting', 'connecting');
                 if (DEVICE) void refresh();       /* removed meanwhile? then say it, do not retry for ever */
-                setTimeout(() => { if (socket === mine && wanted) connect(); }, RETRY_MS);
+                setTimeout(() => { if (socket === mine && wanted) connect({ resume: true }); }, RETRY_MS);
             }
         };
     }
@@ -951,7 +961,7 @@
         if (!current || !socket || !wanted) return;
         const dead = socket; socket = undefined;
         try { dead.close(); } catch { /* gone */ }
-        connect();
+        connect({ resume: true });
     });
 
     terminal.onData(send);
@@ -8177,7 +8187,8 @@
         apply.dataset.retry = String(failedHere);
         apply.className = failedHere ? '' : 'primary';
         apply.textContent = failedHere ? `Try ${u.available} again\u2026` : `Update to ${u.available ?? ''}`;
-        $('updates-retry-note').textContent = failedHere ? `It did not start here before. If it fails again, ${u.version} is put back.` : '';
+        const onlyFetch = failedHere && u.history.filter((h) => h.action === 'update' && h.to === u.available && h.result !== 'done').every((h) => h.fetch === true);
+        $('updates-retry-note').textContent = !failedHere ? '' : onlyFetch ? 'It could not be downloaded before; it is tried again by itself.' : `It did not start here before. If it fails again, ${u.version} is put back.`;
         $('updates-retry-note').hidden = !failedHere;
         $('updates-retry-yes').hidden = true; $('updates-retry-no').hidden = true; apply.hidden = false;
         /* The last thing that went wrong, said once at the top, in words: a version put

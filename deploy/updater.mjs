@@ -85,6 +85,10 @@ const WATCH_EVERY_MS = 3600_000;
 const WATCH_RECENT_MS = 24 * 3600_000;
 const HISTORY_MAX = 30;
 const ASK_EVERY_MS = 6 * 3600_000;
+/* A VERSION THAT COULD NOT EVEN BE FETCHED (16-11: npm asked one minute after it came out, before every mirror
+   had it): nothing of it ran here, so it is tried again by itself, this long after, this many times at most. */
+export const FETCH_AGAIN_MS = 30 * 60_000;
+export const FETCH_TRIES = 3;
 /* Between "Switching" said in state.json and the server stopped: the pages ask the server every
    10 seconds at most (app.js), and the server says it in each answer (updates.mjs, notice): each
    gives way to the maintenance page before the server goes. */
@@ -602,7 +606,7 @@ export class Updater {
         const unlock = this.#lock();
         try {
             let release;
-            try { release = await this.prepare({ version }); } catch (error) { this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: error.message }); throw error; }
+            try { release = await this.prepare({ version }); } catch (error) { this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: error.message, ...(/^npm could not install /.test(error.message) ? { fetch: true } : {}) }); throw error; }
             const before = this.#dataFormat();
             let archive;
             try {
@@ -714,8 +718,13 @@ export class Updater {
         const available = await this.check();
         if (!available) return 'up to date';
         if (conf.MODE === 'ask') return `${available} is out: waiting for the owner`;
-        /* A version that failed here is not tried again by itself: the owner can, from Settings. */
-        if ((state.history ?? []).some((h) => h.to === available && h.action === 'update' && h.result !== 'done')) return `${available} failed here before: not tried again by itself`;
+        /* A version that failed here is not tried again by itself: the owner can, from Settings. One that only
+           could not be fetched (nothing of it ran) is, later, a few times. */
+        const failed = (state.history ?? []).filter((h) => h.to === available && h.action === 'update' && h.result !== 'done');
+        if (failed.some((h) => h.fetch !== true)) return `${available} failed here before: not tried again by itself`;
+        if (failed.length >= FETCH_TRIES) return `${available} could not be fetched ${failed.length} times: not tried again by itself`;
+        const lastAt = Math.max(...failed.map((h) => new Date(h.at ?? 0).getTime()), -Infinity);
+        if (failed.length && now - lastAt < FETCH_AGAIN_MS) return `${available} could not be fetched: tried again later`;
         const why = await this.busy(); if (why) return why;
         await this.apply(available);
         /* What the history says, not what was hoped: a version that did not start was undone. */

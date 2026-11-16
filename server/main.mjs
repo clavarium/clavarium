@@ -59,7 +59,8 @@ import { GitChecks } from './gitchecks.mjs';
 import { GitKeeper } from './gitkeeper.mjs';
 import { GitRunner } from './gitrunner.mjs';
 import { Shelf } from './shelf.mjs';
-import { Health } from './health.mjs';
+import { Health, RESTART_OUTSIDE, TOOLS_HOST_PATTERN } from './health.mjs';
+import { Revive } from './revive.mjs';
 import { LinkGuard, removedLine, toolLine } from './linkguard.mjs';
 import { Setup } from './setup.mjs';
 import { Capacity } from './capacity.mjs';
@@ -482,7 +483,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* A sign-in a companion did for another conversation (signinhelp.mjs, made below): its answer typed there. */
         acked: (name, e) => signinHelp?.acked(name, e) });
     const typingWatch = new TypingWatch();
-    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), docket: dockets, typing: (name) => typingWatch.busy(name),
+    /* WHO WOKE IT (16-11): this server opens a terminal for others (a wake-up, a key); said once it wakes one. */
+    const wakeWhy = { why: new Map(), set(name, by) { this.why.set(name, by); }, take(name) { const by = this.why.get(name); this.why.delete(name); return by ?? 'the server'; } };
+    all.woken = (name, by, was) => events.add({ kind: 'machine', text: `Machine of ${name}: woken by ${by} (it was ${was})`, conversation: name });
+    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => { if (!all.awake().includes(name)) wakeWhy.set(name, 'its wake-up'); return bridge?.warm(name); }, docket: dockets, typing: (name) => typingWatch.busy(name),
         fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
     const wakeTimer = wakeups.start(wakeEveryMs);
     const docketTimer = dockets.start(wakeEveryMs);
@@ -613,7 +617,29 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): its tool restarted by this server
        once its turn has ended (its pulse no longer busy), said in its chat; once per ten minutes at most. */
     const restartedAt = new Map();
+    /* ITS TOOL STILL IN A FOLDER THAT CAME LOOSE, or asking from outside /work (16-11, revive.mjs): restarted
+       by the server, its tool only; told through its docket first (read as it starts), its chat after. */
+    const revive = new Revive({
+        /* Its tools' host stopped first (it starts again at the tool's first tool, from the folder put back). */
+        restart: async (name) => { await vms.exec(name, ['sh', '-c', `for p in $(pgrep -f '${TOOLS_HOST_PATTERN}'); do kill "$p"; done; true`], { timeoutMs: 10_000 }).catch(() => {}); return all.restartTool(name); },
+        restartMachine: async (name) => { const r = await all.machineAction(name, 'restart', { wait: true }); return r?.ok !== false; },
+        busy: (name) => talk.pulse(name)?.busy === true,
+        taken: (name) => vms.exec(name, ['rm', '-f', RESTART_OUTSIDE], { timeoutMs: 10_000 }),
+        tell: (name, why, step) => {
+            const loose = why === 'stale' || why === 'stuck';
+            if (step === 'before') {
+                if (loose) try { if (dockets.on(name)) dockets.post(name, { kind: 'restarted', text: 'Your work folder came loose in your machine and was put back: your tool was restarted to see it again (what was in the old one could not be reached). Your work picks up where it was; what ran in the background stopped.' }); } catch { /* its docket may be off */ }
+                return;
+            }
+            const text = step === 'done'
+                ? (why === 'stuck' ? 'Its work folder could not be mounted again: its machine was restarted, the folder is back. Its work picks up where it was.' : loose ? 'Its work folder had come loose: its tool was restarted to see it again. Its work picks up where it was.' : 'Its tool was restarted as it asked: its work picks up where it was.')
+                : 'Its tool could not be restarted: open its terminal and type exit, it starts again.';
+            try { talk.event(name, { kind: step === 'done' ? 'restarted' : 'machine-problem', text, topic: step === 'done' ? 'Restarted' : 'Machine', ...(step === 'done' ? {} : { tone: 'warn' }) }); } catch { /* its chat is off */ }
+            if (step === 'failed') events.add({ kind: 'machine', text: `${name}: ${text}`, conversation: name });
+        },
+    });
     const restartTimer = setInterval(() => {
+        void revive.tick().catch(() => {});
         for (const name of all.awake()) {
             if (!talk.restartAsked(name)) continue;
             if (talk.pulse(name)?.busy) continue;
@@ -646,7 +672,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs);
        not where its owner turned on its own reaction (above): one way of telling it, not two. */
     const healthDocket = new HealthDocket({ store: new Store(`${dataDir}/health-docket.json`), dockets, reacting: (name) => reacting.settings(name).on });
-    health.forgotten = (name) => { healthDocket.forget(name); watchdog.forget(name); };
+    health.forgotten = (name) => { healthDocket.forget(name); watchdog.forget(name); revive.forget(name); };
     /* A machine's problems worth keeping in What happened: said once, until they went away. */
     const problemsSaid = new Map();
     /* ITS WATCHDOG (watchdog.mjs): mute or full for as long as its owner set, forced off then started, once;
@@ -662,6 +688,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         alert: (payload) => { events.add({ kind: 'machine', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
     health.judged = (name, record) => {
         void watchdog.judged(name, record).catch(() => {});
+        try { revive.judged(name, record); } catch { /* its tool: nothing more */ }
         talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
         /* A folder that came loose and was put back: said once, in its chat (the look that put it back). */
         for (const path of record?.remounted ?? []) { try { talk.event(name, { kind: 'machine-ok', text: `Le dossier ${path} s'était détaché de la machine : il a été remonté.`, topic: 'Machine', brief: 'Shared folder' }); } catch { /* its chat is off */ } }
@@ -843,6 +870,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             wake: (name) => {
                 const c = all.get(name);
                 if (c?.phase !== 'ready') throw new Refusal(409, 'This conversation is not ready.');
+                if (c.asleep === true || c.stopped === true) wakeWhy.set(name, 'a key (API)');
                 void bridge?.warm(name);
                 return { state: c.asleep === true ? 'waking' : 'awake' };
             },
@@ -895,9 +923,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); }
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
+        /* Put to sleep or stopped: a page that comes back by itself does not wake it (bridge.mjs, CLOSE_ASLEEP). */
+        asleep: (name) => { const c = all.get(name); return c?.asleep === true || c?.stopped === true; },
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },
-        spawn: async (name, cols, rows, say) => {
-            const [program, ...argv] = await all.open(name, say);
+        spawn: async (name, cols, rows, say, who) => {
+            const [program, ...argv] = await all.open(name, say, who ?? wakeWhy.take(name));
             const started = pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });
             /* Its start is over once something is drawn (nothing of it is
                read), once it ends, or after a while whatever happens. Not
