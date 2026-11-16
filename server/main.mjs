@@ -917,6 +917,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); }
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
+        /* Put to sleep or stopped: a page that comes back by itself does not wake it (bridge.mjs, CLOSE_ASLEEP). */
+        asleep: (name) => { const c = all.get(name); return c?.asleep === true || c?.stopped === true; },
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
