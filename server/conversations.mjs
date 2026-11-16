@@ -163,6 +163,9 @@ export class Conversations {
     /* Set by the server: its wake-ups, for a whole export; and on its import, when asked, its reminders (from the
        export's work folder) and those wake-ups given again (15-11, as a copy does). */
     wakeupsOf = () => undefined;
+    /* Set by the server: a machine put to sleep or stopped, woken by an opening -- `by` who (16-11: a sleeper found
+       awake in the morning, and nothing said who woke it). Said in What happened. */
+    woken = () => {};
     importReminders = async () => {};
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
@@ -560,7 +563,7 @@ export class Conversations {
     }
 
     /* What a terminal must run to reach this conversation. Wakes the VM first. */
-    async open(name, say = () => {}) {
+    async open(name, say = () => {}, by = 'the server') {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : c.phase === 'moving' ? 'This conversation is moving its work folder.' : 'This conversation could not be built.');
@@ -571,6 +574,7 @@ export class Conversations {
         /* Opening is the explicit gesture that ends a sleep, or a stop its owner asked for. */
         if (c.asleep) this.#store.patch(name, { asleep: false });
         if (c.stopped) this.#store.patch(name, { stopped: undefined });
+        if (c.asleep || c.stopped) { try { this.woken(name, by, c.asleep ? 'asleep' : 'stopped'); } catch { /* said, nothing more */ } }
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
         /* Another screen is applying the size kept for its wake: this one opens once it is over. */
         await this.#resizing.get(name)?.catch(() => {});

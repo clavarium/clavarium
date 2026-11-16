@@ -483,7 +483,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* A sign-in a companion did for another conversation (signinhelp.mjs, made below): its answer typed there. */
         acked: (name, e) => signinHelp?.acked(name, e) });
     const typingWatch = new TypingWatch();
-    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), docket: dockets, typing: (name) => typingWatch.busy(name),
+    /* WHO WOKE IT (16-11): this server opens a terminal for others (a wake-up, a key); said once it wakes one. */
+    const wakeWhy = { why: new Map(), set(name, by) { this.why.set(name, by); }, take(name) { const by = this.why.get(name); this.why.delete(name); return by ?? 'the server'; } };
+    all.woken = (name, by, was) => events.add({ kind: 'machine', text: `Machine of ${name}: woken by ${by} (it was ${was})`, conversation: name });
+    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => { if (!all.awake().includes(name)) wakeWhy.set(name, 'its wake-up'); return bridge?.warm(name); }, docket: dockets, typing: (name) => typingWatch.busy(name),
         fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
     const wakeTimer = wakeups.start(wakeEveryMs);
     const docketTimer = dockets.start(wakeEveryMs);
@@ -866,6 +869,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             wake: (name) => {
                 const c = all.get(name);
                 if (c?.phase !== 'ready') throw new Refusal(409, 'This conversation is not ready.');
+                if (c.asleep === true || c.stopped === true) wakeWhy.set(name, 'a key (API)');
                 void bridge?.warm(name);
                 return { state: c.asleep === true ? 'waking' : 'awake' };
             },
@@ -921,8 +925,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* Put to sleep or stopped: a page that comes back by itself does not wake it (bridge.mjs, CLOSE_ASLEEP). */
         asleep: (name) => { const c = all.get(name); return c?.asleep === true || c?.stopped === true; },
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },
-        spawn: async (name, cols, rows, say) => {
-            const [program, ...argv] = await all.open(name, say);
+        spawn: async (name, cols, rows, say, who) => {
+            const [program, ...argv] = await all.open(name, say, who ?? wakeWhy.take(name));
             const started = pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });
             /* Its start is over once something is drawn (nothing of it is
                read), once it ends, or after a while whatever happens. Not

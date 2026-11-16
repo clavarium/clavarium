@@ -917,3 +917,17 @@ test('reset: a working machine too is deleted with its work, and built anew; ref
     assert.ok(b.calls.indexOf('work make fresh') > erased, 'its work made anew, empty');
     assert.equal(all.list()[0].phase, 'ready');
 });
+
+test('a machine put to sleep and woken by an opening: who woke it is said once; an opening of one awake says nothing (16-11)', async (t) => {
+    const { all } = stepping(t);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    const woken = []; all.woken = (name, by, was) => woken.push(`${name} ${by} ${was}`);
+    await all.sleep('demo');
+    assert.equal(all.get('demo').asleep, true);
+    await all.open('demo', () => {}, 'a page'); all.attached('demo'); all.left('demo');
+    assert.deepEqual(woken, ['demo a page asleep']);
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    assert.equal(woken.length, 1);
+});

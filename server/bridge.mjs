@@ -185,7 +185,9 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         return run;
     }
     async function openNow(name, cols, rows, sink, say) {
-        const terminal = await spawn(name, cols, rows, say);
+        /* Who opens it, for What happened when it wakes a sleeper: a screen, or this server (warm). */
+        const who = sink ? (deviceSeats.has(sink) ? 'a paired device' : 'a page') : undefined;
+        const terminal = await spawn(name, cols, rows, say, who);
         /* While it was being opened another one may have been: the newest wins. */
         if (live.has(name)) close(name);
         const kept = { terminal, sink, cols, rows, openedAt: Date.now(), outputAt: Date.now() };
