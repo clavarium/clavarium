@@ -173,6 +173,8 @@
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
  *   GET  /api/mail/open?ref=mail:...&c=   GET /api/mail/page?ref=...   a mail cited by its reference, read now (mailref.mjs)
  *   POST /api/tether/agenda                 {target, from?, to?}: a calendar's events of a window, read now (agenda.mjs)
+ *   POST /api/tether/mail-list|mail-read    {target, folder?, text?} | {target, id, folder?}: a mailbox's latest messages, one as text (mailview.mjs)
+ *   POST /api/tether/contacts|contact       {target, text?} | {target, id}: an address book's contacts, one (contactview.mjs)
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>[&dir=<subfolders>&exists=keep|replace|skip&batch=<id>]  the body IS the file
  *   GET  /api/files/thumb|text   POST /api/files/save|make|rename|move|remove|taken   ?c=...&r=...&p=...   (see files.mjs)
  *
@@ -190,6 +192,8 @@ import { VmUnknown } from './vm.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { mailRoute } from './mailref.mjs';
 import { readAgenda } from './agenda.mjs';
+import { readMailList, readMail } from './mailview.mjs';
+import { readContacts, readContact } from './contactview.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
@@ -728,6 +732,10 @@ export async function handleApi(request, response, conversations, headers, resou
         /* A calendar's agenda, read now through Tether as the owner's own read (agenda.mjs, 16-11): seen in its asset
            panel, so the calendar need not stay open elsewhere. A POST, for this site's own pages only (checked above). */
         if (pathname === '/api/tether/agenda' && tethers) return send(200, await readAgenda(tethers, body ?? {}, { who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' } })), true;
+        /* A mailbox's latest messages and one as text, an address book's contacts and one, read the same way (16-11:
+           mailview.mjs, contactview.mjs): never marked read, nothing changed. */
+        const peek = { '/api/tether/mail-list': readMailList, '/api/tether/mail-read': readMail, '/api/tether/contacts': readContacts, '/api/tether/contact': readContact }[pathname];
+        if (peek && tethers) return send(200, await peek(tethers, body ?? {}, { who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' } })), true;
         /* A mailbox's signature (Markdown), added under what the agent sends from it. */
         if (pathname === '/api/tether/signature' && tethers) {
             const t = tethers.store().target(String(body.target ?? ''));
