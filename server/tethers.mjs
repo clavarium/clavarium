@@ -304,6 +304,15 @@ export class Tethers {
         return this.#keeper.read(String(verb ?? ''), args && typeof args === 'object' ? args : {}, by);
     }
 
+    /* A MACHINE'S SHARED CONSOLE, for the person's page (sshconsole.mjs): one shell per machine, the conversations given
+       it on the same one. `who`: { id, name }, the person the caller has already checked; `onEvent` gets what the machine
+       prints and the console's state. -> Tether's handle (write, resize, hidden, hideFromAi, takeBack, interrupt, detach). */
+    console(target, who, onEvent) {
+        const by = { id: String(who?.id ?? 'person:owner'), name: String(who?.name ?? 'Owner') };
+        if (typeof this.#keeper.console !== 'function') throw new Error('this Tether has no shared console');
+        return this.#keeper.console(String(target ?? ''), by, onEvent);
+    }
+
     /* The store behind it, for the Assets page to create/give/remove targets. */
     store() { return this.#keeper.store; }
 

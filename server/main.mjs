@@ -96,6 +96,7 @@ import { Desks, handleDesktop } from './desktop.mjs';
 import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs';
 import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
+import { attachConsole } from './sshconsole.mjs';
 import { copyWorkFolder } from './copywork.mjs';
 import { accessesOf, relinkAccesses } from './carry.mjs';
 import { Jobs, withUpdates } from './jobs.mjs';
@@ -921,6 +922,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let closing = false;
     boxes.attach(server, WebSocketServer);
     browsers.attach(server, WebSocketServer); server.on('close', () => browsers.shutdown());
+    /* A machine's shared SSH console, live in its asset panel (sshconsole.mjs): the same checks as the terminal. */
+    attachConsole(server, { tethers, gate, originOk });
     /* The wake word's weekly threshold tuning (Sunday from 03:00, each box's own time): looked at every 10 minutes. */
     const wakeWeekly = setInterval(() => { try { boxes.wakeWeekly(); } catch (error) { console.error(`wake tuning: ${error.message}`); } }, 10 * 60_000); wakeWeekly.unref?.(); server.on('close', () => clearInterval(wakeWeekly));
     /* A collect session's clock: the stations asked, its end, the speaker told to stop (boxcollect.mjs). */

@@ -220,6 +220,8 @@ export function demandeView(q) {
         if (c.command || c.text) { v.code = String(c.command ?? c.text); sub.push(v.code.split('\n')[0].slice(0, 60)); }
         v.yes = c.action === 'run' ? 'run' : c.action === 'type' ? 'type' : 'open';
         if (c.action === 'run') v.irreversible = true;
+        /* A destructive line (Tether: rm -r, mkfs, reboot...): marked, never in Accept all, said as final. */
+        if (c.destructive) { v.irreversible = true; if (!v.risk.includes(w('req-risk-final'))) v.risk.push(w('req-risk-final')); }
     } else if (c.kind === 'files') {
         v.title = c.action === 'write' ? w('req-files-write', { path: String(c.path) }) : c.action === 'delete' ? w('req-files-delete', { path: String(c.path) }) : c.action === 'move' ? w('req-files-move', { from: String(c.from), to: String(c.to) }) : `${c.action ?? 'files'} ${c.path ?? ''}`.trim();
         if (where) sub.push(where);
