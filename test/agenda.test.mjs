@@ -57,9 +57,10 @@ test('Tether\'s text lines, read back: id, start, title, place; the whole series
     assert.deepEqual(eventsOfText('No event in that range.'), []);
 });
 
-test('an event given as data: kept to what the page shows; a link only when it is https', () => {
+test('an event given as data: kept to what the page shows, its invitation as text; a link only when it is https', () => {
     const e = eventOf({ id: 'x', title: 'Call\nnow', start: '2026-11-16T10:00:00', end: '2026-11-16T10:30', location: 'Online', organizer: 'boss@example.com', online: 'https://meet.example.com/a', attendees: 4, show: 'tentative', notes: 'never sent' });
-    assert.deepEqual(e, { id: 'x', title: 'Call now', start: '2026-11-16T10:00', end: '2026-11-16T10:30', allDay: false, location: 'Online', organizer: 'boss@example.com', online: 'https://meet.example.com/a', attendees: 4, show: 'tentative' });
+    assert.deepEqual(e, { id: 'x', title: 'Call now', start: '2026-11-16T10:00', end: '2026-11-16T10:30', allDay: false, location: 'Online', organizer: 'boss@example.com', online: 'https://meet.example.com/a', attendees: 4, show: 'tentative', notes: 'never sent' });
+    assert.equal(eventOf({ start: '2026-11-16T10:00', notes: 'line\u0007 one\n\n\n\nline two' }).notes, 'line one\n\nline two', 'its invitation text: lines kept, control characters dropped');
     assert.equal(eventOf({ start: '2026-11-16T10:00', online: 'javascript:alert(1)' }).online, null);
     assert.equal(eventOf({ start: '2026-11-16T10:00', show: 'oof' }).show, 'away');
     assert.equal(eventOf({ start: 'soon' }), null);

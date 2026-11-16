@@ -1282,6 +1282,7 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .ag-facts dt { color: var(--ink2); }
 .ag-facts dd { margin: 0; overflow-wrap: anywhere; }
 .ag-facts a { color: var(--brass-ink); }
+.ag-notes { white-space: pre-wrap; max-height: 16em; overflow: auto; color: var(--ink2); overflow-wrap: anywhere; }
 .ag-now { display: flex; align-items: center; gap: 6px; color: var(--brass-ink); font-size: .6875rem; font-weight: 600; text-transform: uppercase; }
 .ag-now::after { content: ""; flex: 1; border-top: 1.5px solid var(--brass-ink); }
 @media (max-width: 600px) {

@@ -6235,6 +6235,15 @@
         if (ev.online) { const a = el('a', '', uiSaid('set-ag-join', 'Join online')); a.href = ev.online; a.target = '_blank'; a.rel = 'noopener noreferrer'; fact(uiSaid('set-ag-link', 'Link'), a); }
         fact(uiSaid('set-ag-organizer', 'Organizer'), ev.organizer ? document.createTextNode(ev.organizer) : null);
         if (Number.isInteger(ev.attendees) && ev.attendees > 0) fact(uiSaid('set-ag-guests', 'Guests'), document.createTextNode(String(ev.attendees)));
+        /* ITS INVITATION'S TEXT (16-11): text nodes only -- never HTML, nothing in it runs; a web address (https) alone is a link. */
+        if (ev.notes) {
+            const text = el('div', 'ag-notes');
+            for (const part of String(ev.notes).split(/(https:\/\/[^\s<>"')\]]+)/)) {
+                if (/^https:\/\//.test(part)) { const a = el('a', '', part.length > 60 ? `${part.slice(0, 57)}…` : part); a.href = part; a.target = '_blank'; a.rel = 'noopener noreferrer'; text.append(a); }
+                else if (part) text.append(document.createTextNode(part));
+            }
+            fact(uiSaid('set-ag-notes', 'Invitation'), text);
+        }
         if (ev.show && ev.show !== 'busy') fact(uiSaid('set-ag-shown', 'Shown as'), document.createTextNode(uiSaid(`set-ag-show-${ev.show}`, { free: 'Free', tentative: 'Tentative', away: 'Away', elsewhere: 'Elsewhere' }[ev.show] ?? ev.show)));
         box.append(head, facts);
         return box;

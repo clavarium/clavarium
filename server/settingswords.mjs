@@ -305,7 +305,7 @@ export const SETTINGS_WORDS_FR = {
     'set-ag-failed': 'Agenda illisible pour le moment.', 'set-ag-none': 'Aucun événement cette semaine', 'set-ag-free-day': 'Rien aujourd\'hui',
     'set-ag-more': 'Certains événements ne sont pas affichés', 'set-ag-partial': 'Heures de début seules, pour l\'instant',
     'set-ag-when': 'Quand', 'set-ag-where': 'Où', 'set-ag-link': 'Lien', 'set-ag-join': 'Rejoindre en ligne', 'set-ag-organizer': 'Organisateur',
-    'set-ag-guests': 'Invités', 'set-ag-shown': 'Affiché comme', 'set-ag-show-free': 'Libre', 'set-ag-show-tentative': 'Provisoire',
+    'set-ag-guests': 'Invités', 'set-ag-notes': 'Invitation', 'set-ag-shown': 'Affiché comme', 'set-ag-show-free': 'Libre', 'set-ag-show-tentative': 'Provisoire',
     'set-ag-show-away': 'Absent', 'set-ag-show-elsewhere': 'Ailleurs',
     'set-ml-short': 'Manque de mémoire', 'set-ml-short-what': 'La plus grosse machine', 'set-ml-force': 'Forcer l’arrêt', 'set-ml-sleep': 'Mettre en veille', 'set-ml-alert': 'Alerter seulement',
 };
