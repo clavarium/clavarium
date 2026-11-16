@@ -25,6 +25,14 @@
    shell. It prints one fact per line; the server reads only these lines. */
 import { SHARING_STEP } from './vm.mjs';
 import { WHY } from './linkguard.mjs';
+import { SOCKET } from './tmux.mjs';
+import { SESSION } from './conversations.mjs';
+
+/* A FILE OUTSIDE /work where its tool may ask to be restarted when /work itself is dead (16-11): the
+   one in its chat's folder (talk.mjs, RESTART_ASKED) cannot be written then. Read by the probe. */
+export const RESTART_OUTSIDE = '/var/tmp/clavarium-restart-asked';
+/* What a folder that came loose looks like on a terminal (the kernel's words for ENOTCONN). */
+const LOOSE_WORDS = 'transport endpoint is not connected|socket is not connected|ENOTCONN';
 
 /* How long installing the shared-folder helper in a machine may take (it comes from the snap store). */
 export const SHARING_MS = 180_000;
@@ -41,6 +49,15 @@ export const PROBE = [
     '  else echo "mount missing $p"; fi',
     'done',
     'if [ -d /work ] && awk \'$2=="/work"{f=1} END{exit !f}\' /proc/mounts; then timeout 5 df -Pm /work 2>/dev/null | awk \'NR==2{print "disk /work", $4, $2}\'; fi',
+    /* ITS TOOL STILL IN A FOLDER THAT WENT (16-11). A folder put back is a NEW mount: a program that was
+       in the old one stays in it, dead ("Transport endpoint is not connected"), until it is started
+       again -- the folder looks well, its tool does not. So each program of its tool's session whose
+       folder is ours to read (readlink) and cannot be entered is said; the first one is enough. */
+    `t=$(tmux -L ${SOCKET} list-panes -t '=${SESSION}:' -F '#{pane_pid}' 2>/dev/null | head -n 1)`,
+    'case "$t" in ""|*[!0-9]*) ;; *) timeout 5 sh -c \'for p in $(ps -o pid= -s "$1" 2>/dev/null); do l=$(readlink "/proc/$p/cwd" 2>/dev/null) || continue; [ -n "$l" ] || continue; [ -d "/proc/$p/cwd/." ] || { echo "stale $p"; exit 0; }; done\' stale "$t";; esac',
+    /* What its terminal shows now: a folder that is not connected, said by its tool (a symptom, not a proof). */
+    `tmux -L ${SOCKET} capture-pane -p -t '=${SESSION}:' 2>/dev/null | grep -c -i -E '${LOOSE_WORDS}' | awk '{print "screen", $1+0}'`,
+    `if [ -f ${RESTART_OUTSIDE} ]; then echo "restart asked"; fi`,
 ].join('\n');
 export const PROBE_NAME = 'clavarium-health';
 
@@ -76,6 +93,9 @@ export function readProbe(text, paths = []) {
         if (parts[0] === 'oomkinds' && parts.length === 3 && a !== undefined && b !== undefined) facts.oomKinds = { machine: a, limit: b };
         if (parts[0] === 'disk' && parts.length === 4 && disks.has(parts[1]) && b !== undefined && c !== undefined) facts.disks[parts[1]] = { availableMb: b, sizeMb: c };
         if (parts[0] === 'mount' && parts.length === 3 && expected.has(parts[2]) && MOUNT_STATES.has(parts[1])) facts.mounts[parts[2]] = parts[1];
+        if (parts[0] === 'stale' && parts.length === 2 && a !== undefined) facts.stale = true;
+        if (parts[0] === 'screen' && parts.length === 2 && a !== undefined) facts.screenLoose = a;
+        if (line.trim() === 'restart asked') facts.restartAsked = true;
     }
     return facts;
 }
@@ -123,6 +143,9 @@ export function judge(record) {
         for (const path of record.remounted ?? []) add('info', 'mount', `remounted:${path}`, `${path} had come loose in the machine: it was mounted again.`);
         for (const { path, why } of record.failed ?? []) add('bad', 'mount', `failed:${path}`, `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);
         for (const path of record.missing ?? []) if (!(record.failed ?? []).some((f) => f.path === path)) add('warn', 'mount', `missing:${path}`, `${path} is not reachable in the machine.`);
+        if (record.stale) add('bad', 'mount', 'stale-tool', 'Its tool is still in a folder that came loose: it is restarted, its work picks up where it was.');
+        /* Its terminal says so while its folders look well: said, nothing done (its tool may only be quoting it). */
+        else if (record.screenLoose > 0 && !(record.missing ?? []).length) add('warn', 'mount', 'screen-loose', 'Its terminal says a folder is not connected, though its folders look well.');
     }
     /* Links its folders hold that the share cannot serve (linkguard.mjs): looked at on this server, whatever its machine does. */
     for (const l of record.links?.removed ?? []) add('info', 'link', `link-removed:${l.folder}/${l.path}`, `/resources/${l.folder}/${l.path} was a broken link (${WHY[l.kind] ?? l.kind}): it was removed on the server, what it pointed to left as it was.`);
@@ -226,6 +249,7 @@ export class Health {
         return this.#keep(name, {
             at, state, answering: true, memory: facts.memory, oomKills: facts.oomKills ?? 0, ...(facts.oomKinds ? { oomKinds: facts.oomKinds } : {}), disks: facts.disks,
             paths, missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}), ...(links ? { links } : {}),
+            ...(facts.stale ? { stale: true } : {}), ...(facts.screenLoose ? { screenLoose: facts.screenLoose } : {}), ...(facts.restartAsked ? { restartAsked: true } : {}),
             /* What was put back stays said until a later look finds nothing to put back. */
         });
     }

@@ -289,3 +289,59 @@ test('a folder the VM manager cannot mount for want of its helper in the machine
     assert.deepEqual(execs, ['sudo -n snap install multipass-sshfs'], 'once, for both folders');
     assert.equal((seen.failed ?? []).some((f) => /multipass-sshfs/.test(f.why)), false);
 });
+
+/* 16-11: /work came loose; put back, its tool stayed in the old one (dead) until it was started again. */
+test('the probe says nothing of a tool, a screen or a request that are not there', () => {
+    const r = spawnSync('sh', ['-c', PROBE, PROBE_NAME, '/proc'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const facts = readProbe(r.stdout, ['/proc']);
+    assert.equal(facts.stale, undefined);
+    assert.ok(!facts.screenLoose, r.stdout);
+});
+
+test('a program in a folder it can no longer enter is said stale, one it can enter is not', { skip: process.getuid?.() === 0 && 'root enters any folder' }, async (t) => {
+    const line = PROBE.split('\n').find((l) => l.includes('echo "stale'));
+    const loop = /sh -c '(.*)' stale "\$t"/.exec(line)[1];
+    const dir = mkdtempSync(join(tmpdir(), 'clv-stale-'));
+    const { spawn } = await import('node:child_process');
+    const { chmodSync } = await import('node:fs');
+    const child = spawn('sleep', ['30'], { cwd: dir, detached: true, stdio: 'ignore' });
+    t.after(() => { child.kill(); chmodSync(dir, 0o700); rmSync(dir, { recursive: true, force: true }); });
+    await new Promise((r) => setTimeout(r, 100));
+    const run = () => spawnSync('sh', ['-c', loop, 'stale', String(child.pid)], { encoding: 'utf8' }).stdout;
+    assert.equal(run(), '', 'its folder can be entered');
+    chmodSync(dir, 0);
+    assert.equal(readProbe(run()).stale, true);
+});
+
+test('what the probe says of its tool is read only as it should be: a whole number, the words of ours', () => {
+    assert.equal(readProbe('stale 42\n').stale, true);
+    assert.equal(readProbe('stale x\nstale 1 2\n').stale, undefined);
+    assert.equal(readProbe('screen 3\n').screenLoose, 3);
+    assert.equal(readProbe('screen -1\n').screenLoose, undefined);
+    assert.equal(readProbe('restart asked\n').restartAsked, true);
+    assert.equal(readProbe('restart asked now\n').restartAsked, undefined);
+});
+
+test('a tool still in a folder that came loose is bad and said; a terminal that says so is noted, unless a folder is missing', async (t) => {
+    const stale = await machine(t, { extra: ['stale 42'] }).health.check('demo');
+    assert.equal(stale.stale, true);
+    assert.equal(stale.level, 'bad');
+    assert.deepEqual(stale.problems.map((p) => p.key), ['stale-tool']);
+    const screen = await machine(t, { extra: ['screen 2'] }).health.check('demo');
+    assert.deepEqual(screen.problems.map((p) => [p.level, p.key]), [['warn', 'screen-loose']]);
+    assert.equal(judge({ state: 'Running', answering: true, screenLoose: 2, missing: ['/work'] }).problems.some((p) => p.key === 'screen-loose'), false);
+    const asked = await machine(t, { extra: ['restart asked'] }).health.check('demo');
+    assert.equal(asked.restartAsked, true);
+    assert.equal(asked.level, 'ok');
+});
+
+test('/work put back while its tool was in it: the same look says its tool stale, for it to be restarted', async (t) => {
+    const m = machine(t, { dead: ['/work'] });
+    const exec = m.vms.exec;
+    /* After it is put back, the probe sees its tool still in the old one. */
+    m.vms.exec = async (...a) => { const r = await exec(...a); return m.calls.includes('mount work') ? { ...r, stdout: `${r.stdout}stale 7\n` } : r; };
+    const seen = await m.health.check('demo');
+    assert.deepEqual(seen.remounted, ['/work']);
+    assert.equal(seen.stale, true);
+});

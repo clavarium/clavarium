@@ -59,7 +59,8 @@ import { GitChecks } from './gitchecks.mjs';
 import { GitKeeper } from './gitkeeper.mjs';
 import { GitRunner } from './gitrunner.mjs';
 import { Shelf } from './shelf.mjs';
-import { Health } from './health.mjs';
+import { Health, RESTART_OUTSIDE } from './health.mjs';
+import { Revive } from './revive.mjs';
 import { LinkGuard, removedLine, toolLine } from './linkguard.mjs';
 import { Setup } from './setup.mjs';
 import { Capacity } from './capacity.mjs';
@@ -613,7 +614,27 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): its tool restarted by this server
        once its turn has ended (its pulse no longer busy), said in its chat; once per ten minutes at most. */
     const restartedAt = new Map();
+    /* ITS TOOL STILL IN A FOLDER THAT CAME LOOSE, or asking from outside /work (16-11, revive.mjs): restarted
+       by the server, its tool only; told through its docket first (read as it starts), its chat after. */
+    const revive = new Revive({
+        restart: (name) => all.restartTool(name),
+        busy: (name) => talk.pulse(name)?.busy === true,
+        taken: (name) => vms.exec(name, ['rm', '-f', RESTART_OUTSIDE], { timeoutMs: 10_000 }),
+        tell: (name, why, step) => {
+            const loose = why === 'stale';
+            if (step === 'before') {
+                if (loose) try { if (dockets.on(name)) dockets.post(name, { kind: 'restarted', text: 'Your work folder came loose in your machine and was put back: your tool was restarted to see it again (what was in the old one could not be reached). Your work picks up where it was; what ran in the background stopped.' }); } catch { /* its docket may be off */ }
+                return;
+            }
+            const text = step === 'done'
+                ? (loose ? 'Its work folder had come loose: its tool was restarted to see it again. Its work picks up where it was.' : 'Its tool was restarted as it asked: its work picks up where it was.')
+                : 'Its tool could not be restarted: open its terminal and type exit, it starts again.';
+            try { talk.event(name, { kind: step === 'done' ? 'restarted' : 'machine-problem', text, topic: step === 'done' ? 'Restarted' : 'Machine', ...(step === 'done' ? {} : { tone: 'warn' }) }); } catch { /* its chat is off */ }
+            if (step === 'failed') events.add({ kind: 'machine', text: `${name}: ${text}`, conversation: name });
+        },
+    });
     const restartTimer = setInterval(() => {
+        void revive.tick().catch(() => {});
         for (const name of all.awake()) {
             if (!talk.restartAsked(name)) continue;
             if (talk.pulse(name)?.busy) continue;
@@ -646,7 +667,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs);
        not where its owner turned on its own reaction (above): one way of telling it, not two. */
     const healthDocket = new HealthDocket({ store: new Store(`${dataDir}/health-docket.json`), dockets, reacting: (name) => reacting.settings(name).on });
-    health.forgotten = (name) => { healthDocket.forget(name); watchdog.forget(name); };
+    health.forgotten = (name) => { healthDocket.forget(name); watchdog.forget(name); revive.forget(name); };
     /* A machine's problems worth keeping in What happened: said once, until they went away. */
     const problemsSaid = new Map();
     /* ITS WATCHDOG (watchdog.mjs): mute or full for as long as its owner set, forced off then started, once;
@@ -662,6 +683,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         alert: (payload) => { events.add({ kind: 'machine', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
     health.judged = (name, record) => {
         void watchdog.judged(name, record).catch(() => {});
+        try { revive.judged(name, record); } catch { /* its tool: nothing more */ }
         talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
         /* A folder that came loose and was put back: said once, in its chat (the look that put it back). */
         for (const path of record?.remounted ?? []) { try { talk.event(name, { kind: 'machine-ok', text: `Le dossier ${path} s'était détaché de la machine : il a été remonté.`, topic: 'Machine', brief: 'Shared folder' }); } catch { /* its chat is off */ } }
