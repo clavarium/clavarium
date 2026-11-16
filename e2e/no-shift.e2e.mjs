@@ -63,7 +63,9 @@ test('both Settings keep their size while their figures are read, say they are b
                 await page.goto(`${b.origin}/`);
                 await me.until('the list is shown', async () => {
                     if (await page.locator('#nav-settings').isVisible()) return true;
-                    if (await page.locator('#fold').isVisible()) await page.locator('#fold').click().catch(() => {});
+                    /* The bare address opens on the desk (16-11): its own « » » opens the list beside it, once. */
+                    if (await page.locator('#deck .fold-here').isVisible()) { if ((await page.locator('#app').getAttribute('data-list')) === 'folded') await page.locator('#deck .fold-here').click().catch(() => {}); }
+                    else if (await page.locator('#fold').isVisible()) await page.locator('#fold').click().catch(() => {});
                     else if (await page.locator('#back').isVisible()) await page.locator('#back').click().catch(() => {});
                     return false;
                 });

@@ -325,6 +325,17 @@ export const SETTINGS_WORDS_FR = {
     'set-ct-failed-one': 'Contact illisible pour le moment.', 'set-ct-none': 'Aucun contact', 'set-ct-more': 'Certains contacts masqués : cherchez',
     'set-ct-partial': 'Sans société dans la liste, pour l\'instant', 'set-ct-email': 'Courriel', 'set-ct-phone': 'Téléphone', 'set-ct-company': 'Société',
     'set-ct-f-title': 'Fonction', 'set-ct-f-birthday': 'Anniversaire', 'set-ct-f-address': 'Adresse', 'set-ct-notes': 'Notes',
+    /* The desk, the home page (desk.js, 16-11). */
+    'desk-add': '+ Ajouter', 'desk-edit': 'Modifier', 'desk-done': 'Terminé', 'desk-tidy': 'Tasser', 'desk-tidy-what': 'Tout ranger en haut à gauche',
+    'desk-empty': 'Bureau vide : + Ajouter', 'desk-not-saved': 'Bureau non enregistré', 'desk-options': 'Options', 'desk-size': 'Taille',
+    'desk-size-s': 'Icône', 'desk-size-m': 'Large', 'desk-size-l': 'Grande',
+    'desk-mv-left': 'Déplacer à gauche', 'desk-mv-right': 'Déplacer à droite', 'desk-mv-up': 'Déplacer en haut', 'desk-mv-down': 'Déplacer en bas',
+    'desk-remove': 'Retirer du bureau', 'desk-folder-open': 'Ouvrir', 'desk-folder-undo': 'Défaire le dossier', 'desk-folder-out': 'Sortir du dossier',
+    'desk-folder-new': 'Nouveau dossier', 'desk-folder-name': 'Nom du dossier', 'desk-folder-of': 'Dossier {name}', 'desk-folder-n': '{n} éléments',
+    'desk-folder-empty': 'Dossier vide', 'desk-close': 'Fermer', 'desk-add-title': 'Ajouter au bureau', 'desk-add-convs': 'Conversations',
+    'desk-add-rooms': 'Salons', 'desk-add-assets': 'Assets', 'desk-add-more': 'Dossiers', 'desk-add-all': 'Tout est déjà sur le bureau',
+    'desk-added': 'Ajouté au bureau', 'desk-editing': 'Mode modification', 'desk-drop-folder': 'Lâcher : faire un dossier',
+    'desk-drop-into': 'Lâcher : mettre dans le dossier', 'desk-create': 'Créer', 'desk-new-conv': 'Nouvelle conversation', 'desk-new-room': 'Nouveau salon',
     'set-ml-short': 'Manque de mémoire', 'set-ml-short-what': 'La plus grosse machine', 'set-ml-force': 'Forcer l’arrêt', 'set-ml-sleep': 'Mettre en veille', 'set-ml-alert': 'Alerter seulement',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

@@ -92,6 +92,7 @@ import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PA
 import { Pocket } from './pocket.mjs';
 import { Speech } from './speech.mjs';
 import { Features, handleFeatures, cached } from './features.mjs';
+import { Desks, handleDesktop } from './desktop.mjs';
 import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs';
 import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
@@ -116,6 +117,8 @@ export const FILES = {
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
     '/features.js': ['web/features.js', 'text/javascript; charset=utf-8'],
     '/kit.js': ['web/kit.js', 'text/javascript; charset=utf-8'],
+    /* The desk, the home page (desktop.mjs keeps its places). */
+    '/desk.js': ['web/desk.js', 'text/javascript; charset=utf-8'],
     /* A mail file (.eml) read as a mail program shows it (the file viewer, app.js showMail). */
     '/mail-view.js': ['web/mail-view.js', 'text/javascript; charset=utf-8'],
     '/gitgraph.js': ['web/gitgraph.js', 'text/javascript; charset=utf-8'],
@@ -194,7 +197,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin, desks } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -259,10 +262,13 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             return;
         }
         /* Before anything else, static files included: see gate.mjs. */
-        if (gate(request.headers) === undefined) {
+        const who = gate(request.headers);
+        if (who === undefined) {
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
+        /* The desk (desktop.mjs): one per person, the gate's name for them. */
+        if (desks && pathname === '/api/desktop' && await handleDesktop(request, response, desks, who, originOk, HEADERS)) return;
         /* What this Clavarium can do and its next step (features.mjs); an export of the setup is its backup's day. */
         if (features && pathname.startsWith('/api/features') && await handleFeatures(request, response, features, originOk, HEADERS)) return;
         if (features && ((request.method === 'POST' && pathname === '/api/setup/export') || (request.method === 'GET' && pathname === '/api/setup/bundle' && !request.url.includes('stats=1')))) response.once('finish', () => { if (response.statusCode === 200) features.exported(); });
@@ -910,7 +916,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         answerer: answererConfig(env)?.models.length ?? 0, updates: updates.about(), team: team ? team.list().length : null,
         screen: await quick(screenNow(), 1500, null), catalogue: await quick(catalogue.providers().catch(() => []), 1500, []),
     }) });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, desks: new Desks({ file: new JsonFile(`${dataDir}/desktops.json`, {}) }), apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); clearInterval(stopSigninHelp); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);

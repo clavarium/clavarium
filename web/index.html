@@ -734,7 +734,8 @@
         <!-- FEATURES (features.js): the next step over the cards; the welcome in place of "No conversation yet". -->
         <div id="deck-features" hidden></div>
         <div id="deck-welcome" hidden></div>
-        <div id="deck-cards" class="deck"></div>
+        <!-- THE DESK (desk.js): the home page, a grid of icons kept per person, the same on every screen. -->
+        <div id="deck-cards" class="desk-host"></div>
         <div id="deck-empty" class="deck-empty" hidden><p>No conversation yet.</p><div class="deck-empty-acts"><button type="button" id="deck-empty-new" class="primary">+ Create a conversation</button><button type="button" id="deck-empty-import">Import a configuration</button></div></div>
       </div>
       <!-- A room (#268): one thread for several AIs, the person and voice boxes. -->
@@ -1538,6 +1539,7 @@
 <div id="cm-toast" class="cm-toast" role="status" hidden><span id="cm-toast-text"></span><button type="button" id="cm-toast-go" class="primary"></button><button type="button" id="cm-toast-close" class="quiet" aria-label="Close">×</button></div>
 <script src="/features.js"></script>
 <script src="/kit.js"></script>
+<script src="/desk.js"></script>
 <script src="/mail-view.js"></script>
 <script src="/app.js"></script>
 <script type="module" src="/voice.js"></script>
