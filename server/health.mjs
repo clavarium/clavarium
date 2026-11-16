@@ -31,6 +31,8 @@ import { SESSION } from './conversations.mjs';
 /* A FILE OUTSIDE /work where its tool may ask to be restarted when /work itself is dead (16-11): the
    one in its chat's folder (talk.mjs, RESTART_ASKED) cannot be written then. Read by the probe. */
 export const RESTART_OUTSIDE = '/var/tmp/clavarium-restart-asked';
+/* The host of its tools, as pgrep -f reads it (the bracket: never the shell that asks). */
+export const TOOLS_HOST_PATTERN = '/tools/launch/[t]ools-host.mjs';
 /* What a folder that came loose looks like on a terminal (the kernel's words for ENOTCONN). */
 const LOOSE_WORDS = 'transport endpoint is not connected|socket is not connected|ENOTCONN';
 /* A WORK FOLDER THE VM MANAGER CANNOT TAKE BACK (16-11, tried on a test server): its mount program died, multipass
@@ -60,6 +62,9 @@ export const PROBE = [
     `t=$(tmux -L ${SOCKET} list-panes -t '=${SESSION}:' -F '#{pane_pid}' 2>/dev/null | head -n 1)`,
     'case "$t" in ""|*[!0-9]*) ;; *) timeout 5 sh -c \'for p in $(ps -o pid= -s "$1" 2>/dev/null); do l=$(readlink "/proc/$p/cwd" 2>/dev/null) || continue; [ -n "$l" ] || continue; [ -d "/proc/$p/cwd/." ] || { echo "stale $p"; exit 0; }; done\' stale "$t";; esac',
     /* What its terminal shows now: a folder that is not connected, said by its tool (a symptom, not a proof). */
+    /* And the host of its tools (config/launch/tools-host.mjs: Parley, Docket... for its agent), started in its own
+       session from the tool's folder: left in a dead one, every tool it serves fails, the tool restarted or not. */
+    `for p in $(pgrep -f '${TOOLS_HOST_PATTERN}' 2>/dev/null); do [ -d "/proc/$p/cwd/." ] || { echo "stale $p"; break; }; done`,
     `tmux -L ${SOCKET} capture-pane -p -t '=${SESSION}:' 2>/dev/null | grep -c -i -E '${LOOSE_WORDS}' | awk '{print "screen", $1+0}'`,
     `if [ -f ${RESTART_OUTSIDE} ]; then echo "restart asked"; fi`,
 ].join('\n');

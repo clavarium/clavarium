@@ -59,7 +59,7 @@ import { GitChecks } from './gitchecks.mjs';
 import { GitKeeper } from './gitkeeper.mjs';
 import { GitRunner } from './gitrunner.mjs';
 import { Shelf } from './shelf.mjs';
-import { Health, RESTART_OUTSIDE } from './health.mjs';
+import { Health, RESTART_OUTSIDE, TOOLS_HOST_PATTERN } from './health.mjs';
 import { Revive } from './revive.mjs';
 import { LinkGuard, removedLine, toolLine } from './linkguard.mjs';
 import { Setup } from './setup.mjs';
@@ -620,7 +620,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* ITS TOOL STILL IN A FOLDER THAT CAME LOOSE, or asking from outside /work (16-11, revive.mjs): restarted
        by the server, its tool only; told through its docket first (read as it starts), its chat after. */
     const revive = new Revive({
-        restart: (name) => all.restartTool(name),
+        /* Its tools' host stopped first (it starts again at the tool's first tool, from the folder put back). */
+        restart: async (name) => { await vms.exec(name, ['sh', '-c', `for p in $(pgrep -f '${TOOLS_HOST_PATTERN}'); do kill "$p"; done; true`], { timeoutMs: 10_000 }).catch(() => {}); return all.restartTool(name); },
         restartMachine: async (name) => { const r = await all.machineAction(name, 'restart', { wait: true }); return r?.ok !== false; },
         busy: (name) => talk.pulse(name)?.busy === true,
         taken: (name) => vms.exec(name, ['rm', '-f', RESTART_OUTSIDE], { timeoutMs: 10_000 }),

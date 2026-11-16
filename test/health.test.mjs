@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Health, PROBE, PROBE_NAME, readProbe, judge, STUCK_MOUNT } from '../server/health.mjs';
+import { Health, PROBE, PROBE_NAME, readProbe, judge, STUCK_MOUNT, TOOLS_HOST_PATTERN } from '../server/health.mjs';
 import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 import { Grants } from '../server/grants.mjs';
@@ -353,4 +353,11 @@ test('a work folder the VM manager refuses to mount again ("already mounted", it
     const said = judge({ state: 'Running', answering: true, oomKills: 0, memory: { totalMb: 2048, availableMb: 1200 }, disks: {}, missing: ['/work'], failed: [{ path: '/work', why: 'already mounted' }], stuckWork: true });
     assert.equal(said.level, 'bad');
     assert.ok(said.problems.some((p) => p.key === 'stuck-work'));
+});
+
+test('the host of its tools left in a dead folder is looked for too (it serves Parley and Docket to its agent, in a session of its own)', () => {
+    assert.ok(PROBE.includes(TOOLS_HOST_PATTERN));
+    assert.ok(new RegExp(TOOLS_HOST_PATTERN).test('node /tools/launch/tools-host.mjs /run/user/1000/clavarium-tools-1000'));
+    assert.equal(new RegExp(TOOLS_HOST_PATTERN).test(`sh -c for p in $(pgrep -f '${TOOLS_HOST_PATTERN}')`), false, 'never the shell that asks');
+    assert.equal(readProbe('stale 4242\n').stale, true);
 });
