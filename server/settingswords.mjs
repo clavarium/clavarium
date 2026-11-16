@@ -137,7 +137,7 @@ export const SETTINGS_WORDS_FR = {
     'set-room-give-done': 'Donné à {name}', 'set-room-give-kept': '{name} a déjà plus', 'set-room-give-cancel': 'Annuler',
     /* « Less is more » (07-11): every word still in English on a French screen -- the list, Assets, a room. */
     'set-no-conv': 'Aucune conversation', 'set-home-choose': 'Choisissez une conversation, ou créez-en une.',
-    'set-home-no-such': 'Cette adresse ne nomme aucune conversation.', 'set-nav-access': 'Accès', 'set-nav-settings': 'Réglages',
+    'set-home-no-such': 'Cette adresse ne nomme aucune conversation.', 'set-nav-home': 'Accueil', 'set-nav-access': 'Accès', 'set-nav-settings': 'Réglages',
     'set-list-needs': 'À vous', 'set-list-recent': 'Récent', 'set-list-groups': 'Groupes', 'set-list-rooms': 'Salons',
     'set-list-not-filed': 'Sans groupe', 'set-list-asks': 'vous demande', 'set-list-waits': 'vous attend',
     'set-list-asks-for': 'le répondeur vous demande', 'set-list-answered': 'a répondu à votre place',
