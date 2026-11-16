@@ -73,6 +73,9 @@ const timeOf = (v) => {
 };
 /* An online meeting's link: a web address, nothing else (never a script's). */
 const linkOf = (v) => { try { const u = new URL(String(v ?? '')); return u.protocol === 'https:' ? u.href.slice(0, 2000) : null; } catch { return null; } };
+/* An invitation's text, as text: lines kept, control characters dropped, short. The page shows it as text only. */
+export const NOTES_MAX = 2000;
+const notesOf = (v) => String(v ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, NOTES_MAX);
 const SHOW = { busy: 'busy', free: 'free', tentative: 'tentative', oof: 'away', away: 'away', workingelsewhere: 'elsewhere', elsewhere: 'elsewhere' };
 
 /* One event Tether handed as data, kept to the fields the page shows. */
@@ -83,7 +86,7 @@ export function eventOf(e) {
     const n = Number(e.attendees);
     return {
         id: line(e.id, 2048), title: line(e.title) || '(no title)', start, end: timeOf(e.end), allDay,
-        location: line(e.location), organizer: line(e.organizer, 320), online: linkOf(e.online),
+        location: line(e.location), organizer: line(e.organizer, 320), online: linkOf(e.online), notes: notesOf(e.notes),
         attendees: Number.isInteger(n) && n >= 0 ? n : null, show: SHOW[String(e.show ?? '').toLowerCase()] ?? null,
     };
 }

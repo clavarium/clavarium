@@ -196,7 +196,12 @@ export const SETTINGS_WORDS_FR = {
     'set-mcp-need': 'Collez le bloc, ou donnez nom et adresse.', 'set-mcp-tools': 'Outils', 'set-mcp-refresh': 'Actualiser', 'set-mcp-seen': 'Marquer comme vu',
     'set-mcp-none': 'Aucun outil listé pour l\'instant.', 'set-mcp-unreached': 'Injoignable : {why}', 'set-mcp-open': 'atteint l\'extérieur',
     'set-mcp-fresh': 'Nouveau : demandé jusqu\'à ce que vous l\'ayez vu',
-    'set-mcp-oauth': 'Se connecter (OAuth)', 'set-mcp-client': 'Identifiant client', 'set-mcp-client-need': 'Collez son identifiant client.',
+    'set-mcp-oauth': 'Se connecter', 'set-mcp-client': 'Identifiant client', 'set-mcp-client-need': 'Collez son identifiant et son secret, une fois.',
+    /* Its client pasted once, the permissions asked, signed out (16-11). */
+    'set-mcp-reconnect': 'Reconnecter', 'set-mcp-client-box': 'Identifiant et secret client', 'set-mcp-secret': 'Secret client',
+    'set-mcp-scopes': 'Autorisations demandées', 'set-mcp-redirect': 'Adresse de retour de son appli', 'set-mcp-client-kept': 'Gardés sur le serveur. Aucune IA ne les voit.',
+    'set-mcp-secret-need': 'Collez aussi son secret client.', 'set-ap-edit': 'Modifier', 'set-ap-send-edited': 'Accepter ainsi modifié',
+    'set-mcp-guess': 'semble seulement lire', 'set-mcp-out': '{name} est déconnecté. Reconnectez-le.',
     'set-mcp-c-read': 'Lecture seule', 'set-mcp-c-write': 'Écrit', 'set-mcp-c-destructive': 'Supprime ou écrase',
     'set-mcp-custom': 'Droits personnalisés', 'set-mcp-yes': 'Oui', 'set-mcp-ask': 'Demander', 'set-mcp-no': 'Non',
     'set-rt-mcp-none': 'Coupé', 'set-rt-mcp-watch': 'Lit', 'set-rt-mcp-propose': 'Tout, approuvé', 'set-rt-mcp-free': 'Tout', 'set-rt-mcp-frame': 'Personnalisé',
@@ -305,7 +310,7 @@ export const SETTINGS_WORDS_FR = {
     'set-ag-failed': 'Agenda illisible pour le moment.', 'set-ag-none': 'Aucun événement cette semaine', 'set-ag-free-day': 'Rien aujourd\'hui',
     'set-ag-more': 'Certains événements ne sont pas affichés', 'set-ag-partial': 'Heures de début seules, pour l\'instant',
     'set-ag-when': 'Quand', 'set-ag-where': 'Où', 'set-ag-link': 'Lien', 'set-ag-join': 'Rejoindre en ligne', 'set-ag-organizer': 'Organisateur',
-    'set-ag-guests': 'Invités', 'set-ag-shown': 'Affiché comme', 'set-ag-show-free': 'Libre', 'set-ag-show-tentative': 'Provisoire',
+    'set-ag-guests': 'Invités', 'set-ag-notes': 'Invitation', 'set-ag-shown': 'Affiché comme', 'set-ag-show-free': 'Libre', 'set-ag-show-tentative': 'Provisoire',
     'set-ag-show-away': 'Absent', 'set-ag-show-elsewhere': 'Ailleurs',
     'set-ml-short': 'Manque de mémoire', 'set-ml-short-what': 'La plus grosse machine', 'set-ml-force': 'Forcer l’arrêt', 'set-ml-sleep': 'Mettre en veille', 'set-ml-alert': 'Alerter seulement',
 };

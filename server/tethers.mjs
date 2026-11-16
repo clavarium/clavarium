@@ -121,7 +121,7 @@ export class Tethers {
         this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets; this.#dockets = dockets;
         this.#offered = new JsonFile(`${dataDir}/tether-offered.json`, []);
         this.#noticed = new JsonFile(`${dataDir}/tether-notices-seen.json`, []);
-        this.#keeper = make(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), notify: (n) => this.#notified(n), now, ...(connectors ? { connectors } : {}) });
+        this.#keeper = make(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name, opts) => this.#reveal(name, opts), notify: (n) => this.#notified(n), now, ...(connectors ? { connectors } : {}) });
         /* Every change a page shows -- a new approval waiting, one decided, the targets,
            the journal -- bumps the counter the client watches, so the approvals screen
            sees them all at once, not only when a store change happens to wake it. */
@@ -247,9 +247,10 @@ export class Tethers {
 
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.
        An unknown or expired secret is a plain refusal the connector turns into "Refused". */
-    async #reveal(name) {
-        /* An MCP server signed in with OAuth (mcpoauth.mjs): its current access token, refreshed here when due. */
-        const fresh = await this.oauth?.access?.(name);
+    async #reveal(name, opts) {
+        /* An MCP server signed in with OAuth (mcpoauth.mjs): its current access token, refreshed here when due, or
+           at once when Tether says the server refused the one it had (opts.fresh, 16-11). */
+        const fresh = await this.oauth?.access?.(name, { fresh: opts?.fresh === true });
         if (fresh !== undefined) return fresh;
         const value = this.#secrets?.reveal?.(name);
         if (value === undefined || value === null) throw new Error(`no secret named "${name}" on this server`);

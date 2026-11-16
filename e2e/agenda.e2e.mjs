@@ -22,7 +22,7 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
         const at = (n, hm) => `${addDays(today, n)}T${hm}`;
         return { text: 'listed', size: 6, events: [
             { id: 'e1', title: 'Early call', start: at(0, '00:05'), end: at(0, '00:35'), location: 'Room 2', show: 'busy' },
-            { id: 'e2', title: 'Team review', start: at(0, '23:30'), end: at(0, '23:55'), organizer: 'lead@example.com', online: 'https://meet.example.com/abc', attendees: 5, show: 'tentative' },
+            { id: 'e2', title: 'Team review', start: at(0, '23:30'), end: at(0, '23:55'), organizer: 'lead@example.com', online: 'https://meet.example.com/abc', attendees: 5, show: 'tentative', notes: 'Ordre du jour <img src=x onerror="window.pwned=1"> <script>window.pwned=2</script>\nRejoindre : https://teams.example.com/l/meetup-join/abc' },
             { id: 'e3', title: 'Conference', start: addDays(today, 2), end: addDays(today, 4), allDay: true },
         ] };
     } };
@@ -45,7 +45,13 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
     await agenda.locator('.ag-event', { hasText: 'Team review' }).locator('summary').click();
     const facts = agenda.locator('.ag-event[open] .ag-facts');
     assert.match(await facts.innerText(), /lead@example\.com/);
-    assert.equal(await facts.locator('a').getAttribute('href'), 'https://meet.example.com/abc');
+    assert.equal(await facts.locator('a').first().getAttribute('href'), 'https://meet.example.com/abc');
+    /* Its invitation's text: shown as text, nothing in it runs; its web address alone is a link. */
+    const notes = facts.locator('.ag-notes');
+    assert.match(await notes.innerText(), /<img src=x onerror=/);
+    assert.equal(await notes.locator('img, script').count(), 0);
+    assert.equal(await page.evaluate(() => window.pwned ?? null), null);
+    assert.equal(await notes.locator('a').getAttribute('href'), 'https://teams.example.com/l/meetup-join/abc');
     await shot(page, 'desktop-agenda');
     /* Painted again (Tether's count moved with the read): no second read. */
     await page.waitForTimeout(3000);

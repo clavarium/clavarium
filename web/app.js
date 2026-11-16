@@ -5347,14 +5347,15 @@
         const made = justMade?.to === current ? justMade : null;
         const kind = made ? '' : giveNew.kind;
         const levels = newLevels(kind);
-        if (kind && !levels.includes(giveNew.level)) giveNew.level = levels[0] ?? '';
+        /* An MCP server made here is given at Write (« propose »: each action asked, 16-11); the rest at the first. */
+        if (kind && !levels.includes(giveNew.level)) giveNew.level = (kind === 'mcp' ? 'write' : levels[0]) ?? '';
         const level = levels.length ? { options: levels.map((l) => ({ value: l, label: KIT.rightWord(l, 'pick') })), value: giveNew.level, label: uiSaid('set-na-level', 'What it may do'), onChange: (v) => { giveNew.level = v; } } : null;
         const box = newAssetBox({
             kind, title: '',
             context: kind && !made ? { line: uiSaid('set-na-will', 'Will be given to {name}', { name: who }), level } : null,
             made: made ? { said: uiSaid('set-na-made-to', '{name} created and given to {to}', { name: made.name, to: who }), note: made.note } : null,
             onKind: (k) => {
-                giveNew.kind = k; justMade = null; $('cassets-error').hidden = true; void paintRoomAssets();
+                giveNew.kind = k; giveNew.level = ''; justMade = null; $('cassets-error').hidden = true; void paintRoomAssets();
                 /* Its keys, read here too: Assets may not have been opened yet. */
                 if (k === 'git') void getJson('/git-keys', []).then((keys) => paintKeys(keys));
             },
@@ -5602,9 +5603,9 @@
     }
     /* Accept or refuse a Tether call that is waiting for a person. `after` repaints the
        surface the row sits in (the Assets page by default; the room passes its own). */
-    async function decideTether(id, decision, after) {
+    async function decideTether(id, decision, after, args) {
         $(asErrId()).hidden = true;
-        try { await post(`${API}/tether/decide`, { id, decision }); }
+        try { await post(`${API}/tether/decide`, { id, decision, ...(args ? { args } : {}) }); }
         catch (error) { sayAsErr(error); }
         if (after) await after(); else await repaintAsset();
     }
@@ -5812,6 +5813,12 @@
     }
     /* AN EXTERNAL MCP SERVER (mcpx.mjs, Tether's mcp target): its address, its tools each with its kind, « Refresh »;
        a new tool marked until seen (« Mark as seen »); then, for each conversation at Custom, what each kind may do. */
+    /* A sign-in under way (its provider's tab open): the panel is painted again when this page is looked at again.
+       The client form opened, and what the server said it needs, per server. */
+    let mcpSigningIn = ''; let mcpClientOpen = ''; const mcpClientNeed = new Map();
+    const backFromSignin = () => { if (!mcpSigningIn || document.visibilityState !== 'visible') return; mcpSigningIn = ''; void repaintAsset(); };
+    document.addEventListener('visibilitychange', backFromSignin);
+    window.addEventListener('focus', backFromSignin);
     const MCP_CLASS = { read: ['set-mcp-c-read', 'Reads only'], write: ['set-mcp-c-write', 'Writes'], destructive: ['set-mcp-c-destructive', 'Deletes or overwrites'] };
     const mcpClass = (c) => uiSaid(...(MCP_CLASS[c] ?? MCP_CLASS.destructive));
     function mcpParts(t) {
@@ -5825,22 +5832,57 @@
             catch (error) { sayAsErr(error); }
             await repaintAsset();
         });
-        /* Signed in with OAuth where the service offers no key (mcpoauth.mjs): the consent in a new tab, back here by
-           itself. A server that registers no client by itself asks for its client id once. */
-        const oauth = el('button', '', uiSaid('set-mcp-oauth', 'Sign in with OAuth')); oauth.type = 'button'; oauth.dataset.act = 'mcp-oauth';
-        const clientRow = el('div', 'set-row mcp-client'); clientRow.hidden = true;
-        const clientId = el('input'); clientId.type = 'text'; clientId.autocomplete = 'off'; clientId.spellcheck = false;
-        clientId.setAttribute('aria-label', uiSaid('set-mcp-client', 'Client id'));
-        clientId.placeholder = uiSaid('set-mcp-client', 'Client id');
-        clientRow.append(el('span', '', uiSaid('set-mcp-client-need', 'Paste its client id.')), clientId);
+        /* Signed in with OAuth where the service offers no key (mcpoauth.mjs). PHONE-SAFE (16-11): the provider's tab is
+           opened IN the click, before anything is awaited (a browser lets only a click open one), then sent to its
+           address; none opened (a blocked pop-up), this tab goes there and comes back by itself. A service that
+           registers no client by itself asks once for its client id and secret (kept on the server, never shown
+           again) and the permissions to ask; the address its app must name is shown to copy. */
+        const signedOut = t.catalog?.needs === 'reconnect';
+        const oauth = el('button', signedOut ? 'primary' : '', signedOut ? uiSaid('set-mcp-reconnect', 'Reconnect') : uiSaid('set-mcp-oauth', 'Sign in')); oauth.type = 'button'; oauth.dataset.act = 'mcp-oauth';
+        const clientBox = el('details', 'mcp-client'); clientBox.open = mcpClientOpen === t.id;
+        clientBox.append(el('summary', '', uiSaid('set-mcp-client-box', 'Client ID and secret')));
+        const field = (key, fallback, input) => { const l = el('label', 'mcp-client-field'); l.append(el('span', '', uiSaid(key, fallback)), input); return l; };
+        const clientId = el('input'); clientId.type = 'text'; clientId.autocomplete = 'off'; clientId.spellcheck = false; clientId.name = 'mcp-client-id';
+        const clientSecret = el('input'); clientSecret.type = 'password'; clientSecret.autocomplete = 'new-password'; clientSecret.name = 'mcp-client-secret';
+        const scopes = el('input'); scopes.type = 'text'; scopes.autocomplete = 'off'; scopes.spellcheck = false; scopes.name = 'mcp-scopes';
+        const redirect = el('input'); redirect.type = 'text'; redirect.readOnly = true; redirect.name = 'mcp-redirect';
+        const said = el('p', 'hint mcp-client-said', uiSaid('set-mcp-client-kept', 'Kept on the server. No AI sees them.'));
+        const asked = mcpClientNeed.get(t.id);
+        if (asked) { redirect.value = asked.redirect ?? ''; scopes.value = (asked.scopes ?? []).join(' '); }
+        redirect.hidden = !redirect.value;
+        clientBox.append(field('set-mcp-client', 'Client ID', clientId), field('set-mcp-secret', 'Client secret', clientSecret),
+            field('set-mcp-scopes', 'Permissions asked', scopes), ...(redirect.value ? [field('set-mcp-redirect', 'Its app\'s redirect address', redirect)] : []), said);
+        clientBox.addEventListener('toggle', () => { mcpClientOpen = clientBox.open ? t.id : ''; });
         oauth.addEventListener('click', async () => {
-            oauth.disabled = true; $(asErrId()).hidden = true;
+            $(asErrId()).hidden = true;
+            /* Opened now, empty; never told who opened it (the provider's page cannot reach this one). */
+            let tab = null;
+            try { tab = window.open('', '_blank'); if (tab) tab.opener = null; } catch { tab = null; }
+            oauth.disabled = true; oauth.setAttribute('aria-busy', 'true');
+            const body = { target: t.id, lang: deviceLang(), back: location.pathname + location.search, tab: tab ? 'new' : 'same' };
+            if (clientId.value.trim()) body.clientId = clientId.value.trim();
+            if (clientSecret.value.trim()) body.clientSecret = clientSecret.value.trim();
+            if (asked && scopes.value.trim() !== (asked.scopes ?? []).join(' ')) body.scope = scopes.value.trim();
+            else if (clientId.value.trim() && scopes.value.trim()) body.scope = scopes.value.trim();
+            /* Not kept in the page a moment longer. */
+            clientSecret.value = '';
             try {
-                const r = await post(`${API}/tether/mcp-oauth`, { target: t.id, ...(clientId.value.trim() ? { clientId: clientId.value.trim() } : {}) });
-                if (r?.need === 'client') { clientRow.hidden = false; clientId.focus(); }
-                else if (r?.url) window.open(r.url, '_blank', 'noopener');
-            } catch (error) { sayAsErr(error); }
-            oauth.disabled = false;
+                const r = await post(`${API}/tether/mcp-oauth`, body);
+                if (r?.url) {
+                    mcpSigningIn = t.id;
+                    if (tab) tab.location.href = r.url; else { location.assign(r.url); return; }
+                } else {
+                    try { tab?.close(); } catch { /* gone */ }
+                    if (r?.need === 'client') {
+                        mcpClientNeed.set(t.id, { redirect: r.redirect, scopes: r.scopes, secret: r.secret });
+                        mcpClientOpen = t.id;
+                        sayAsErr(new Error(r.missing === 'secret' ? uiSaid('set-mcp-secret-need', 'Paste its client secret too.') : uiSaid('set-mcp-client-need', 'Paste its client ID and secret, once.')));
+                        await repaintAsset();
+                        return;
+                    }
+                }
+            } catch (error) { try { tab?.close(); } catch { /* gone */ } sayAsErr(error); }
+            oauth.disabled = false; oauth.removeAttribute('aria-busy');
         });
         const fresh = tools.filter((x) => x.fresh === true);
         const seen = fresh.length ? el('button', '', uiSaid('set-mcp-seen', 'Mark as seen')) : null;
@@ -5860,13 +5902,17 @@
             const kind = el('small', 'mcp-tool-class', mcpClass(x.class)); kind.dataset.class = x.class;
             li.append(nm, kind);
             if (x.open && x.class !== 'read') li.append(el('small', 'hint', uiSaid('set-mcp-open', 'reaches outside')));
+            /* Declares nothing, seems to only read (Tether, 16-11): offered at Read, each call asked. */
+            if (x.guess === 'read') li.append(el('small', 'hint', uiSaid('set-mcp-guess', 'seems to only read')));
             if (x.fresh === true) li.append(el('small', 'mcp-tool-fresh', uiSaid('set-mcp-fresh', 'New — asked until you\'ve seen it')));
             list.append(li);
         }
         const body = [];
-        if (t.catalog?.error) body.push(el('p', 'error', uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: t.catalog.error })));
+        /* Signed out for good (Tether, 16-11): said once, plainly, the button to reconnect beside it. */
+        if (signedOut) body.push(el('p', 'error mcp-out', uiSaid('set-mcp-out', '{name} is disconnected. Reconnect it.', { name: t.title })));
+        else if (t.catalog?.error) body.push(el('p', 'error', uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: t.catalog.error })));
         body.push(tools.length ? list : el('p', 'hint', uiSaid('set-mcp-none', 'No tools listed yet.')));
-        body.push(clientRow);
+        body.push(clientBox);
         out.push({ title: uiSaid('set-mcp-tools', 'Tools'), extra: [seen, oauth, refresh], body, cls: 'as-mcp-tools' });
         /* Custom: each kind of tool Yes / Ask / No, for each conversation set to it. */
         const custom = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');
@@ -6153,7 +6199,26 @@
                     const yes = el('button', 'primary', 'Accept'); yes.type = 'button'; yes.addEventListener('click', () => { yes.disabled = true; void decideTether(q.id, 'yes', repaintAsset); });
                     const no = el('button', 'danger', 'Refuse'); no.type = 'button'; no.addEventListener('click', () => { no.disabled = true; void decideTether(q.id, 'no', repaintAsset); });
                     const acts = el('div', 'levels'); acts.append(yes, no);
-                    line.append(what, acts); box.append(line);
+                    line.append(what, acts);
+                    /* EDIT BEFORE APPROVING (16-11): an MCP call's texts shown whole (a reply's text...), changed here, then
+                       approved as changed; Tether checks them again against the tool. */
+                    const editable = q.card?.kind === 'mcp' && Array.isArray(q.editable) ? q.editable : [];
+                    if (editable.length) {
+                        const edit = el('button', '', uiSaid('set-ap-edit', 'Edit')); edit.type = 'button'; edit.dataset.act = 'edit-call';
+                        const form = el('div', 'ap-edit'); form.hidden = true;
+                        const boxes = editable.map((name) => {
+                            const area = el('textarea'); area.name = name; area.rows = 3; area.value = (q.card.args ?? []).find((x) => x.name === name)?.value ?? '';
+                            const l = el('label', 'mcp-client-field'); l.append(el('span', '', name), area); form.append(l);
+                            return area;
+                        });
+                        const send = el('button', 'primary', uiSaid('set-ap-send-edited', 'Accept as edited')); send.type = 'button';
+                        send.addEventListener('click', () => { send.disabled = true; void decideTether(q.id, 'yes', repaintAsset, Object.fromEntries(boxes.map((b) => [b.name, b.value]))); });
+                        form.append(send);
+                        edit.addEventListener('click', () => { form.hidden = !form.hidden; yes.hidden = !form.hidden; if (!form.hidden) boxes[0]?.focus(); });
+                        acts.append(edit);
+                        line.append(form);
+                    }
+                    box.append(line);
                 }
                 parts.push({ title: 'Waiting for you', body: [box] });
             }
@@ -6235,6 +6300,15 @@
         if (ev.online) { const a = el('a', '', uiSaid('set-ag-join', 'Join online')); a.href = ev.online; a.target = '_blank'; a.rel = 'noopener noreferrer'; fact(uiSaid('set-ag-link', 'Link'), a); }
         fact(uiSaid('set-ag-organizer', 'Organizer'), ev.organizer ? document.createTextNode(ev.organizer) : null);
         if (Number.isInteger(ev.attendees) && ev.attendees > 0) fact(uiSaid('set-ag-guests', 'Guests'), document.createTextNode(String(ev.attendees)));
+        /* ITS INVITATION'S TEXT (16-11): text nodes only -- never HTML, nothing in it runs; a web address (https) alone is a link. */
+        if (ev.notes) {
+            const text = el('div', 'ag-notes');
+            for (const part of String(ev.notes).split(/(https:\/\/[^\s<>"')\]]+)/)) {
+                if (/^https:\/\//.test(part)) { const a = el('a', '', part.length > 60 ? `${part.slice(0, 57)}…` : part); a.href = part; a.target = '_blank'; a.rel = 'noopener noreferrer'; text.append(a); }
+                else if (part) text.append(document.createTextNode(part));
+            }
+            fact(uiSaid('set-ag-notes', 'Invitation'), text);
+        }
         if (ev.show && ev.show !== 'busy') fact(uiSaid('set-ag-shown', 'Shown as'), document.createTextNode(uiSaid(`set-ag-show-${ev.show}`, { free: 'Free', tentative: 'Tentative', away: 'Away', elsewhere: 'Elsewhere' }[ev.show] ?? ev.show)));
         box.append(head, facts);
         return box;
