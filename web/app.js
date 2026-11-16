@@ -2002,6 +2002,8 @@
             paint();
             paintChips();
             paintHealth();
+            /* The desk shown: its cards say the states of now (its places are not read again). */
+            if (!DEVICE && place === 'deck') { try { paintDeskStates(); } catch { /* not set up yet */ } }
             if (!DEVICE) void paintGauge();
             /* The chats of the others, kept for a switch at once (15-11): what moved, fetched in the background. */
             if (!DEVICE) void keepChats();
@@ -7124,20 +7126,87 @@
         $('features-title').textContent = uiSaid('features-title', 'Features');
         $('features-about').textContent = data ? uiSaid('features-lit-of', '{n} of {t} rooms lit', { n: data.counts.ready, t: data.counts.total }) : '';
     }
+    /* THE DESK (desk.js, 16-11): the home page, a grid of icons kept per person by the server, the same on
+       every screen. Each thing is drawn as everywhere else (kit ConvCard, AssetCard); its folders are its own
+       (the list's groups never change). The first time, it holds the home cards as they were. */
+    let desk = null;
+    let deskAssets = new Map();
+    /* The assets a desk may hold (its "+ Add"): folders, repositories, mailboxes, connected accounts, binders. */
+    async function readDeskAssets() {
+        const [all, lists, tether] = await Promise.all([getJson('/resources', []), binderCall('lists', {}), getJson('/tether', {})]);
+        const got = new Map();
+        for (const r of Array.isArray(all) ? all : []) { const kind = kindOf(r); got.set(`a:${kind}:${r.name}`, { key: `${kind}:${r.name}`, kind, name: r.name }); }
+        for (const t of Array.isArray(tether?.targets) ? tether.targets : []) got.set(`a:connexion:${t.id}`, { key: `connexion:${t.id}`, kind: tetherCat(t.kind), name: t.title ?? t.id });
+        for (const l of lists?.ok && Array.isArray(lists.data) ? lists.data.filter((x) => !x.archived) : []) got.set(`a:list:${l.id}`, { key: `list:${l.id}`, kind: 'list', name: l.title, sub: cardsSub(l.count) });
+        deskAssets = got;
+    }
+    const deskConv = (id) => (id.startsWith('c:') ? conversations.find((c) => c.name === id.slice(2)) : undefined);
+    const deskRoom = (id) => (id.startsWith('r:') ? roomsNow().find((r) => r.id === id.slice(2)) : undefined);
+    const roomSign = () => { const sign = document.createElement('span'); sign.className = 'room-sign'; return sign; };
+    function deskThing(id) {
+        const c = deskConv(id); if (c) return { name: shownName(c) };
+        const r = deskRoom(id); if (r) return { name: r.name };
+        const a = deskAssets.get(id); return a ? { name: a.name } : null;
+    }
+    function deskMini(id) {
+        const c = deskConv(id); if (c) return KIT.Avatar({ name: shownName(c) });
+        const r = deskRoom(id); if (r) return KIT.Avatar({ name: r.name, glyph: roomSign() });
+        return KIT.AssetIcon({ kind: deskAssets.get(id)?.kind ?? 'folder' });
+    }
+    function deskTile(id) {
+        const c = deskConv(id); if (c) { const card = KIT.ConvCard(convModel(c, true), { size: 'card', tag: 'div', cls: 'desk-card' }); card.dataset.name = c.name; return card; }
+        const r = deskRoom(id); if (r) { const card = KIT.ConvCard(roomModel(r), { size: 'card', tag: 'div', cls: 'desk-card desk-card-room' }); card.dataset.room = r.id; return card; }
+        const a = deskAssets.get(id);
+        return KIT.AssetCard({ key: a?.key, kind: a?.kind, name: a?.name ?? '', sub: a?.sub || uiSaid(`set-acc-kind-${a?.kind}`, ASSET_WORD[a?.kind] ?? '') }, { size: 'row', tag: 'div', cls: 'desk-card' });
+    }
+    function deskOpen(id) {
+        const c = deskConv(id); if (c) { leavePlace(); select(c.name, { step: true }); return; }
+        const r = deskRoom(id); if (r) { void openSalon(r.id, true, { step: true }); return; }
+        const a = deskAssets.get(id); if (a) void openAssetsPlace(a.key);
+    }
+    function mountDesk() {
+        if (desk || !window.clavariumDesk) return desk;
+        desk = window.clavariumDesk.Desk($('deck-cards'), {
+            load: async () => { const r = await fetch(`${API}/desktop`); if (!r.ok) throw new Error(`desk: ${r.status}`); return r.json(); },
+            save: async (body) => { const r = await fetch(`${API}/desktop`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); if (!r.ok) throw new Error(`desk: ${r.status}`); },
+            has: (id) => deskThing(id) !== null,
+            name: (id) => deskThing(id)?.name ?? '',
+            tile: (id) => deskTile(id),
+            mini: (id) => deskMini(id),
+            waits: (id) => { const c = deskConv(id); if (c) return needsYou(c); const r = deskRoom(id); return Boolean(r && r.unread > 0); },
+            open: (id) => deskOpen(id),
+            /* Today's home cards, in their order: the rooms, then the conversations. */
+            wanted: () => [...roomsNow().map((r) => ({ id: `r:${r.id}`, size: 'm' })), ...conversations.map((c) => ({ id: `c:${c.name}`, size: 'm' }))],
+            addable: () => [
+                { title: uiSaid('desk-add-convs', 'Conversations'), items: conversations.map((c) => ({ id: `c:${c.name}`, name: shownName(c), sign: deskMini(`c:${c.name}`) })) },
+                { title: uiSaid('desk-add-rooms', 'Rooms'), items: roomsNow().map((r) => ({ id: `r:${r.id}`, name: r.name, sign: deskMini(`r:${r.id}`) })) },
+                { title: uiSaid('desk-add-assets', 'Assets'), items: [...deskAssets].map(([id, a]) => ({ id, name: a.name, what: uiSaid(`set-acc-kind-${a.kind}`, ASSET_WORD[a.kind] ?? a.kind), sign: deskMini(id) })) },
+            ],
+            create: [{ label: uiSaid('desk-new-conv', 'New conversation'), run: () => { void openNew(); } }, { label: uiSaid('desk-new-room', 'New room'), run: () => { void openSalonNew(); } }],
+            word: (key, en, vars) => uiSaid(key, en, vars),
+        });
+        return desk;
+    }
+    /* Drawn again only when what its cards say changed, and never while it is being arranged. */
+    let deskSaid = '';
+    function paintDeskStates() {
+        if (!desk || desk.editing) return;
+        const said = JSON.stringify([conversations.map((c) => convModel(c, true)), roomsNow().map((r) => roomModel(r))]);
+        if (said !== deskSaid) { deskSaid = said; desk.render(); }
+    }
     async function paintDeck() {
         $('deck-title').textContent = appName;
-        const list = [...conversations];
-        const add = el('button', 'conv-card conv-card-new'); add.type = 'button';
-        add.append(el('span', 'conv-card-plus', '+'), el('small', '', 'New conversation'));
-        add.addEventListener('click', () => { void openNew(); });
-        const addRoom = el('button', 'conv-card conv-card-new conv-card-new-room'); addRoom.type = 'button';
-        addRoom.append(el('span', 'conv-card-plus', '+'), el('small', '', 'New room'));
-        addRoom.addEventListener('click', () => { void openSalonNew(); });
-        const paint = () => $('deck-cards').replaceChildren(...rooms.map((r) => roomCard(r)), ...list.map((c) => convCard(c, (x) => { leavePlace(); select(x.name); })), add, ...(list.length ? [addRoom] : []));
-        paint();
-        $('deck-cards').hidden = list.length === 0; $('deck-empty').hidden = list.length > 0;
-        void paintDeckFeatures(list.length);
-        await Promise.all([loadRooms(), loadBoxes()]); paint();
+        const count = conversations.length;
+        $('deck-cards').hidden = count === 0; $('deck-empty').hidden = count > 0;
+        void paintDeckFeatures(count);
+        if (!count) return;
+        const d = mountDesk(); if (!d) return;
+        /* Drawn at once with what is known; the rooms, the boxes and the assets read behind, then again. */
+        await Promise.all([loadRooms(), loadBoxes()]);
+        if (place !== 'deck') return;
+        try { await d.refresh(); } catch { /* not read: drawn at the next opening */ }
+        await readDeskAssets().catch(() => {});
+        if (place === 'deck') d.render();
     }
     /* FEATURES (features.js): the welcome in place of "No conversation yet" until it is passed; then the
        next step over the cards. */
@@ -7337,6 +7406,8 @@
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
         $('deck').hidden = which !== 'deck';
+        /* The desk left: its menu, an open folder, its edit mode go with it. */
+        if (which !== 'deck') { try { desk?.leave(); } catch { /* not set up yet */ } }
         $('salon').hidden = which !== 'salon'; $('salon-new').hidden = which !== 'salon-new';
         /* The places of the whole have a part of the page of their own, over the conversation (03-11). */
         $('places').hidden = !['access', 'settings', 'assets', 'deck', 'new', 'salon', 'salon-new'].includes(which);
@@ -7351,7 +7422,8 @@
     function placeAddress() {
         const q = new URLSearchParams();
         if (current) q.set('c', current);
-        if (place !== 'conversations') q.set('open', place);
+        /* The desk with no conversation open is the bare address: the page of arrival. */
+        if (place !== 'conversations' && !(place === 'deck' && !current)) q.set('open', place);
         if (place === 'salon' && roomOpenNow()) q.set('room', roomOpenNow());
         if (place === 'assets' && assetOpen) q.set('a', assetOpen);
         if (place === 'assets' && assetOpen && assetOpen === listOpen && assetsView?.place.page === 'card') q.set('card', assetsView.place.card);
@@ -13196,6 +13268,10 @@
             const d = await features?.refresh().catch(() => null);
             if (d?.welcome && place === 'conversations' && !conversations.length) openDeck(false);
         }
+        /* THE DESK, the page of arrival (16-11): the bare address opens on it where the list sits beside it; on a
+           phone the list stays the first screen, the desk one tap away (its title). An address that names a
+           conversation or a place opens on that instead. */
+        else if (home && !DEVICE && !current && !location.search && place === 'conversations' && !narrow()) openDeck(false);
     }
     void start();
 })();

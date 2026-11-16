@@ -3249,3 +3249,92 @@ span.tile-spark { display: block; height: 22px; }
 .list-bones { display: grid; gap: 10px; padding: 8px 0; }
 .ap-edit { flex: 1 1 100%; }
 .ap-edit textarea { width: 100%; box-sizing: border-box; }
+
+/* THE DESK (desk.js, 16-11, mockup bureau-2): the home page, icons that snap to cells. The cards inside are the
+   kit's (ConvCard, AssetCard); only their sizes are set here: an icon (s), wide (m: two cells), large (l: 2 x 2). */
+.desk-host { --desk-cell: 104px; --desk-row: 104px; --desk-gap: 12px; display: flex; flex-direction: column; min-height: 0; }
+.desk-bar { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 10px 16px 0; }
+.desk-bar .desk-edit.primary { background: var(--brass); color: var(--on-brass); border-color: var(--brass); }
+.desk-grid { display: grid; grid-auto-rows: var(--desk-row); gap: var(--desk-gap); padding: 12px 16px 96px; min-width: 0; }
+.desk-empty { text-align: center; color: var(--ink2); padding: 24px 16px; }
+@media (max-width: 520px) { .desk-host { --desk-cell: 72px; --desk-row: 96px; --desk-gap: 10px; } }
+.desk-tile { position: relative; min-width: 0; min-height: 0; border-radius: 16px; border: 1px solid var(--line); background: linear-gradient(160deg, var(--bar), var(--panel)); overflow: hidden; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; -webkit-touch-callout: none; outline-offset: 2px; }
+.desk-tile:focus-visible { outline: 2px solid var(--brass); }
+.desk-tile:hover { border-color: var(--brass); }
+.desk-tile > .desk-card, .desk-tile > .desk-folder { height: 100%; padding: 10px; min-height: 0; }
+.desk-card.kit-conv-card { min-height: 0; overflow: hidden; }
+.desk-l .desk-card.kit-conv-card .kit-conv-main > .last { -webkit-line-clamp: 6; }
+.desk-card.kit-asset { flex-direction: row; align-items: center; align-content: flex-start; }
+.desk-m .desk-card.kit-asset, .desk-l .desk-card.kit-asset { align-items: flex-start; }
+.desk-l .desk-card .kit-asset-ic { --ka-ic: 40px; }
+/* An icon: its sign, its name under it, nothing else (its point still says how it is). */
+.desk-s { background: transparent; border-color: transparent; }
+.desk-s:hover { border-color: transparent; background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.desk-s > .desk-card, .desk-s > .desk-folder { padding: 6px 4px; }
+.desk-s .desk-card.kit-conv-card { --kc-av: 50px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; }
+.desk-s .desk-card.kit-conv-card > .state-dot { position: absolute; top: 50%; left: 50%; margin: 6px 0 0 16px; width: 12px; height: 12px; }
+.desk-s .desk-card .kit-conv-head { align-items: center; }
+.desk-s .desk-card .kit-conv-head > b, .desk-s .desk-card .kit-asset-name, .desk-s .desk-folder-name { font-size: .75rem; font-weight: 500; -webkit-line-clamp: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; text-align: center; }
+.desk-s .desk-card :is(.when, .last, .kit-conv-now, .kit-chips, .kit-asset-sub, .kit-asset-side) { display: none !important; }
+.desk-s .desk-card.kit-conv-card .kit-conv-main { display: block; max-width: 100%; }
+.desk-s .desk-card.kit-asset { flex-direction: column; justify-content: center; gap: 6px; }
+.desk-s .desk-card.kit-asset .kit-asset-main { flex: none; max-width: 100%; align-items: center; }
+.desk-s .desk-card .kit-asset-ic { --ka-ic: 50px; border-radius: 14px; }
+@media (max-width: 520px) { .desk-s .desk-card.kit-conv-card { --kc-av: 44px; } .desk-s .desk-card .kit-asset-ic { --ka-ic: 44px; } }
+/* A folder of the desk: up to four signs in its square; wide or large, its first ones by name. */
+.desk-folder { position: relative; display: flex; flex-direction: column; gap: 8px; color: var(--ink); }
+.desk-folder-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.desk-folder-words { display: flex; flex-direction: column; min-width: 0; }
+.desk-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-folder-words .when { color: var(--ink2); font-size: .75rem; }
+.desk-folder-ic { flex: none; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--button); display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 3px; padding: 5px; }
+.desk-folder-ic > * { --kc-av: 100%; --ka-ic: 100%; width: 100%; height: 100%; border-radius: 4px; font-size: 0; min-width: 0; min-height: 0; }
+.desk-folder-ic > * svg { display: none; }
+.desk-s .desk-folder { align-items: center; justify-content: center; text-align: center; gap: 6px; }
+.desk-s .desk-folder-head { flex-direction: column; gap: 6px; max-width: 100%; }
+.desk-s .desk-folder-words { max-width: 100%; }
+.desk-s .desk-folder-ic { width: 50px; height: 50px; border-radius: 14px; }
+@media (max-width: 520px) { .desk-s .desk-folder-ic { width: 44px; height: 44px; } }
+.desk-folder-mini { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.desk-m .desk-folder-mini { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.desk-m .desk-folder-mini em { display: none; }
+.desk-folder-kid { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; font-size: .6875rem; color: var(--ink2); }
+.desk-folder-kid > :first-child { --kc-av: 30px; --ka-ic: 30px; }
+.desk-folder-kid em { font-style: normal; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-badge { position: absolute; top: 4px; right: 4px; min-width: 20px; padding: 1px 6px; border-radius: 10px; background: var(--wait); color: #fff; font: 700 .6875rem/1.4 var(--sans); text-align: center; }
+/* Edit mode: free cells dotted, each thing a « ⋯ », a slight wobble (none when motion is reduced). */
+.desk-cell { border: 1px dashed var(--line); border-radius: 16px; opacity: .7; }
+.desk-dropmark { border: 2px solid var(--brass); border-radius: 16px; background: color-mix(in srgb, var(--brass) 15%, transparent); pointer-events: none; }
+.desk-more { display: none; position: absolute; top: 4px; right: 4px; z-index: 2; width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--bar); color: var(--ink); line-height: 1; font-size: 1rem; }
+.desk-editing .desk-more { display: block; }
+.desk-editing .desk-tile { touch-action: none; animation: desk-wobble .28s ease-in-out infinite alternate; }
+.desk-editing .desk-tile:nth-child(2n) { animation-delay: .14s; }
+.desk-editing .desk-s { border: 1px dashed var(--line); }
+@keyframes desk-wobble { from { transform: rotate(-.7deg); } to { transform: rotate(.7deg); } }
+@media (prefers-reduced-motion: reduce) { .desk-editing .desk-tile { animation: none; } }
+.desk-ghosted { opacity: .25; }
+.desk-target { outline: 2px solid var(--brass); outline-offset: 2px; }
+.desk-drag { position: fixed; z-index: 80; margin: 0; pointer-events: none; transform: scale(1.05); box-shadow: 0 12px 30px rgba(0, 0, 0, .35); animation: none !important; }
+.desk-hint { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 85; padding: 6px 12px; border-radius: 10px; background: var(--brass); color: var(--on-brass); font-size: .8125rem; pointer-events: none; }
+.desk-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bar); color: var(--ink); box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
+.desk-menu { position: fixed; z-index: 90; min-width: 200px; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--bar); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); display: flex; flex-direction: column; gap: 2px; }
+.desk-menu > button { text-align: left; border: 0; background: none; color: var(--ink); padding: 8px 10px; border-radius: 8px; }
+.desk-menu button:hover, .desk-menu button:focus-visible { background: var(--button); }
+.desk-sizes, .desk-arrows { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 2px 2px 4px; }
+.desk-arrows { grid-template-columns: repeat(4, 1fr); }
+.desk-sizes button, .desk-arrows button { text-align: center; background: transparent; color: var(--ink); padding: 6px 4px; }
+.desk-sizes button[aria-pressed="true"] { background: var(--brass); color: var(--on-brass); border-color: var(--brass); }
+.desk-sheet-bg { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .5); }
+.desk-sheet { width: min(560px, 100%); max-height: 85vh; overflow: auto; padding: 14px; border-radius: 18px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.desk-sheet-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.desk-sheet-head h2 { flex: 1; margin: 0; font-size: 1rem; }
+.desk-folder-input { flex: 1; min-width: 0; font: inherit; font-weight: 600; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.desk-in-folder { grid-template-columns: repeat(auto-fill, minmax(var(--desk-cell, 96px), 1fr)); padding: 4px 0; --desk-cell: 96px; --desk-row: 104px; }
+.desk-pick { display: flex; flex-direction: column; gap: 6px; }
+.desk-pick h3 { margin: 10px 0 2px; font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+.desk-pick-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-align: left; font-weight: 500; }
+.desk-pick-row > :first-child { --kc-av: 30px; --ka-ic: 30px; }
+.desk-pick-row > .desk-folder-ic { width: 30px; height: 30px; border-radius: 9px; }
+.desk-pick-row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-pick-row small { margin-left: auto; color: var(--ink2); }
+.desk-plus { width: 30px; text-align: center; color: var(--brass-ink); font-size: 1.25rem; }
