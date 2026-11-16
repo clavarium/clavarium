@@ -139,3 +139,13 @@ test('POST /api/tether/contacts and contact: this site\'s pages only; read as th
     assert.equal(gone.status, 404);
     assert.equal(gone.json.error, 'No such address book.');
 });
+
+test('16-11: contacts as the real Tether connector hands them ({ data: { contacts } } / { data: { contact } }, one level down through its keeper)', async (t) => {
+    const { tethers } = world(t, (verb) => (verb === 'contacts.read'
+        ? { text: 'x', size: 1, data: { contact: { id: 'c1', name: 'Alex', emails: ['alex@example.com'], phones: ['+33 6', '+33 1'], company: 'Co', title: 'CEO' } } }
+        : { text: 'x', size: 1, data: { contacts: [{ id: 'c1', name: 'Alex', emails: ['alex@example.com'], phones: ['+33 6', '+33 1'], company: 'Co' }], more: false } }));
+    const list = await readContacts(tethers, { target: BOOK.id }, { who: OWNER });
+    assert.equal(list.partial, false); assert.deepEqual(list.contacts[0].phones, ['+33 6', '+33 1']); assert.equal(list.contacts[0].company, 'Co');
+    const one = await readContact(tethers, { target: BOOK.id, id: 'c1' }, { who: OWNER });
+    assert.equal(one.partial, false); assert.equal(one.company, 'Co');
+});

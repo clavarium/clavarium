@@ -137,3 +137,14 @@ test('POST /api/tether/agenda: this site\'s pages only; the events, read as the 
     assert.equal(gone.status, 404);
     assert.equal(gone.json.error, 'No such calendar.');
 });
+
+test('16-11: events as the real Tether connector hands them ({ data: { events } }, one level down through its keeper): read as data, invitation and link kept', async (t) => {
+    const ev = { id: 'e1', title: 'Demo', start: '2026-11-16T16:00:00', end: '2026-11-16T17:00:00', organizer: 'Ann', online: 'https://teams.example.com/l/meetup-join/1', notes: 'Agenda of the demo', attendees: 3 };
+    const { tethers } = world(t, () => ({ text: 'listed', size: 6, data: { events: [ev], more: false } }));
+    const got = await readAgenda(tethers, { target: CAL.id, from: '2026-11-16', to: '2026-11-23' }, { who: OWNER });
+    assert.equal(got.partial, false);
+    assert.equal(got.events[0].online, ev.online);
+    assert.equal(got.events[0].notes, ev.notes);
+    assert.equal(got.events[0].organizer, 'Ann');
+    assert.equal(got.more, false);
+});

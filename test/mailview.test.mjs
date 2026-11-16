@@ -197,3 +197,13 @@ test('POST /api/tether/mail-list and mail-read: this site\'s pages only; read as
     assert.equal(bad.status, 400);
     assert.equal(bad.json.kind, 'bad-folder');
 });
+
+test('16-11: mail as the real Tether connector hands it ({ data: { messages } } / { data: { message } }, one level down through its keeper)', async (t) => {
+    const { tethers } = world(t, (verb) => (verb === 'mail.read'
+        ? { text: 'x', size: 1, data: { message: { id: 'A', from: 'x@example.com', subject: 'Hi', text: 'Bonjour', attachments: [{ name: 'devis.pdf', type: 'application/pdf', size: 4096 }] } } }
+        : { text: 'x', size: 1, data: { messages: [{ id: 'A', from: 'x@example.com', subject: 'Hi', date: '2026-11-16T10:00:00Z', unread: true, attachments: true }], more: false } }));
+    const list = await readMailList(tethers, { target: BOX.id }, { who: OWNER });
+    assert.equal(list.partial, false); assert.equal(list.messages[0].unread, true); assert.equal(list.messages[0].attachments, true);
+    const one = await readMail(tethers, { target: BOX.id, id: 'A' }, { who: OWNER });
+    assert.equal(one.partial, false); assert.equal(one.text, 'Bonjour'); assert.equal(one.attachments[0].name, 'devis.pdf');
+});

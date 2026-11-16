@@ -13,6 +13,7 @@
  * A Tether that hands its contacts as data (`data.contacts`, `data.contact`: the fields below) gives them all; one that
  * gives only its text lines (0.1.0-next.69) gives name, emails and phones in one line, no company: `partial`. */
 import { Refusal } from './conversations.mjs';
+import { handed } from './agenda.mjs';
 import { READ_MS } from './mailview.mjs';
 
 export const CONTACTS_MAX = 200;
@@ -37,7 +38,7 @@ async function asked(tethers, t, verb, args, who, wait) {
     finally { clearTimeout(timer); }
     if (got === null) throw refused(504, 'late', `${t.title} did not answer in time. Try again.`);
     if (!got?.ok) throw refused(/no such contact/.test(String(got?.text)) ? 404 : 502, 'unreachable', `${t.title} could not be read: ${line(got?.text, 300) || 'no answer'}.`);
-    return got;
+    return handed(got);
 }
 
 /* One contact Tether handed as data, kept to what the list shows. */

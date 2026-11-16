@@ -78,6 +78,11 @@ export const NOTES_MAX = 2000;
 const notesOf = (v) => String(v ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, NOTES_MAX);
 const SHOW = { busy: 'busy', free: 'free', tentative: 'tentative', oof: 'away', away: 'away', workingelsewhere: 'elsewhere', elsewhere: 'elsewhere' };
 
+/* WHAT TETHER HANDED AS DATA, where its keeper puts it: a person's read answers { ok, text, data: { size, ...the
+   connector's own fields } }, so a connector's `data` arrives one level down (data.data). Both are read (16-11: the
+   panels read only the top level, and fell back to the text lines: no invitation text, no link, no organizer). */
+export const handed = (got) => (got?.data?.data && typeof got.data.data === 'object' && !Array.isArray(got.data.data) ? { ...got, data: got.data.data } : got);
+
 /* One event Tether handed as data, kept to the fields the page shows. */
 export function eventOf(e) {
     const start = timeOf(e?.start);
@@ -122,6 +127,7 @@ export async function readAgenda(tethers, { target, from, to } = {}, { who, zone
     finally { clearTimeout(timer); }
     if (got === null) throw refused(504, 'late', `${t.title} did not answer in time. Try again.`);
     if (!got?.ok) throw refused(502, 'unreachable', `${t.title} could not be read: ${line(got?.text, 300) || 'no answer'}.`);
+    got = handed(got);
     const given = Array.isArray(got.data?.events);
     const all = (given ? got.data.events.map(eventOf).filter(Boolean) : eventsOfText(got.text))
         .sort((a, b) => a.start.localeCompare(b.start));

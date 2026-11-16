@@ -21,6 +21,7 @@
  * that gives only its text lines (0.1.0-next.69) gives who, subject, date, and no unread or attachment mark: the
  * answer says `partial`. */
 import { Refusal } from './conversations.mjs';
+import { handed } from './agenda.mjs';
 
 export const MESSAGES_MAX = 25;
 export const READ_MS = 30_000;
@@ -129,7 +130,7 @@ async function asked(tethers, t, verb, args, who, wait) {
     finally { clearTimeout(timer); }
     if (got === null) throw refused(504, 'late', `${t.title} did not answer in time. Try again.`);
     if (!got?.ok) throw refused(got?.code === 'gone' ? 404 : 502, got?.code === 'gone' ? 'gone' : 'unreachable', `${t.title} could not be read: ${line(got?.text, 300) || 'no answer'}.`);
-    return got;
+    return handed(got);
 }
 
 /* THE LATEST MESSAGES OF A MAILBOX TARGET, or those matching `text`, read now. `who`: { id, name }, said in Tether's
