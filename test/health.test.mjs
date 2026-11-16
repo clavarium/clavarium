@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Health, PROBE, PROBE_NAME, readProbe, judge } from '../server/health.mjs';
+import { Health, PROBE, PROBE_NAME, readProbe, judge, STUCK_MOUNT } from '../server/health.mjs';
 import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 import { Grants } from '../server/grants.mjs';
@@ -344,4 +344,13 @@ test('/work put back while its tool was in it: the same look says its tool stale
     const seen = await m.health.check('demo');
     assert.deepEqual(seen.remounted, ['/work']);
     assert.equal(seen.stale, true);
+});
+
+test('a work folder the VM manager refuses to mount again ("already mounted", its SSHFS process gone) is said bad, its machine to be restarted (16-11)', () => {
+    assert.ok(STUCK_MOUNT.test('"/work" is already mounted in \'clv-demo\''));
+    assert.ok(STUCK_MOUNT.test('failed to unmount "/work": Failed to terminate SSHFS mount process gracefully'));
+    assert.equal(STUCK_MOUNT.test('timed out after 5000 ms'), false);
+    const said = judge({ state: 'Running', answering: true, oomKills: 0, memory: { totalMb: 2048, availableMb: 1200 }, disks: {}, missing: ['/work'], failed: [{ path: '/work', why: 'already mounted' }], stuckWork: true });
+    assert.equal(said.level, 'bad');
+    assert.ok(said.problems.some((p) => p.key === 'stuck-work'));
 });

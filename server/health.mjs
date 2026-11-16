@@ -33,6 +33,10 @@ import { SESSION } from './conversations.mjs';
 export const RESTART_OUTSIDE = '/var/tmp/clavarium-restart-asked';
 /* What a folder that came loose looks like on a terminal (the kernel's words for ENOTCONN). */
 const LOOSE_WORDS = 'transport endpoint is not connected|socket is not connected|ENOTCONN';
+/* A WORK FOLDER THE VM MANAGER CANNOT TAKE BACK (16-11, tried on a test server): its mount program died, multipass
+   cannot unmount it ("Failed to terminate SSHFS mount process") and then refuses to mount it again ("already
+   mounted"). Only a restart of its machine mounts it again. */
+export const STUCK_MOUNT = /already mounted|terminate SSHFS mount process/i;
 
 /* How long installing the shared-folder helper in a machine may take (it comes from the snap store). */
 export const SHARING_MS = 180_000;
@@ -143,6 +147,7 @@ export function judge(record) {
         for (const path of record.remounted ?? []) add('info', 'mount', `remounted:${path}`, `${path} had come loose in the machine: it was mounted again.`);
         for (const { path, why } of record.failed ?? []) add('bad', 'mount', `failed:${path}`, `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);
         for (const path of record.missing ?? []) if (!(record.failed ?? []).some((f) => f.path === path)) add('warn', 'mount', `missing:${path}`, `${path} is not reachable in the machine.`);
+        if (record.stuckWork) add('bad', 'mount', 'stuck-work', 'Its work folder cannot be mounted again in its machine: its machine is restarted, its work picks up where it was.');
         if (record.stale) add('bad', 'mount', 'stale-tool', 'Its tool is still in a folder that came loose: it is restarted, its work picks up where it was.');
         /* Its terminal says so while its folders look well: said, nothing done (its tool may only be quoting it). */
         else if (record.screenLoose > 0 && !(record.missing ?? []).length) add('warn', 'mount', 'screen-loose', 'Its terminal says a folder is not connected, though its folders look well.');
@@ -249,6 +254,7 @@ export class Health {
         return this.#keep(name, {
             at, state, answering: true, memory: facts.memory, oomKills: facts.oomKills ?? 0, ...(facts.oomKinds ? { oomKinds: facts.oomKinds } : {}), disks: facts.disks,
             paths, missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}), ...(links ? { links } : {}),
+            ...(failed.some((f) => f.path === '/work' && STUCK_MOUNT.test(f.why ?? '')) ? { stuckWork: true } : {}),
             ...(facts.stale ? { stale: true } : {}), ...(facts.screenLoose ? { screenLoose: facts.screenLoose } : {}), ...(facts.restartAsked ? { restartAsked: true } : {}),
             /* What was put back stays said until a later look finds nothing to put back. */
         });

@@ -75,3 +75,24 @@ test('asked from outside /work: its request taken away, restarted once its turn 
 test('the guide tells a tool where to ask when /work itself fails', () => {
     assert.ok(ownText({ name: 'demo', tool: 'Claude Code', workKept: true, chat: true }).includes(`touch ${RESTART_OUTSIDE}`));
 });
+
+test('a work folder the VM manager cannot mount again: its MACHINE is restarted, not only its tool, once, even while it looks busy after the wait', async () => {
+    let now = 1_000_000; const tools = []; const machines = []; const said = [];
+    const revive = new Revive({
+        restart: async (name) => { tools.push(name); return true; },
+        restartMachine: async (name) => { machines.push(name); return true; },
+        busy: () => true, tell: (name, why, step) => said.push(`${why} ${step}`), now: () => now,
+    });
+    revive.judged('demo', { ...well, stale: true, stuckWork: true });
+    assert.equal(revive.wanted('demo'), 'stuck');
+    await revive.tick();
+    assert.deepEqual(machines, [], 'busy: waited for first');
+    now += WAIT_MS;
+    await revive.tick();
+    assert.deepEqual(machines, ['demo']); assert.deepEqual(tools, []);
+    assert.deepEqual(said, ['stuck before', 'stuck done']);
+    revive.judged('demo', { ...well, stuckWork: true });
+    now += WAIT_MS;
+    await revive.tick();
+    assert.equal(machines.length, 1, 'not again within AGAIN_MS');
+});

@@ -618,16 +618,17 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        by the server, its tool only; told through its docket first (read as it starts), its chat after. */
     const revive = new Revive({
         restart: (name) => all.restartTool(name),
+        restartMachine: async (name) => { const r = await all.machineAction(name, 'restart', { wait: true }); return r?.ok !== false; },
         busy: (name) => talk.pulse(name)?.busy === true,
         taken: (name) => vms.exec(name, ['rm', '-f', RESTART_OUTSIDE], { timeoutMs: 10_000 }),
         tell: (name, why, step) => {
-            const loose = why === 'stale';
+            const loose = why === 'stale' || why === 'stuck';
             if (step === 'before') {
                 if (loose) try { if (dockets.on(name)) dockets.post(name, { kind: 'restarted', text: 'Your work folder came loose in your machine and was put back: your tool was restarted to see it again (what was in the old one could not be reached). Your work picks up where it was; what ran in the background stopped.' }); } catch { /* its docket may be off */ }
                 return;
             }
             const text = step === 'done'
-                ? (loose ? 'Its work folder had come loose: its tool was restarted to see it again. Its work picks up where it was.' : 'Its tool was restarted as it asked: its work picks up where it was.')
+                ? (why === 'stuck' ? 'Its work folder could not be mounted again: its machine was restarted, the folder is back. Its work picks up where it was.' : loose ? 'Its work folder had come loose: its tool was restarted to see it again. Its work picks up where it was.' : 'Its tool was restarted as it asked: its work picks up where it was.')
                 : 'Its tool could not be restarted: open its terminal and type exit, it starts again.';
             try { talk.event(name, { kind: step === 'done' ? 'restarted' : 'machine-problem', text, topic: step === 'done' ? 'Restarted' : 'Machine', ...(step === 'done' ? {} : { tone: 'warn' }) }); } catch { /* its chat is off */ }
             if (step === 'failed') events.add({ kind: 'machine', text: `${name}: ${text}`, conversation: name });

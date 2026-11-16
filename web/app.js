@@ -8187,7 +8187,8 @@
         apply.dataset.retry = String(failedHere);
         apply.className = failedHere ? '' : 'primary';
         apply.textContent = failedHere ? `Try ${u.available} again\u2026` : `Update to ${u.available ?? ''}`;
-        $('updates-retry-note').textContent = failedHere ? `It did not start here before. If it fails again, ${u.version} is put back.` : '';
+        const onlyFetch = failedHere && u.history.filter((h) => h.action === 'update' && h.to === u.available && h.result !== 'done').every((h) => h.fetch === true);
+        $('updates-retry-note').textContent = !failedHere ? '' : onlyFetch ? 'It could not be downloaded before; it is tried again by itself.' : `It did not start here before. If it fails again, ${u.version} is put back.`;
         $('updates-retry-note').hidden = !failedHere;
         $('updates-retry-yes').hidden = true; $('updates-retry-no').hidden = true; apply.hidden = false;
         /* The last thing that went wrong, said once at the top, in words: a version put

@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fakeRegistry } from './fake-registry.mjs';
-import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS, ensureQuietSudo, quietLine } from '../deploy/updater.mjs';
+import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS, ensureQuietSudo, quietLine, FETCH_AGAIN_MS, FETCH_TRIES } from '../deploy/updater.mjs';
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 const DOCKET_REPO = 'https://github.com/clavarium/clavarium-docket';
@@ -520,4 +520,23 @@ test('sudo is told not to log the host program\'s probes: with what its version 
     assert.equal(await ensureQuietSudo({ file, run: async () => ({ code: 1, stdout: '', stderr: 'parse error' }) }), false);
     assert.equal(readFileSync(file, 'utf8'), before);
     assert.equal(await ensureQuietSudo({ file: join(dir, 'none'), run: ok }), false);
+});
+
+test('a version said out but not served yet (npm could not fetch it): nothing switched, tried again by itself later, a few times at most (16-11)', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.u.set('mode', 'asap');
+    s.publish('1.0.1');
+    const back = s.reg.hold('clavarium', '1.0.1');
+    await assert.rejects(s.u.apply('1.0.1'), /npm could not install/);
+    assert.equal(s.current(), '1.0.0');
+    assert.equal(s.u.about().history[0].fetch, true);
+    /* Too soon: not yet. */
+    assert.equal(await s.u.tick(), '1.0.1 could not be fetched: tried again later');
+    /* Later, and served by then: installed by itself. */
+    back();
+    s.at(new Date(2026, 9, 18, 12, 0, 0, 0 + FETCH_AGAIN_MS + 1000));
+    assert.equal(await s.u.tick(), 'updated to 1.0.1');
+    assert.equal(s.current(), '1.0.1');
+    assert.ok(FETCH_TRIES >= 2);
 });

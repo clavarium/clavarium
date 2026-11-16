@@ -10,7 +10,7 @@
  */
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -67,6 +67,8 @@ export async function fakeRegistry() {
         origin, publish, asked,
         /* A tag moved by hand (a version taken back to "latest"). */
         tag(name, tag, version) { packages.get(name)['dist-tags'][tag] = version; },
+        /* Its tag says it is out, its file is not served yet (a mirror behind, 16-11): back with the function returned. */
+        hold(name, version) { const file = join(dir, `${name}-${version}.tgz`); renameSync(file, `${file}.held`); return () => renameSync(`${file}.held`, file); },
         close() { server.close(); rmSync(dir, { recursive: true, force: true }); },
     };
 }
