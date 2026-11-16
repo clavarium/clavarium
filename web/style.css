@@ -3338,3 +3338,76 @@ span.tile-spark { display: block; height: 22px; }
 .desk-pick-row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-pick-row small { margin-left: auto; color: var(--ink2); }
 .desk-plus { width: 30px; text-align: center; color: var(--brass-ink); font-size: 1.25rem; }
+
+/* A MACHINE'S SHARED CONSOLE (16-11, app.js consoleParts): big -- most of the panel's height --, the same terminal as a
+   conversation's; who has it above, the state in words under it, its keys bar on a touch screen, its tools; under it the
+   AI's proposals, its inputs, the journal. Full screen: the console large, the conversation's chat beside it (under it on
+   a phone). Colours never alone: each state is said in words too. */
+.as-console-part .sc { display: flex; flex-direction: column; }
+.sc-main { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #0f141a; transition: box-shadow .2s, border-color .2s; }
+.sc.ai-typing .sc-main { border-color: var(--wait); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wait) 35%, transparent); }
+.sc.hidden-input .sc-main { border-color: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 30%, transparent); }
+.sc-presence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 10px; background: var(--bar); border-bottom: 1px solid var(--line); }
+.sc-chip { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; padding: 2px 10px 2px 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.sc-chip small { color: var(--ink2); }
+.sc-chip .sc-av { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: .6875rem; font-weight: 700; }
+.sc-chip.me .sc-av { background: var(--brass); color: var(--on-brass); }
+.sc-chip.ai .sc-av { background: var(--wait); color: #fff; }
+.sc-chip.me.active { border-color: var(--brass); }
+.sc-chip.ai.active { border-color: var(--wait); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wait) 25%, transparent); }
+.sc-space { flex: 1; }
+.sc-live { font-size: .75rem; color: var(--ink2); white-space: nowrap; }
+.sc-live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--warn); }
+.sc-live.on { color: var(--ok); }
+.sc-live.on::before { background: var(--ok); }
+.sc-screen { height: max(340px, calc(100dvh - 330px)); padding: 6px 8px; background: #0f141a; min-width: 0; }
+.sc-screen .xterm { height: 100%; }
+.sc-state { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 10px; font-size: .8125rem; background: var(--bar); color: var(--ink); border-top: 1px solid var(--line); }
+.sc-state[data-tone="ai"] { background: color-mix(in srgb, var(--wait) 16%, var(--panel)); border-top-color: var(--wait); }
+.sc-state[data-tone="secret"] { background: color-mix(in srgb, var(--ok) 14%, var(--panel)); border-top-color: var(--ok); }
+.sc-state[data-tone="pause"] { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); border-top-color: var(--warn); }
+.sc-state[data-tone="bad"] { color: var(--danger); }
+.sc-keys { display: none; gap: 4px; padding: 5px; background: var(--bar); border-top: 1px solid var(--line); overflow-x: auto; }
+.sc-keys button { min-height: 38px; min-width: 44px; padding: 2px 8px; font: 600 .8125rem var(--mono, ui-monospace, Menlo, Consolas, monospace); flex: 0 0 auto; }
+.sc-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 10px; background: var(--panel); border-top: 1px solid var(--line); }
+.sc-tools button[aria-pressed="true"] { border-color: var(--brass); color: var(--brass-ink); background: color-mix(in srgb, var(--brass) 12%, transparent); }
+.sc-tools .sc-take { font-size: .875rem; }
+/* Under the console: what the AI proposes, what it typed, the journal. */
+.sc-ai { display: flex; flex-direction: column; gap: 10px; }
+.sc-ask { border: 1px solid var(--wait); border-radius: 10px; padding: 10px 12px; background: var(--panel); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wait) 20%, transparent); display: flex; flex-direction: column; gap: 6px; }
+.sc-ask.risky { border-color: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 22%, transparent); }
+.sc-ask-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .8125rem; }
+.sc-ai-tag { font-size: .6875rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--wait); color: var(--wait); }
+.sc-risk { font-size: .6875rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--danger); color: var(--danger); white-space: nowrap; }
+.sc-why { margin: 0; font-size: .875rem; }
+.sc-cmd { display: block; font: .8125rem/1.45 ui-monospace, Menlo, Consolas, monospace; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; white-space: pre-wrap; word-break: break-all; }
+.sc-risk-say { margin: 0; font-size: .8125rem; color: var(--danger); }
+.sc-ask-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sc-edit { display: flex; flex-direction: column; gap: 6px; }
+.sc-edit textarea { font: .8125rem ui-monospace, Menlo, Consolas, monospace; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; resize: vertical; }
+.sc-typed h4 { margin: 0 0 4px; font-size: .75rem; color: var(--ink2); letter-spacing: .05em; text-transform: uppercase; }
+.sc-typed-row, .sc-j-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: .8125rem; padding: 2px 0; }
+.sc-typed-row small, .sc-j-at { color: var(--ink2); font-variant-numeric: tabular-nums; }
+.sc-typed-row code, .sc-j-row code { font: .8125rem ui-monospace, Menlo, Consolas, monospace; word-break: break-all; }
+.sc-j-mark { font-size: .75rem; color: var(--ink2); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
+.sc-journal { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; }
+/* Full screen: over the page, the console large, the chat beside it. */
+.sc.sc-full { position: fixed; inset: 0; z-index: 60; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 30%); gap: 10px; padding: 10px; background: var(--bg); }
+.sc.sc-full .sc-main { min-height: 0; }
+.sc.sc-full .sc-screen { height: auto; flex: 1; min-height: 0; }
+.sc-chat { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.sc-chat-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--bar); font-size: .875rem; }
+.sc-chat-pick { flex: 1; min-width: 0; font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+.sc-chat-thread { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.sc-chat-thread > .hint { padding: 12px; }
+:root[data-sc-full] body { overflow: hidden; }
+@media (max-width: 760px), (pointer: coarse) {
+  .sc-keys { display: flex; }
+}
+@media (max-width: 760px) {
+  .sc-screen { height: max(280px, calc(100dvh - 300px)); padding: 4px; }
+  .sc-tools .sc-ctrlc { display: none; }
+  .sc-tools .sc-take { flex: 1 1 100%; min-height: 42px; }
+  .sc.sc-full { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 58fr) minmax(0, 42fr); padding: 6px; gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { .sc-main { transition: none; } }

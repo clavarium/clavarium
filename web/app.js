@@ -483,13 +483,15 @@
     document.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
         const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest('#terminal')) return;
+        if (target?.closest('#terminal, .sc-screen')) return;
         if (target?.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable]:not([contenteditable=false])')) { target.blur(); return; }
         if (nav.back()) event.preventDefault();
     });
 
     /* ---------- the terminal ---------- */
-    const terminal = new Terminal({
+    /* ONE TERMINAL, everywhere a terminal is drawn (a conversation's, a machine's shared console): the same xterm,
+       the same font and theme, the same links. What it is given to draw is only ever drawn by it, never as HTML. */
+    const terminalOptions = () => ({
         cursorBlink: true, scrollback: 5000,
         fontSize: innerWidth < 500 ? 11 : 14,
         fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
@@ -498,6 +500,7 @@
            tab, with no way back to this page; anything else is not followed. */
         linkHandler: { activate: (_event, uri) => openWeb(uri), allowNonHttpProtocols: false },
     });
+    const terminal = new Terminal(terminalOptions());
     /* A web address on screen opens in a new tab, on its own: nothing of this
        page is handed to it. Only http and https. */
     function openWeb(uri) {
@@ -981,7 +984,13 @@
        A click from the keyboard (Enter or Space on the focused button)
        sends once. */
     const stopRepeats = new Set();
-    for (const button of document.querySelectorAll('#keys button[data-keys]')) {
+    /* THE KEYS BAR, one behaviour wherever it is (a conversation's #keys, a machine's console): each button's
+       data-keys, sent to `sendKeys`, the focus given back by `focusBack`. */
+    function wireKeys(buttons, sendKeys, focusBack) {
+        for (const button of buttons) wireKey(button, sendKeys, focusBack);
+    }
+    wireKeys(document.querySelectorAll('#keys button[data-keys]'), (keys) => send(keys), () => focusTerminal());
+    function wireKey(button, send, focusTerminal) {
         const key = button.dataset.keys;
         let delay = null; let every = null;
         const stop = () => { clearTimeout(delay); clearInterval(every); delay = null; every = null; };
@@ -6127,6 +6136,8 @@
         /* A CALENDAR'S AGENDA (16-11): its events, under who has it -- read through Tether as the owner's own read
            (agenda.mjs), so the calendar need not stay open elsewhere. The owner's page only: a device reads no calendar. */
         if (t?.kind === 'calendar' && !DEVICE) parts.push(agendaPart(t));
+        /* A MACHINE'S SHARED CONSOLE (16-11): live, under who has it (sshconsole.mjs). The owner's page only: not given to devices. */
+        if (t?.kind === 'ssh' && !DEVICE) parts.push(...consoleParts(t, tether, from));
         /* A MAILBOX'S MAIL, AN ADDRESS BOOK'S CONTACTS (16-11): read the same way (mailview.mjs, contactview.mjs). */
         if (t?.kind === 'mail' && !DEVICE) parts.push(mailPart(t));
         if (t?.kind === 'contacts' && !DEVICE) parts.push(contactsPart(t));
@@ -6194,7 +6205,8 @@
             /* An MCP server's rights say themselves (Off / Read / All with approval / All / Custom): no levels' words under them. */
             if (t.kind !== 'mcp') parts.push(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
             /* Calls waiting for a person (propose/frame). Accept or refuse each. */
-            const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id);
+            /* A machine's terminal inputs are proposed beside its console (consoleAsk), not here again. */
+            const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id && !(t.kind === 'ssh' && !DEVICE && String(q.verb ?? '').startsWith('terminal.')));
             if (waiting.length) {
                 const box = el('div', 'as-users');
                 for (const q of waiting) {
@@ -6362,6 +6374,296 @@
             return;
         }
         agendaDays(holder, answer);
+    }
+    /* A MACHINE'S SHARED CONSOLE (16-11): the live SSH console of a machine asset, under who has it -- ONE shell that
+       the person and the conversations given the machine share (Tether's console.mjs, through sshconsole.mjs). Drawn by
+       the same terminal as a conversation's (terminalOptions, xterm: what the machine prints is never HTML here), with
+       the same keys bar (wireKeys). Big: most of the panel's height. Under it, the AI's proposals (Send / Edit / Refuse,
+       destructive marked, sent in two steps) and its inputs, then a short journal. Full screen: the console large and,
+       beside it (under it on a phone), the chat of the conversation that holds the machine (Parley's own view). The
+       person's key always wins; « Take back control », « Hidden input », « Hide from the AI », Ctrl C.
+       KEPT ACROSS PAINTS: the panel is drawn again with every Tether change, the console is not -- its element (and its
+       terminal, its socket) is the same one, moved into the new panel, its focus given back. */
+    const consoleViews = new Map();             /* target id -> view */
+    const SC_KEYS = [['esc', 'Esc'], ['tab', 'Tab'], ['left', '←'], ['down', '↓'], ['up', '↑'], ['right', '→'], ['enter', 'Enter'], ['stop', 'Ctrl+C']];
+    const SC_RISK = {
+        erase: ['set-sc-risk-erase', 'Erases files. No way back.'], disk: ['set-sc-risk-disk', 'Writes over a disk. No way back.'],
+        power: ['set-sc-risk-power', 'Stops or restarts the machine.'], rights: ['set-sc-risk-rights', 'Changes rights on the whole system.'],
+        other: ['set-sc-risk-other', 'Can break the machine.'],
+    };
+    const SC_EVENTS = {
+        'control taken back from the AI': ['set-sc-j-took', 'took back control'], 'input hidden: a password prompt': ['set-sc-j-prompt', 'password prompt: input hidden'],
+        'input hidden by the person': ['set-sc-j-hidden', 'hidden input'], 'hidden from the AI': ['set-sc-j-hide-ai', 'hidden from the AI'], 'shown to the AI again': ['set-sc-j-show-ai', 'shown to the AI again'],
+    };
+    const scButton = (cls, text) => { const b = el('button', cls, text); b.type = 'button'; return b; };
+    const hhmm = (at) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+    function consoleView(target) {
+        let v = consoleViews.get(target.id);
+        if (v) { v.target = target; return v; }
+        v = { id: target.id, target, state: null, socket: null, phase: 'connecting', focused: false, full: false, chat: null, chatOf: '', chatPick: '', waiting: [], opened: false, retry: 0, away: 0, from: '' };
+        consoleViews.set(target.id, v);
+        const root = el('div', 'sc'); root.dataset.target = target.id;
+        const presence = el('div', 'sc-presence'); presence.setAttribute('aria-live', 'polite');
+        const screen = el('div', 'sc-screen'); screen.setAttribute('role', 'log'); screen.setAttribute('aria-label', uiSaid('set-sc-console', 'Console'));
+        const banner = el('div', 'sc-state'); banner.setAttribute('aria-live', 'assertive');
+        const keys = el('div', 'sc-keys'); keys.setAttribute('role', 'group'); keys.setAttribute('aria-label', uiSaid('set-sc-keys', 'Keys'));
+        for (const [k, label] of SC_KEYS) { const b = scButton(k === 'stop' ? 'careful' : '', label); b.dataset.keys = k; keys.append(b); }
+        const take = scButton('danger sc-take', uiSaid('set-sc-take', 'Take back control')); take.hidden = true;
+        const hideAi = scButton('sc-hide-ai', uiSaid('set-sc-hide-ai', 'Hide from the AI')); hideAi.setAttribute('aria-pressed', 'false');
+        const secret = scButton('sc-secret', uiSaid('set-sc-secret', 'Hidden input')); secret.setAttribute('aria-pressed', 'false');
+        const ctrlc = scButton('quiet sc-ctrlc', 'Ctrl C'); ctrlc.title = uiSaid('set-sc-ctrlc', 'Interrupts what is running');
+        const full = scButton('quiet sc-full-btn', uiSaid('set-sc-full', 'Full screen')); full.setAttribute('aria-pressed', 'false');
+        const reopen = scButton('primary sc-reopen', uiSaid('set-sc-reopen', 'Open it again')); reopen.hidden = true;
+        const tools = el('div', 'sc-tools'); tools.append(take, hideAi, secret, el('span', 'sc-space'), ctrlc, full);
+        const main = el('div', 'sc-main'); main.append(presence, screen, banner, keys, tools);
+        /* Full screen: the chat of a conversation that holds the machine, beside the console. */
+        const chatHead = el('div', 'sc-chat-head');
+        const chatBox = el('div', 'sc-chat-thread');
+        const side = el('aside', 'sc-chat'); side.setAttribute('aria-label', uiSaid('set-sc-chat', 'Chat')); side.hidden = true; side.append(chatHead, chatBox);
+        root.append(main, side);
+        Object.assign(v, { root, presence, screen, banner, take, hideAi, secret, fullBtn: full, reopen, chatHead, chatBox, side });
+        const term = new Terminal({ ...terminalOptions(), scrollback: 3000 });
+        const fitter = new FitAddon.FitAddon(); term.loadAddon(fitter);
+        v.term = term; v.fit = () => { if (v.opened && screen.isConnected && screen.offsetWidth > 0) { try { fitter.fit(); } catch { /* not drawn yet */ } } };
+        new ResizeObserver(() => v.fit()).observe(screen);
+        const sendJson = (m) => { if (v.socket?.readyState === 1) v.socket.send(JSON.stringify(m)); };
+        const sendKeys = (data) => { if (v.socket?.readyState === 1) v.socket.send(new TextEncoder().encode(data)); };
+        v.sendJson = sendJson;
+        term.onData(sendKeys);
+        term.onResize(({ cols, rows }) => sendJson({ type: 'resize', cols, rows }));
+        keys.addEventListener('pointerdown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
+        wireKeys(keys.querySelectorAll('button[data-keys]'), sendKeys, () => term.focus());
+        take.addEventListener('click', () => { sendJson({ type: 'take-back' }); term.focus(); });
+        ctrlc.addEventListener('click', () => { sendJson({ type: 'interrupt' }); term.focus(); });
+        hideAi.addEventListener('click', () => { sendJson({ type: 'hide-ai', on: !(v.state?.hideAi) }); });
+        secret.addEventListener('click', () => { sendJson({ type: 'hidden', on: !(v.state?.hidden) }); term.focus(); });
+        full.addEventListener('click', () => consoleFull(v, !v.full));
+        reopen.addEventListener('click', () => { reopen.hidden = true; consoleConnect(v); });
+        /* Where the focus is, kept across paints: given back once the console is in the new panel. */
+        root.addEventListener('focusin', () => { v.focused = true; });
+        document.addEventListener('pointerdown', (event) => { if (!root.contains(event.target)) v.focused = false; }, true);
+        return v;
+    }
+    function consoleConnect(v) {
+        if (v.socket && v.socket.readyState <= 1) return;
+        v.phase = 'connecting'; consolePaint(v);
+        const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${scheme}://${location.host}${API}/tether/console?${new URLSearchParams({ target: v.id, cols: String(v.term.cols), rows: String(v.term.rows) })}`);
+        ws.binaryType = 'arraybuffer';
+        v.socket = ws;
+        ws.addEventListener('message', (event) => {
+            if (typeof event.data !== 'string') { v.term.write(new Uint8Array(event.data)); return; }
+            let m; try { m = JSON.parse(event.data); } catch { return; }
+            /* Ready: the screen so far comes next, drawn on a clean terminal (a page that came back draws it once). */
+            if (m.type === 'ready') { v.term.reset(); v.phase = 'live'; v.retry = 0; v.state = m.state; consolePaint(v); v.fit(); }
+            else if (m.type === 'state') { const was = v.state; v.state = m.state; consolePaint(v); if (was && !was.typing !== !m.state.typing) consoleSoon(v); }
+            else if (m.type === 'error') { v.phase = 'failed'; v.error = String(m.text ?? ''); consolePaint(v); }
+        });
+        ws.addEventListener('close', (event) => {
+            if (v.socket !== ws) return;
+            v.socket = null;
+            if (v.phase === 'failed') { v.reopen.hidden = false; return; }
+            if (event.code === 1000) { v.phase = 'closed'; consolePaint(v); return; }
+            /* Dropped: again in a moment while it is shown, said meanwhile; never its keys replayed. */
+            v.phase = 'connecting'; consolePaint(v);
+            if (v.root.isConnected && v.retry < 6) { v.retry++; setTimeout(() => { if (v.root.isConnected) consoleConnect(v); }, 1500 * v.retry); }
+            else { v.phase = 'closed'; consolePaint(v); }
+        });
+    }
+    /* After the AI typed: the journal and the proposals read again (a paint of the panel; the console stays). */
+    function consoleSoon(v) { clearTimeout(v.soon); v.soon = setTimeout(() => { if (v.root.isConnected) void repaintAsset(); }, 600); }
+    function consolePaint(v) {
+        const st = v.state ?? {};
+        const typing = st.typing ?? null;
+        v.root.classList.toggle('ai-typing', Boolean(typing));
+        v.root.classList.toggle('hidden-input', Boolean(st.hidden));
+        v.root.classList.toggle('hidden-ai', Boolean(st.hideAi));
+        /* Who has it: you, and each assistant on it -- what it does, in words, never by colour alone. */
+        const chips = [];
+        const me = el('span', `sc-chip me${typing ? '' : ' active'}`); me.append(el('span', 'sc-av', uiSaid('set-sc-you-av', 'Y')), el('span', '', uiSaid('set-sc-you', 'You')), el('small', '', st.hidden ? uiSaid('set-sc-you-hidden', 'typing (hidden)') : typing ? uiSaid('set-sc-you-watch', 'watching') : uiSaid('set-sc-you-control', 'in control')));
+        chips.push(me);
+        for (const a of st.agents ?? []) {
+            const doing = st.hideAi ? uiSaid('set-sc-ai-blind', 'sees nothing') : typing?.agent === a.id ? uiSaid('set-sc-ai-typing', 'typing') : v.waiting.some((q) => q.agent?.id === a.id) ? uiSaid('set-sc-ai-proposes', 'proposes') : uiSaid('set-sc-ai-watching', 'watching');
+            const c = el('span', `sc-chip ai${typing?.agent === a.id ? ' active' : ''}`); c.append(el('span', 'sc-av', uiSaid('set-sc-ai-av', 'AI')), el('span', '', a.name), el('small', '', doing));
+            chips.push(c);
+        }
+        if (!(st.agents ?? []).length) chips.push(el('small', 'hint', uiSaid('set-sc-no-ai', 'No assistant on it now')));
+        const live = el('span', `sc-live${v.phase === 'live' ? ' on' : ''}`, v.phase === 'live' ? uiSaid('set-sc-live', 'live') : v.phase === 'connecting' ? uiSaid('set-sc-connecting', 'connecting…') : uiSaid('set-sc-off', 'closed'));
+        v.presence.replaceChildren(...chips, el('span', 'sc-space'), live);
+        /* The one line that says the state (aria-live). */
+        let text; let tone = '';
+        if (v.phase === 'failed') { text = v.error || uiSaid('set-sc-failed', 'The console could not be opened.'); tone = 'bad'; }
+        else if (v.phase === 'closed') { text = uiSaid('set-sc-closed', 'The console is closed.'); tone = 'pause'; }
+        else if (v.phase === 'connecting') text = uiSaid('set-sc-connecting-long', 'Connecting to the machine…');
+        else if (st.hidden) { text = st.hidden === 'prompt' ? uiSaid('set-sc-hidden-prompt', 'Password asked: hidden input, the AI sees nothing.') : uiSaid('set-sc-hidden', 'Hidden input: the AI sees nothing.'); tone = 'secret'; }
+        else if (typing) { text = uiSaid('set-sc-typing', '{name} is typing. A key takes back control.', { name: typing.name }); tone = 'ai'; }
+        else if (st.hideAi) { text = uiSaid('set-sc-hidden-ai', 'Hidden from the AI until you show it.'); tone = 'pause'; }
+        else text = uiSaid('set-sc-control', 'You are in control.');
+        v.banner.dataset.tone = tone;
+        v.banner.replaceChildren(el('span', '', text), ...(v.phase === 'closed' || v.phase === 'failed' ? [v.reopen] : []));
+        if (v.phase === 'closed' || v.phase === 'failed') v.reopen.hidden = false;
+        v.take.hidden = !typing;
+        v.hideAi.setAttribute('aria-pressed', String(Boolean(st.hideAi)));
+        v.hideAi.textContent = st.hideAi ? uiSaid('set-sc-show-ai', 'Show to the AI') : uiSaid('set-sc-hide-ai', 'Hide from the AI');
+        v.secret.setAttribute('aria-pressed', String(Boolean(st.hidden)));
+    }
+    /* FULL SCREEN: the console large, the chat of its conversation beside it (under it on a phone). Esc (outside the
+       terminal, which keeps its Escape for the machine) or Back leaves. */
+    function consoleFull(v, on) {
+        if (v.full === on) return;
+        v.full = on;
+        v.root.classList.toggle('sc-full', on);
+        v.side.hidden = !on;
+        const b = v.fullBtn;
+        b.setAttribute('aria-pressed', String(on));
+        b.textContent = on ? uiSaid('set-sc-leave-full', 'Leave full screen') : uiSaid('set-sc-full', 'Full screen');
+        document.documentElement.toggleAttribute('data-sc-full', on);
+        /* Over the whole page, out of the panel (drawn again meanwhile, it holds a line in its place); back in it after. */
+        if (on) document.body.append(v.root);
+        else if (v.root.parentElement === document.body) { v.root.remove(); void repaintAsset(); }
+        if (on) {
+            v.fullStep = nav.over('console-full', () => consoleFull(v, false));
+            void consoleChat(v);
+        } else {
+            if (v.fullStep) { const step = v.fullStep; v.fullStep = null; nav.drop(step); }
+            v.chat?.destroy(); v.chat = null; v.chatOf = '';
+        }
+        requestAnimationFrame(() => { v.fit(); v.term.focus(); });
+    }
+    /* The conversations that hold the machine; the one whose chat is shown: picked, else the one on the console now,
+       else the conversation this panel is seen from, else the first. */
+    function consoleHolders(v) {
+        return Object.keys(v.target.grants ?? {}).filter((id) => id.startsWith('conversation:')).map((id) => id.slice('conversation:'.length)).filter((n) => conversations.some((c) => c.name === n));
+    }
+    function consoleChatOf(v) {
+        const holders = consoleHolders(v);
+        if (v.chatPick && holders.includes(v.chatPick)) return v.chatPick;
+        const on = (v.state?.agents ?? []).map((a) => String(a.id).replace(/^conversation:/, '')).find((n) => holders.includes(n));
+        return on ?? (holders.includes(v.from) ? v.from : holders[0] ?? '');
+    }
+    async function consoleChat(v) {
+        const holders = consoleHolders(v);
+        const name = consoleChatOf(v);
+        const label = (n) => conversations.find((c) => c.name === n)?.title || n;
+        if (holders.length > 1) {
+            const pick = el('select', 'sc-chat-pick'); pick.setAttribute('aria-label', uiSaid('set-sc-chat-of', 'Chat of'));
+            for (const n of holders) { const o = el('option', '', label(n)); o.value = n; o.selected = n === name; pick.append(o); }
+            pick.addEventListener('change', () => { v.chatPick = pick.value; void consoleChat(v); });
+            v.chatHead.replaceChildren(el('b', '', uiSaid('set-sc-chat-of', 'Chat of')), pick);
+        } else v.chatHead.replaceChildren(el('b', '', name ? label(name) : uiSaid('set-sc-chat', 'Chat')));
+        if (!name) { v.chat?.destroy(); v.chat = null; v.chatOf = ''; v.chatBox.replaceChildren(el('p', 'hint', uiSaid('set-sc-no-holder', 'No conversation has this machine.'))); return; }
+        if (v.chat && v.chatOf === name) return;
+        v.chat?.destroy(); v.chat = null; v.chatOf = name;
+        v.chatBox.replaceChildren();
+        if (!conversations.find((c) => c.name === name)?.talk) { v.chatBox.append(el('p', 'hint', uiSaid('set-sc-chat-off', 'The chat of this conversation is off.'))); return; }
+        const [{ mount }, words] = await Promise.all([parleyUi(), readWords()]);
+        if (!v.full || v.chatOf !== name) return;
+        v.chatBox.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+        /* Parley's own chat view, as in the conversation: its thread read and written the same way. */
+        v.chat = mount(v.chatBox, {
+            words, view: chatView, window: windowFor(chatWindow),
+            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then(machineLines),
+            search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
+            send: (text, answers, files) => post(talkPath(name), { text, answers, quick: true, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}) }),
+            schemes: { mail: { icon: 'mail', open: (ref, label2) => { void openMailRef(ref, { label: label2, of: name }); } } },
+        });
+    }
+    /* A console no longer shown for a while lets its shell go (the person's side): opened again when shown. */
+    setInterval(() => {
+        for (const v of consoleViews.values()) {
+            if (v.root.isConnected) { v.away = 0; continue; }
+            v.away += 1;
+            if (v.away >= 3 && v.socket) { const ws = v.socket; v.socket = null; v.phase = 'closed'; try { ws.close(); } catch { /* gone */ } }
+        }
+    }, 10_000);
+    /* The parts: the console (kept), then what the AI proposes and has typed, then the journal (drawn each paint). */
+    function consoleParts(target, tether, from) {
+        const v = consoleView(target);
+        v.from = from || '';
+        v.waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === target.id && String(q.verb ?? '').startsWith('terminal.'));
+        const hadFocus = v.focused;
+        let tries = 0;
+        queueMicrotask(function place() {
+            /* Put in the panel at the end of its paint; a paint overtaken by another never puts it: given up after a while. */
+            if (!v.root.isConnected) { if (++tries < 120) requestAnimationFrame(place); return; }
+            if (!v.opened) { v.term.open(v.screen); v.opened = true; }
+            v.fit();
+            if (!v.socket) consoleConnect(v);
+            if (hadFocus) v.term.focus();
+        });
+        consolePaint(v);
+        const ai = el('div', 'sc-ai'); ai.setAttribute('aria-live', 'polite');
+        for (const q of v.waiting) ai.append(consoleAsk(q));
+        const typed = el('div', 'sc-typed');
+        ai.append(typed);
+        const journal = el('div', 'sc-journal');
+        journal.append(el('p', 'hint', uiSaid('set-sc-j-empty', 'Each AI input is kept here.')));
+        void post(`${API}/tether/console-journal`, { target: target.id }).then((r) => {
+            const lines = Array.isArray(r?.lines) ? r.lines : [];
+            const inputs = lines.filter((l) => l.verb && l.ok === true).slice(0, 3);
+            if (inputs.length) {
+                typed.replaceChildren(el('h4', '', uiSaid('set-sc-typed', 'Its last inputs')));
+                for (const l of inputs) { const row = el('div', 'sc-typed-row'); row.append(el('small', '', hhmm(l.at)), el('code', '', l.detail)); typed.append(row); }
+            } else if (!v.waiting.length) typed.replaceChildren(el('p', 'hint', uiSaid('set-sc-ai-none', 'Nothing proposed. It follows the console.')));
+            if (!lines.length) return;
+            journal.replaceChildren(...lines.map((l) => {
+                const row = el('div', 'sc-j-row');
+                row.append(el('small', 'sc-j-at', hhmm(l.at)));
+                if (l.op === 'console') {
+                    const [k, t] = SC_EVENTS[l.detail] ?? ['', l.detail];
+                    row.append(el('b', '', l.by ? uiSaid('set-sc-you', 'You') : uiSaid('set-sc-console', 'Console')), el('span', '', k ? uiSaid(k, t) : t));
+                } else {
+                    row.append(el('b', '', l.agent ?? uiSaid('set-sc-ai-av', 'AI')), el('code', '', l.detail));
+                    const mark = l.decision === 'no' ? uiSaid('set-sc-j-refused', 'refused') : l.decision === 'stopped' || l.decision === 'timeout' || l.decision === 'withdrawn' ? uiSaid('set-sc-j-dropped', 'not sent')
+                        : l.ok === false ? uiSaid('set-sc-j-failed', 'not done') : l.edited ? uiSaid('set-sc-j-edited', 'edited by you') : '';
+                    if (mark) row.append(el('span', 'sc-j-mark', mark));
+                    if (l.risk) row.append(el('span', 'sc-risk', uiSaid('set-sc-destructive', 'Destructive')));
+                }
+                return row;
+            }));
+        }).catch(() => {});
+        return [
+            { title: uiSaid('set-sc-title', 'Console'), body: [v.full ? el('p', 'hint', uiSaid('set-sc-in-full', 'The console is in full screen.')) : v.root], cls: 'as-console-part' },
+            { title: uiSaid('set-sc-ai-title', 'Assistant'), body: [ai], cls: 'as-console-ai' },
+            { title: uiSaid('set-sc-journal', 'Journal'), body: [journal], cls: 'as-console-journal' },
+        ];
+    }
+    /* A PROPOSAL: why, the line whole, Send / Edit / Refuse -- the same decision as any waiting call (decideTether);
+       a destructive one marked, said in plain words, and sent in two steps. */
+    function consoleAsk(q) {
+        const risk = q.destructive ?? q.card?.destructive ?? '';
+        const card = el('div', `sc-ask${risk ? ' risky' : ''}`); card.dataset.request = q.id;
+        const head = el('div', 'sc-ask-head');
+        head.append(el('span', 'sc-ai-tag', uiSaid('set-sc-ai-av', 'AI')), el('b', '', uiSaid('set-sc-to-approve', 'To approve')), el('small', 'hint', q.agent?.name ?? ''), el('span', 'sc-space'));
+        if (risk) head.append(el('span', 'sc-risk', uiSaid('set-sc-destructive', 'Destructive')));
+        card.append(head);
+        if (q.why) card.append(el('p', 'sc-why', q.why));
+        const key = (Array.isArray(q.editable) && q.editable[0]) || (q.verb === 'terminal.run' ? 'command' : 'text');
+        const line = String(q.card?.[key] ?? q.detail ?? '');
+        card.append(el('code', 'sc-cmd', line));
+        if (q.verb === 'terminal.run') card.append(el('p', 'hint', uiSaid('set-sc-run-apart', 'Run apart, shown in the console.')));
+        if (risk) { const [k, t] = SC_RISK[risk] ?? SC_RISK.other; card.append(el('p', 'sc-risk-say', uiSaid(k, t))); }
+        const send = scButton(risk ? 'danger' : 'primary', risk ? uiSaid('set-sc-send-anyway', 'Send anyway') : uiSaid('set-sc-send', 'Send'));
+        const edit = scButton('', uiSaid('set-sc-edit', 'Edit'));
+        const refuse = scButton('quiet', uiSaid('set-sc-refuse', 'Refuse'));
+        const acts = el('div', 'sc-ask-acts'); acts.append(send, edit, refuse);
+        let armed = 0;
+        send.addEventListener('click', () => {
+            if (risk && Date.now() - armed > 5000) { armed = Date.now(); send.textContent = uiSaid('set-sc-sure', 'Sure? Send'); return; }
+            send.disabled = true; void decideTether(q.id, 'yes', repaintAsset);
+        });
+        refuse.addEventListener('click', () => { refuse.disabled = true; void decideTether(q.id, 'no', repaintAsset); });
+        card.append(acts);
+        if (Array.isArray(q.editable) && q.editable.length) {
+            const form = el('div', 'sc-edit'); form.hidden = true;
+            const area = el('textarea'); area.rows = 2; area.value = line; area.spellcheck = false; area.setAttribute('aria-label', uiSaid('set-sc-edit-line', 'The line to send'));
+            const go = scButton('primary', uiSaid('set-sc-send-edited', 'Send as edited'));
+            go.addEventListener('click', () => { if (!area.value.trim()) return; go.disabled = true; void decideTether(q.id, 'yes', repaintAsset, { [key]: area.value }); });
+            form.append(area, go);
+            edit.addEventListener('click', () => { form.hidden = !form.hidden; send.hidden = !form.hidden; if (!form.hidden) area.focus(); });
+            card.append(form);
+        } else edit.hidden = true;
+        return card;
     }
     function agendaPart(target) {
         const holder = el('div', 'as-agenda');
