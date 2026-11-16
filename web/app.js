@@ -4880,7 +4880,7 @@
     /* `work(item)` for each, `n` at a time. */
     const inTurns = async (items, n, work) => { let i = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) await work(items[i++]); })); };
     /* When a known row was true: the time today, else the day. */
-    const asOfText = (at) => { const d = new Date(at); if (!at || Number.isNaN(d.getTime())) return 'not read yet'; return `as of ${d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString()}`; };
+    const asOfText = (at) => { const d = new Date(at); if (!at || Number.isNaN(d.getTime())) return 'not read yet'; return `as of ${d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : d.toLocaleDateString()}`; };
     /* What a row is, for the filter: a branch the remote has and that is ahead of it, a branch it does not have, nothing to send. */
     const kindOfRow = (out) => (out?.state !== 'ahead' ? 'none' : out.targetExists === false ? 'new' : 'update');
     /* A branch that could not be read is not "nothing to send": it stays listed, under every filter, with why. */
@@ -6125,6 +6125,9 @@
         /* A CALENDAR'S AGENDA (16-11): its events, under who has it -- read through Tether as the owner's own read
            (agenda.mjs), so the calendar need not stay open elsewhere. The owner's page only: a device reads no calendar. */
         if (t?.kind === 'calendar' && !DEVICE) parts.push(agendaPart(t));
+        /* A MAILBOX'S MAIL, AN ADDRESS BOOK'S CONTACTS (16-11): read the same way (mailview.mjs, contactview.mjs). */
+        if (t?.kind === 'mail' && !DEVICE) parts.push(mailPart(t));
+        if (t?.kind === 'contacts' && !DEVICE) parts.push(contactsPart(t));
         /* WHAT IS IN IT. */
         if (copyBox) {
             /* Its files: at once in a conversation; in the menu, a button opens them in the panel (the files sheet, moved in). */
@@ -6301,14 +6304,7 @@
         fact(uiSaid('set-ag-organizer', 'Organizer'), ev.organizer ? document.createTextNode(ev.organizer) : null);
         if (Number.isInteger(ev.attendees) && ev.attendees > 0) fact(uiSaid('set-ag-guests', 'Guests'), document.createTextNode(String(ev.attendees)));
         /* ITS INVITATION'S TEXT (16-11): text nodes only -- never HTML, nothing in it runs; a web address (https) alone is a link. */
-        if (ev.notes) {
-            const text = el('div', 'ag-notes');
-            for (const part of String(ev.notes).split(/(https:\/\/[^\s<>"')\]]+)/)) {
-                if (/^https:\/\//.test(part)) { const a = el('a', '', part.length > 60 ? `${part.slice(0, 57)}…` : part); a.href = part; a.target = '_blank'; a.rel = 'noopener noreferrer'; text.append(a); }
-                else if (part) text.append(document.createTextNode(part));
-            }
-            fact(uiSaid('set-ag-notes', 'Invitation'), text);
-        }
+        if (ev.notes) fact(uiSaid('set-ag-notes', 'Invitation'), linkedText('ag-notes', ev.notes));
         if (ev.show && ev.show !== 'busy') fact(uiSaid('set-ag-shown', 'Shown as'), document.createTextNode(uiSaid(`set-ag-show-${ev.show}`, { free: 'Free', tentative: 'Tentative', away: 'Away', elsewhere: 'Elsewhere' }[ev.show] ?? ev.show)));
         box.append(head, facts);
         return box;
@@ -6380,6 +6376,210 @@
         const bar = el('div', 'ag-bar'); bar.append(prev, today, next);
         queueMicrotask(() => { void agendaFill(holder, target.id); });
         return { title: uiSaid('set-ag-title', 'Agenda'), extra: [bar], body: [holder], cls: 'as-agenda-part' };
+    }
+    /* TEXT WITH ITS LINKS (16-11): text nodes only -- never HTML, nothing in it runs; a web address (https) alone is a
+       link. An invitation's text, a mail's words, a contact's notes. */
+    function linkedText(cls, text) {
+        const box = el('div', cls);
+        for (const part of String(text ?? '').split(/(https:\/\/[^\s<>"')\]]+)/)) {
+            if (/^https:\/\//.test(part)) { const a = el('a', '', part.length > 60 ? `${part.slice(0, 57)}…` : part); a.href = part; a.target = '_blank'; a.rel = 'noopener noreferrer'; box.append(a); }
+            else if (part) box.append(document.createTextNode(part));
+        }
+        return box;
+    }
+    /* A READ OF A MAILBOX OR AN ADDRESS BOOK (16-11), kept PEEK_KEEP_MS as the agenda's: a read is journaled by Tether,
+       which paints the panel again -- a paint reads nothing. `key` -> { at, answer } or { at, pending }. */
+    const PEEK_KEEP_MS = 5 * 60_000;
+    const peekKept = new Map();
+    function peekRead(key, path, body, failed, { fresh = false } = {}) {
+        const kept = peekKept.get(key);
+        if (kept && !fresh && (kept.pending || Date.now() - kept.at < PEEK_KEEP_MS)) return kept.pending ?? kept.answer;
+        const pending = post(`${API}/tether/${path}`, body)
+            .then((answer) => { peekKept.set(key, { at: Date.now(), answer }); return answer; })
+            .catch((error) => { peekKept.delete(key); return { error: error.message || failed }; });
+        peekKept.set(key, { at: Date.now(), pending });
+        return pending;
+    }
+    const peekState = new Map();        /* target -> { folder, text, open }: kept across paints */
+    let peekFocus = '';                 /* the search box typed in, given its focus again after a paint */
+    const peekOf = (id) => { if (!peekState.has(id)) peekState.set(id, { folder: 'inbox', text: '', draft: '', open: '' }); return peekState.get(id); };
+    /* A search box: Enter searches, emptied it lists again; what is typed survives a paint. */
+    function peekSearch(id, label, onSearch) {
+        const s = peekOf(id);
+        const form = el('form', 'mv-search'); form.setAttribute('role', 'search');
+        const input = el('input'); input.type = 'search'; input.placeholder = label; input.setAttribute('aria-label', label); input.maxLength = 200; input.value = s.draft; input.spellcheck = false;
+        input.addEventListener('input', () => { s.draft = input.value; if (!input.value.trim() && s.text) { s.text = ''; onSearch(); } });
+        input.addEventListener('focus', () => { peekFocus = id; });
+        input.addEventListener('blur', () => { if (input.isConnected && peekFocus === id) peekFocus = ''; });
+        form.addEventListener('submit', (event) => { event.preventDefault(); s.text = input.value.trim(); s.open = ''; onSearch(); });
+        form.append(input);
+        if (peekFocus === id) queueMicrotask(() => { if (input.isConnected) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } });
+        return form;
+    }
+    /* A mail's time: the hour today, else its day. */
+    const mailWhen = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+    };
+    const fileSize = (n) => (!Number.isFinite(n) ? '' : n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+    const peekFacts = () => {
+        const facts = el('dl', 'ag-facts mv-facts');
+        const fact = (k, v) => { if (!v) return; facts.append(el('dt', '', k)); const dd = el('dd'); dd.append(typeof v === 'string' ? document.createTextNode(v) : v); facts.append(dd); };
+        return { facts, fact };
+    };
+
+    /* THE MAIL OF A MAILBOX ASSET (16-11): its latest messages (25, newest first: who, subject, when, unread, a file);
+       a search through Tether's mail-search; a folder on Microsoft. A message opened: its words AS TEXT, its files
+       named with their size, never opened; its pictures never loaded. Never marked read (Tether peeks). Read only. */
+    async function mailOpenFill(box, target, folder, m) {
+        const body = box.querySelector('.mv-body');
+        if (body.dataset.filled) return;
+        body.dataset.filled = '1';
+        body.replaceChildren(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        const got = await peekRead(`mail-read|${target}|${folder}|${m.id}`, 'mail-read', { target, id: m.id, folder }, uiSaid('set-mv-failed-one', 'This message could not be read.'));
+        if (!body.isConnected) return;
+        if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
+        const { facts, fact } = peekFacts();
+        fact(uiSaid('set-mv-from', 'From'), got.from);
+        fact(uiSaid('set-mv-to', 'To'), got.to);
+        fact(uiSaid('set-mv-cc', 'Cc'), got.cc);
+        if (got.date) fact(uiSaid('set-ag-when', 'When'), new Date(got.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }));
+        if ((got.attachments ?? []).length) {
+            const files = el('ul', 'mv-files');
+            for (const a of got.attachments) { const li = el('li'); li.append(el('span', 'mv-file', a.name)); const size = fileSize(a.size); if (size) li.append(el('span', 'hint', ` ${size}`)); files.append(li); }
+            fact(uiSaid('set-mv-files', 'Files'), files);
+        }
+        const text = linkedText('ag-notes mv-text', got.text || uiSaid('set-mv-empty', '(no text)'));
+        const out = [facts, text];
+        if (got.cut) out.push(el('p', 'hint', uiSaid('set-mv-cut', 'Long message: its start only')));
+        /* The whole mail, as it was written: the mail viewer of .eml files (its pictures blocked unless asked). */
+        if (got.ref) { const open = el('button', 'quiet', uiSaid('set-mv-viewer', 'Open in the viewer')); open.type = 'button'; open.addEventListener('click', () => { void openMailRef(got.ref, { label: m.subject, of: '' }); }); out.push(open); }
+        body.replaceChildren(...out);
+    }
+    function mailRow(target, folder, m) {
+        const s = peekOf(target);
+        const box = el('details', 'ag-event mv-msg'); if (m.unread) box.dataset.unread = '1';
+        const head = el('summary', 'ag-row mv-row');
+        const mark = el('span', 'mv-mark');
+        if (m.unread) { mark.append(el('span', 'mv-dot')); mark.title = uiSaid('set-mv-unread', 'Unread'); mark.setAttribute('aria-label', mark.title); }
+        const what = el('span', 'ag-what');
+        what.append(el('span', 'mv-from', m.from || '—'));
+        const subj = el('span', 'ag-title mv-subject', m.subject);
+        what.append(subj);
+        const side = el('span', 'mv-side');
+        if (m.attachments) { const clip = el('span', 'mv-clip'); clip.append(window.clavariumIcons?.icon('paperclip', 'mv-svg') ?? document.createTextNode('+')); clip.title = uiSaid('set-mv-has-files', 'Has files'); clip.setAttribute('aria-label', clip.title); side.append(clip); }
+        side.append(el('span', 'ag-time', mailWhen(m.date)));
+        head.append(mark, what, side);
+        const body = el('div', 'mv-body');
+        box.append(head, body);
+        box.addEventListener('toggle', () => { if (box.open) { s.open = m.id; void mailOpenFill(box, target, folder, m); } else if (s.open === m.id) s.open = ''; });
+        if (s.open === m.id) { box.open = true; }
+        return box;
+    }
+    async function mailFill(holder, target, opts) {
+        const s = peekOf(target);
+        holder.setAttribute('aria-busy', 'true');
+        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        const answer = await peekRead(`mail-list|${target}|${s.folder}|${s.text}`, 'mail-list', { target, folder: s.folder, text: s.text }, uiSaid('set-mv-failed', 'The mailbox could not be read.'), opts);
+        holder.removeAttribute('aria-busy');
+        if (!holder.isConnected) return;
+        if (answer.error) {
+            const again = el('button', '', uiSaid('set-ag-again', 'Try again')); again.type = 'button';
+            again.addEventListener('click', () => { void mailFill(holder, target, { fresh: true }); });
+            holder.replaceChildren(el('p', 'error', answer.error), again);
+            return;
+        }
+        const pick = holder.closest('.as-mail-part')?.querySelector('.mv-folder');
+        if (pick && (answer.folders ?? []).length > 1 && !pick.options.length) {
+            for (const f of answer.folders) { const o = el('option', '', uiSaid(`set-mv-f-${f}`, { inbox: 'Inbox', sent: 'Sent', drafts: 'Drafts', archive: 'Archive', junk: 'Junk', trash: 'Deleted' }[f] ?? f)); o.value = f; pick.append(o); }
+            pick.value = s.folder; pick.hidden = false;
+        }
+        const list = el('div', 'ag-days mv-list');
+        for (const m of answer.messages ?? []) list.append(mailRow(target, answer.folder, m));
+        const notes = [];
+        if (!(answer.messages ?? []).length) notes.push(el('p', 'hint', answer.text ? uiSaid('set-mv-nothing', 'Nothing found') : uiSaid('set-mv-none', 'No message')));
+        if (answer.more) notes.push(el('p', 'hint', uiSaid('set-mv-more', 'The latest only')));
+        if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-mv-partial', 'No unread or file marks, for now')));
+        holder.replaceChildren(...((answer.messages ?? []).length ? [list] : []), ...notes);
+    }
+    function mailPart(target) {
+        const holder = el('div', 'as-agenda as-mail');
+        const s = peekOf(target.id);
+        const search = peekSearch(target.id, uiSaid('set-mv-search', 'Search mail'), () => { void mailFill(holder, target.id); });
+        const pick = el('select', 'mv-folder'); pick.hidden = true; pick.setAttribute('aria-label', uiSaid('set-mv-folder', 'Folder'));
+        pick.addEventListener('change', () => { s.folder = pick.value; s.open = ''; void mailFill(holder, target.id); });
+        const again = el('button', 'quiet', '↻'); again.type = 'button'; again.title = uiSaid('set-mv-again', 'Read again'); again.setAttribute('aria-label', again.title);
+        again.addEventListener('click', () => { void mailFill(holder, target.id, { fresh: true }); });
+        const bar = el('div', 'ag-bar mv-bar'); bar.append(pick, again);
+        queueMicrotask(() => { void mailFill(holder, target.id); });
+        return { title: uiSaid('set-mv-title', 'Mail'), extra: [bar], body: [search, holder], cls: 'as-agenda-part as-mail-part' };
+    }
+
+    /* THE CONTACTS OF AN ADDRESS BOOK ASSET (16-11): name, email, phone, company; a search through Tether's
+       contacts-search; a contact opened: its details as text. Read only. */
+    async function contactOpenFill(box, target, c) {
+        const body = box.querySelector('.mv-body');
+        if (body.dataset.filled) return;
+        body.dataset.filled = '1';
+        body.replaceChildren(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        const got = await peekRead(`contact|${target}|${c.id}`, 'contact', { target, id: c.id }, uiSaid('set-ct-failed-one', 'This contact could not be read.'));
+        if (!body.isConnected) return;
+        if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
+        const { facts, fact } = peekFacts();
+        const several = (items, scheme) => { if (!items?.length) return null; const box = el('span', 'mv-lines'); for (const v of items) { const a = el('a', '', v); const bare = v.replace(/ \([^)]*\)$/, ''); a.href = `${scheme}:${scheme === 'tel' ? bare.replace(/[^\d+]/g, '') : bare}`; box.append(a); } return box; };
+        fact(uiSaid('set-ct-email', 'Email'), several(got.emails, 'mailto'));
+        fact(uiSaid('set-ct-phone', 'Phone'), several(got.phones, 'tel'));
+        fact(uiSaid('set-ct-company', 'Company'), got.company);
+        const WORD = { title: uiSaid('set-ct-f-title', 'Title'), birthday: uiSaid('set-ct-f-birthday', 'Birthday'), address: uiSaid('set-ct-f-address', 'Address') };
+        for (const [k, v] of got.facts ?? []) { const [base, kind] = /^(\w+)(?: \((.*)\))?$/.exec(k)?.slice(1) ?? [k]; fact(`${WORD[base] ?? base}${kind ? ` (${kind})` : ''}`, v); }
+        if (got.notes) fact(uiSaid('set-ct-notes', 'Notes'), linkedText('ag-notes', got.notes));
+        body.replaceChildren(facts);
+    }
+    function contactRow(target, c) {
+        const s = peekOf(target);
+        const box = el('details', 'ag-event ct-person');
+        const head = el('summary', 'ag-row ct-row');
+        const what = el('span', 'ag-what');
+        what.append(el('span', 'ag-title', c.name));
+        const sub = [c.emails?.[0], c.company].filter(Boolean).join(' · ');
+        if (sub) what.append(el('span', 'ag-where hint', sub));
+        head.append(what, el('span', 'ag-time ct-phone', c.phones?.[0] ?? ''));
+        box.append(head, el('div', 'mv-body'));
+        box.addEventListener('toggle', () => { if (box.open) { s.open = c.id; void contactOpenFill(box, target, c); } else if (s.open === c.id) s.open = ''; });
+        if (s.open === c.id) box.open = true;
+        return box;
+    }
+    async function contactsFill(holder, target, opts) {
+        const s = peekOf(target);
+        holder.setAttribute('aria-busy', 'true');
+        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        const answer = await peekRead(`contacts|${target}|${s.text}`, 'contacts', { target, text: s.text }, uiSaid('set-ct-failed', 'The address book could not be read.'), opts);
+        holder.removeAttribute('aria-busy');
+        if (!holder.isConnected) return;
+        if (answer.error) {
+            const again = el('button', '', uiSaid('set-ag-again', 'Try again')); again.type = 'button';
+            again.addEventListener('click', () => { void contactsFill(holder, target, { fresh: true }); });
+            holder.replaceChildren(el('p', 'error', answer.error), again);
+            return;
+        }
+        const list = el('div', 'ag-days mv-list ct-list');
+        for (const c of answer.contacts ?? []) list.append(contactRow(target, c));
+        const notes = [];
+        if (!(answer.contacts ?? []).length) notes.push(el('p', 'hint', answer.text ? uiSaid('set-mv-nothing', 'Nothing found') : uiSaid('set-ct-none', 'No contact')));
+        if (answer.more) notes.push(el('p', 'hint', uiSaid('set-ct-more', 'Some contacts not shown: search')));
+        if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-ct-partial', 'No company in the list, for now')));
+        holder.replaceChildren(...((answer.contacts ?? []).length ? [list] : []), ...notes);
+    }
+    function contactsPart(target) {
+        const holder = el('div', 'as-agenda as-contacts');
+        const search = peekSearch(target.id, uiSaid('set-ct-search', 'Search contacts'), () => { void contactsFill(holder, target.id); });
+        const again = el('button', 'quiet', '↻'); again.type = 'button'; again.title = uiSaid('set-mv-again', 'Read again'); again.setAttribute('aria-label', again.title);
+        again.addEventListener('click', () => { void contactsFill(holder, target.id, { fresh: true }); });
+        const bar = el('div', 'ag-bar mv-bar'); bar.append(again);
+        queueMicrotask(() => { void contactsFill(holder, target.id); });
+        return { title: uiSaid('set-ct-title', 'Contacts'), extra: [bar], body: [search, holder], cls: 'as-agenda-part as-contacts-part' };
     }
     const ASSET_WORD = { folder: 'Folder', git: 'Repository', mailbox: 'Mailbox', agenda: 'Calendar', contacts: 'Contacts', secret: 'Secret', list: LISTS_WORD.one, acces: 'Access' };
     /* Under its name: its kind (its group, a chip before it, in the menu). */
@@ -10522,7 +10722,7 @@
     const whenOf = (iso) => {
         const d = new Date(iso); if (Number.isNaN(d.getTime())) return '';
         const now = new Date();
-        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
         return d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
     };
     const innerOf = (name) => (filesAt ? `${filesAt}/${name}` : name);

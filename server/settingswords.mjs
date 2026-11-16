@@ -312,6 +312,19 @@ export const SETTINGS_WORDS_FR = {
     'set-ag-when': 'Quand', 'set-ag-where': 'Où', 'set-ag-link': 'Lien', 'set-ag-join': 'Rejoindre en ligne', 'set-ag-organizer': 'Organisateur',
     'set-ag-guests': 'Invités', 'set-ag-notes': 'Invitation', 'set-ag-shown': 'Affiché comme', 'set-ag-show-free': 'Libre', 'set-ag-show-tentative': 'Provisoire',
     'set-ag-show-away': 'Absent', 'set-ag-show-elsewhere': 'Ailleurs',
+    /* A mailbox's mail, an address book's contacts, in their asset panel (mailview.mjs, contactview.mjs, 16-11). */
+    'set-mv-title': 'Courrier', 'set-mv-search': 'Chercher un message', 'set-mv-folder': 'Dossier', 'set-mv-again': 'Relire',
+    'set-mv-failed': 'Boîte illisible pour le moment.', 'set-mv-failed-one': 'Message illisible pour le moment.',
+    'set-mv-none': 'Aucun message', 'set-mv-nothing': 'Rien trouvé', 'set-mv-more': 'Les plus récents seulement',
+    'set-mv-partial': 'Sans non lu ni pièces jointes, pour l\'instant', 'set-mv-unread': 'Non lu', 'set-mv-has-files': 'Pièces jointes',
+    'set-mv-from': 'De', 'set-mv-to': 'À', 'set-mv-cc': 'Cc', 'set-mv-files': 'Pièces jointes', 'set-mv-empty': '(sans texte)',
+    'set-mv-cut': 'Message long : son début seulement', 'set-mv-viewer': 'Ouvrir dans le lecteur',
+    'set-mv-f-inbox': 'Boîte de réception', 'set-mv-f-sent': 'Envoyés', 'set-mv-f-drafts': 'Brouillons', 'set-mv-f-archive': 'Archives',
+    'set-mv-f-junk': 'Indésirables', 'set-mv-f-trash': 'Supprimés',
+    'set-ct-title': 'Contacts', 'set-ct-search': 'Chercher un contact', 'set-ct-failed': 'Carnet illisible pour le moment.',
+    'set-ct-failed-one': 'Contact illisible pour le moment.', 'set-ct-none': 'Aucun contact', 'set-ct-more': 'Certains contacts masqués : cherchez',
+    'set-ct-partial': 'Sans société dans la liste, pour l\'instant', 'set-ct-email': 'Courriel', 'set-ct-phone': 'Téléphone', 'set-ct-company': 'Société',
+    'set-ct-f-title': 'Fonction', 'set-ct-f-birthday': 'Anniversaire', 'set-ct-f-address': 'Adresse', 'set-ct-notes': 'Notes',
     'set-ml-short': 'Manque de mémoire', 'set-ml-short-what': 'La plus grosse machine', 'set-ml-force': 'Forcer l’arrêt', 'set-ml-sleep': 'Mettre en veille', 'set-ml-alert': 'Alerter seulement',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

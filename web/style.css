@@ -1290,6 +1290,36 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
   .ag-row { grid-template-columns: 3.8em minmax(0, 1fr); gap: 6px; }
   .ag-facts { padding-left: 6px; }
 }
+/* A MAILBOX'S MAIL, AN ADDRESS BOOK'S CONTACTS (16-11, app.js mailPart, contactsPart): the agenda's rows, a search box
+   above. A message opened shows its words as text; a contact, its details. Read only. */
+.mv-search input { width: 100%; box-sizing: border-box; }
+.mv-bar select { padding: 4px 8px; }
+.mv-list { gap: 1px; }
+.ag-row.mv-row { grid-template-columns: 10px minmax(0, 1fr) auto; }
+.ag-row.ct-row { grid-template-columns: minmax(0, 1fr) auto; }
+.mv-mark { align-self: center; display: flex; justify-content: center; }
+.mv-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brass-ink); }
+.mv-from { font-size: .8125rem; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-msg .mv-subject { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-msg[data-unread] .mv-subject, .mv-msg[data-unread] .mv-from { font-weight: 600; color: var(--ink); }
+.mv-msg[open] .mv-subject { white-space: normal; overflow-wrap: anywhere; }
+.mv-side { display: flex; align-items: baseline; gap: 6px; }
+.mv-clip { color: var(--ink2); display: inline-flex; align-self: center; }
+.mv-clip svg { width: 14px; height: 14px; }
+.ag-facts.mv-facts { padding-left: 22px; }
+.ct-person .ag-facts.mv-facts { padding-left: 6px; }
+.mv-body { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
+.mv-body > .ag-notes, .mv-body > .hint, .mv-body > button { margin: 0 6px 0 22px; font-size: .8125rem; }
+.mv-body > button { align-self: flex-start; padding: 3px 10px; min-height: 0; }
+.mv-text { max-height: 28em; color: var(--ink); }
+.mv-files { margin: 0; padding: 0; list-style: none; }
+.mv-file { overflow-wrap: anywhere; }
+.mv-lines { display: flex; flex-direction: column; }
+.mv-lines a, .mv-body a { color: var(--brass-ink); }
+@media (max-width: 600px) {
+  .ag-facts.mv-facts { padding-left: 6px; }
+  .mv-body > .ag-notes, .mv-body > .hint, .mv-body > button { margin-left: 6px; }
+}
 .as-foot { margin-top: 10px; }
 .as-form { display: flex; flex-direction: column; gap: 8px; }
 .as-form h3 { margin: 0; font-size: 1.125rem; }
