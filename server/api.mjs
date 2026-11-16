@@ -172,6 +172,7 @@
  *   POST /api/setup/drop                    {id}: something an import waits for, not wanted after all
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
  *   GET  /api/mail/open?ref=mail:...&c=   GET /api/mail/page?ref=...   a mail cited by its reference, read now (mailref.mjs)
+ *   POST /api/tether/agenda                 {target, from?, to?}: a calendar's events of a window, read now (agenda.mjs)
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>[&dir=<subfolders>&exists=keep|replace|skip&batch=<id>]  the body IS the file
  *   GET  /api/files/thumb|text   POST /api/files/save|make|rename|move|remove|taken   ?c=...&r=...&p=...   (see files.mjs)
  *
@@ -188,6 +189,7 @@ import { readRights, typeOf, nameOf } from './grants.mjs';
 import { VmUnknown } from './vm.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { mailRoute } from './mailref.mjs';
+import { readAgenda } from './agenda.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
@@ -721,6 +723,9 @@ export async function handleApi(request, response, conversations, headers, resou
         /* A browser taken away: its tokens and its socket go too. */
         if (tetherOp && tethers && mcpGone?.kind === 'browser') { const r = await tethers.act('remove-target', body, ''); if (!r.ok) throw new Refusal(400, r.text); tethers.browsers?.forget(mcpGone.id); return send(200, r.data ?? { ok: true }), true; }
         if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
+        /* A calendar's agenda, read now through Tether as the owner's own read (agenda.mjs, 16-11): seen in its asset
+           panel, so the calendar need not stay open elsewhere. A POST, for this site's own pages only (checked above). */
+        if (pathname === '/api/tether/agenda' && tethers) return send(200, await readAgenda(tethers, body ?? {}, { who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' } })), true;
         /* A mailbox's signature (Markdown), added under what the agent sends from it. */
         if (pathname === '/api/tether/signature' && tethers) {
             const t = tethers.store().target(String(body.target ?? ''));

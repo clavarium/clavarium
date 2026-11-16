@@ -6076,6 +6076,9 @@
             if (share) { share.type = 'button'; share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); }); }
             parts.push(KIT.AccessList(model, { key: KIT.rightsKey(chosen), kind: chosen.kind, name: chosen.name, onChange: (row, level, stored) => setAccess(chosen, row, level, stored), actions: [share] }));
         }
+        /* A CALENDAR'S AGENDA (16-11): its events, under who has it -- read through Tether as the owner's own read
+           (agenda.mjs), so the calendar need not stay open elsewhere. The owner's page only: a device reads no calendar. */
+        if (t?.kind === 'calendar' && !DEVICE) parts.push(agendaPart(t));
         /* WHAT IS IN IT. */
         if (copyBox) {
             /* Its files: at once in a conversation; in the menu, a button opens them in the panel (the files sheet, moved in). */
@@ -6184,6 +6187,125 @@
         if (stale()) return;
         detail.append(KIT.AssetPanel(card, { back: back ? { onBack: () => { if (!nav.close('asset')) back(); } } : null, parts, foot }));
         if (gitHolder) await gitDetail(gitHolder, chosen.name, { place: inMenu, others: gits.length > 1 });
+    }
+    /* THE AGENDA OF A CALENDAR ASSET (16-11): a week, its days, each event's time, title and place; « now » on today;
+       an event opened says its time, place, link and organiser. Read only. Each read is journaled by Tether, which
+       moves its count and paints the panel again: an answer is kept AGENDA_KEEP_MS here, so a paint reads no calendar. */
+    const AGENDA_KEEP_MS = 5 * 60_000;
+    const AGENDA_DAYS = 7;      /* one week; the pages follow each other, no day twice */
+    const agendaKept = new Map();       /* `${target}|${from}` -> { at, answer } or { at, pending } */
+    const agendaFrom = new Map();       /* target -> the first day shown, when moved from today */
+    let agendaOpen = '';                /* the event opened, kept across paints */
+    let agendaZone = 'Europe/Paris';    /* the calendar's zone (Tether's), as the server last said it */
+    const dayAdd = (day, n) => { const [y, m, d] = day.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+    /* Now, on the calendar's wall clock (its zone, said by the server): 'YYYY-MM-DDTHH:MM'. */
+    const wallNow = (zone) => {
+        try {
+            const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+                .formatToParts(new Date()).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
+            return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+        } catch { return new Date().toISOString().slice(0, 16); }
+    };
+    const dayWords = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const hourOf = (time) => (time && time.length > 10 ? time.slice(11, 16) : '');
+    async function agendaRead(target, from, { fresh = false } = {}) {
+        const key = `${target}|${from}`;
+        const kept = agendaKept.get(key);
+        if (kept && !fresh && (kept.pending || Date.now() - kept.at < AGENDA_KEEP_MS)) return kept.pending ?? kept.answer;
+        const pending = post(`${API}/tether/agenda`, { target, from, to: dayAdd(from, AGENDA_DAYS) })
+            .then((answer) => { agendaKept.set(key, { at: Date.now(), answer }); return answer; })
+            .catch((error) => { agendaKept.delete(key); return { error: error.message || uiSaid('set-ag-failed', 'The calendar could not be read.') }; });
+        agendaKept.set(key, { at: Date.now(), pending });
+        return pending;
+    }
+    function agendaEvent(ev) {
+        const box = el('details', 'ag-event'); box.dataset.show = ev.show ?? 'busy';
+        if (agendaOpen === ev.id) box.open = true;
+        box.addEventListener('toggle', () => { if (box.open) agendaOpen = ev.id; else if (agendaOpen === ev.id) agendaOpen = ''; });
+        const head = el('summary', 'ag-row');
+        head.append(el('span', 'ag-time', ev.allDay ? uiSaid('set-ag-allday', 'All day') : hourOf(ev.start)));
+        const what = el('span', 'ag-what'); what.append(el('span', 'ag-title', ev.title));
+        if (ev.location) what.append(el('span', 'ag-where hint', ev.location));
+        head.append(what);
+        const facts = el('dl', 'ag-facts');
+        const fact = (k, v) => { if (!v) return; facts.append(el('dt', '', k)); const dd = el('dd'); dd.append(v); facts.append(dd); };
+        const when = ev.allDay ? uiSaid('set-ag-allday', 'All day') : `${hourOf(ev.start)}${ev.end ? ` – ${ev.end.slice(0, 10) === ev.start.slice(0, 10) ? hourOf(ev.end) : `${dayWords(ev.end.slice(0, 10))} ${hourOf(ev.end)}`}` : ''}`;
+        fact(uiSaid('set-ag-when', 'When'), document.createTextNode(`${dayWords(ev.start.slice(0, 10))}, ${when}`));
+        fact(uiSaid('set-ag-where', 'Where'), ev.location ? document.createTextNode(ev.location) : null);
+        if (ev.online) { const a = el('a', '', uiSaid('set-ag-join', 'Join online')); a.href = ev.online; a.target = '_blank'; a.rel = 'noopener noreferrer'; fact(uiSaid('set-ag-link', 'Link'), a); }
+        fact(uiSaid('set-ag-organizer', 'Organizer'), ev.organizer ? document.createTextNode(ev.organizer) : null);
+        if (Number.isInteger(ev.attendees) && ev.attendees > 0) fact(uiSaid('set-ag-guests', 'Guests'), document.createTextNode(String(ev.attendees)));
+        if (ev.show && ev.show !== 'busy') fact(uiSaid('set-ag-shown', 'Shown as'), document.createTextNode(uiSaid(`set-ag-show-${ev.show}`, { free: 'Free', tentative: 'Tentative', away: 'Away', elsewhere: 'Elsewhere' }[ev.show] ?? ev.show)));
+        box.append(head, facts);
+        return box;
+    }
+    /* The days of an answer, each with its events; an event of several days on each of them; today always, with « now ». */
+    function agendaDays(holder, answer) {
+        if (answer.zone) agendaZone = answer.zone;
+        const now = wallNow(agendaZone); const today = now.slice(0, 10);
+        const days = new Map();
+        for (let d = answer.from; d < answer.to; d = dayAdd(d, 1)) days.set(d, []);
+        for (const ev of answer.events ?? []) {
+            const first = ev.start.slice(0, 10);
+            /* An all-day event ends the day after its last: it shows on each of its days in the window. */
+            const last = ev.allDay && ev.end ? dayAdd(ev.end.slice(0, 10), -1) : first;
+            for (let d = first; d <= last && d < answer.to; d = dayAdd(d, 1)) if (days.has(d)) days.get(d).push(ev);
+        }
+        const list = el('div', 'ag-days');
+        for (const [day, evs] of days) {
+            if (!evs.length && day !== today) continue;
+            const group = el('section', 'ag-day'); if (day === today) group.dataset.today = '1';
+            const head = el('h4', 'ag-dayhead', dayWords(day));
+            if (day === today) head.append(el('span', 'tag', uiSaid('set-ag-today', 'Today')));
+            group.append(head);
+            const timed = evs.filter((e) => !e.allDay); const whole = evs.filter((e) => e.allDay);
+            for (const ev of whole) group.append(agendaEvent(ev));
+            let marked = day !== today;
+            for (const ev of timed) {
+                if (!marked && ev.start > now) { group.append(el('div', 'ag-now', uiSaid('set-ag-now', 'Now'))); marked = true; }
+                group.append(agendaEvent(ev));
+            }
+            if (!marked) group.append(el('div', 'ag-now', uiSaid('set-ag-now', 'Now')));
+            if (!evs.length) group.append(el('p', 'hint', uiSaid('set-ag-free-day', 'Nothing today')));
+            list.append(group);
+        }
+        const shown = el('p', 'hint ag-range', `${dayWords(answer.from)} – ${dayWords(dayAdd(answer.to, -1))}`);
+        const notes = [];
+        if (!(answer.events ?? []).length) notes.push(el('p', 'hint', uiSaid('set-ag-none', 'No event this week')));
+        if (answer.more) notes.push(el('p', 'hint', uiSaid('set-ag-more', 'Some events not shown')));
+        if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-ag-partial', 'Start times only, for now')));
+        holder.replaceChildren(shown, list, ...notes);
+    }
+    async function agendaFill(holder, target, opts) {
+        const from = agendaFrom.get(target) ?? wallNow(agendaZone).slice(0, 10);
+        holder.setAttribute('aria-busy', 'true');
+        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        const answer = await agendaRead(target, from, opts);
+        holder.removeAttribute('aria-busy');
+        if (!holder.isConnected) return;
+        if (answer.error) {
+            const again = el('button', '', uiSaid('set-ag-again', 'Try again')); again.type = 'button';
+            again.addEventListener('click', () => { void agendaFill(holder, target, { fresh: true }); });
+            holder.replaceChildren(el('p', 'error', answer.error), again);
+            return;
+        }
+        agendaDays(holder, answer);
+    }
+    function agendaPart(target) {
+        const holder = el('div', 'as-agenda');
+        const move = (days) => {
+            const from = agendaFrom.get(target.id) ?? wallNow(agendaZone).slice(0, 10);
+            agendaFrom.set(target.id, dayAdd(from, days));
+            void agendaFill(holder, target.id);
+        };
+        const btn = (text, label, act) => { const b = el('button', 'quiet', text); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', act); return b; };
+        const prev = btn('‹', uiSaid('set-ag-prev', 'Previous week'), () => move(-7));
+        /* Today: back to this week; already there, read again. */
+        const today = btn(uiSaid('set-ag-today', 'Today'), uiSaid('set-ag-today', 'Today'), () => { const was = agendaFrom.has(target.id); agendaFrom.delete(target.id); void agendaFill(holder, target.id, { fresh: !was }); });
+        const next = btn('›', uiSaid('set-ag-next', 'Next week'), () => move(7));
+        const bar = el('div', 'ag-bar'); bar.append(prev, today, next);
+        queueMicrotask(() => { void agendaFill(holder, target.id); });
+        return { title: uiSaid('set-ag-title', 'Agenda'), extra: [bar], body: [holder], cls: 'as-agenda-part' };
     }
     const ASSET_WORD = { folder: 'Folder', git: 'Repository', mailbox: 'Mailbox', agenda: 'Calendar', contacts: 'Contacts', secret: 'Secret', list: LISTS_WORD.one, acces: 'Access' };
     /* Under its name: its kind (its group, a chip before it, in the menu). */
