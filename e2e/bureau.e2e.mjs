@@ -160,5 +160,22 @@ test('the desk: the page of arrival, placed anywhere, moved, folded, sized, tidi
     await me.until('the folder is open', async () => (await me.page.locator('.desk-sheet .desk-in-folder > .desk-tile').count()) === 2);
     await me.page.locator('.desk-sheet .desk-tile[data-id="c:gamma"]').click();
     await me.until('gamma is open', async () => new URL(me.page.url()).searchParams.get('c') === 'gamma' && !(await me.page.locator('#deck').isVisible()));
+
+    /* « Home » in the menu brings the desk back, and folds the list away as the other places do. */
+    if ((await me.page.locator('#app').getAttribute('data-list')) === 'folded') await me.page.locator('#fold').click();
+    await me.page.locator('#nav-home').click();
+    await me.until('the desk again by Home', async () => me.page.locator('#deck').isVisible());
+    assert.equal(await me.page.locator('#nav-home').getAttribute('aria-current'), 'page');
+    await me.until('the list folded', async () => (await me.page.locator('#app').getAttribute('data-list')) === 'folded');
+
+    /* A TAP on a touch screen opens a folder, and it stays open (16-11: the click after the tap closed it). */
+    const touch = await b.person({ phone: true });
+    await touch.page.locator('#nav-home').tap();
+    await touch.until('the desk on the touch screen', async () => (await touch.page.locator(tile(folderId)).count()) === 1);
+    await touch.page.locator(tile(folderId)).tap();
+    await touch.until('the folder open after a tap', async () => (await touch.page.locator('.desk-sheet .desk-in-folder > .desk-tile').count()) === 2);
+    await wait(500);
+    assert.equal(await touch.page.locator('.desk-sheet .desk-in-folder > .desk-tile').count(), 2, 'still open');
+    await touch.page.context().close();
     assert.deepEqual(errors, []);
 });

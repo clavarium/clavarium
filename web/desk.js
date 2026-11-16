@@ -367,7 +367,7 @@
         }
 
         /* ---- the pointer: a press opens; a long press, or a drag in edit mode, moves ---- */
-        let press = null; let drag = null;
+        let press = null; let drag = null; let tapped = '';
         const LONG_MS = 550;
         function down(e) {
             if (e.button !== 0 && e.pointerType === 'mouse') return;
@@ -392,8 +392,9 @@
             clearTimeout(press.timer);
             const p = press; press = null;
             if (editing) return;
-            const it = find(p.id);
-            if (it?.folder !== undefined) { shownFolder = it.id; paintFolder(); } else o.open(p.id);
+            /* Opened on the click that follows, not here: on a touch screen that click lands where the finger was,
+               which would be the folder's backdrop once open, and close it at once (16-11, a tablet). */
+            tapped = p.id;
         }
         function startDrag(e) {
             const t = press.tile; const r = t.getBoundingClientRect();
@@ -450,7 +451,11 @@
         grid.addEventListener('contextmenu', (e) => { if (e.target.closest('.desk-tile')) e.preventDefault(); });
         grid.addEventListener('click', (e) => {
             const more = e.target.closest('.desk-more');
-            if (more) { e.stopPropagation(); const t = more.closest('.desk-tile'); if (menu && menu.dataset.for === t.dataset.id) { closeMenu(); return; } menuFor(t.dataset.id, more); if (menu) menu.dataset.for = t.dataset.id; }
+            if (more) { e.stopPropagation(); const t = more.closest('.desk-tile'); if (menu && menu.dataset.for === t.dataset.id) { closeMenu(); return; } menuFor(t.dataset.id, more); if (menu) menu.dataset.for = t.dataset.id; return; }
+            const t = e.target.closest('.desk-tile'); const id = tapped; tapped = '';
+            if (!t || editing || !id || t.dataset.id !== id) return;
+            const it = find(id);
+            if (it?.folder !== undefined) { shownFolder = it.id; paintFolder(); } else o.open(id);
         });
         grid.addEventListener('keydown', (e) => {
             const t = e.target.closest('.desk-tile'); if (!t || e.target !== t) return;

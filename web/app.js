@@ -7219,7 +7219,10 @@
         features.unmount($(off)); $(off).hidden = true;
         features.show($(on), welcoming ? 'welcome' : 'home');
     }
-    function openDeck(push = true) { if (DEVICE) return; enterPlace('deck', push); void paintDeck(); }
+    /* The desk folds the list away, as the other places of the menu do (16-11: the operator). */
+    function openDeck(push = true) { if (DEVICE) return; if (!narrow()) foldOnOpen(); enterPlace('deck', push); void paintDeck(); }
+    /* « Home » in the menu: the desk, said plainly (its title, top left, was not seen as a way there). */
+    $('nav-home').addEventListener('click', () => openDeck());
     $('deck-close').addEventListener('click', () => leavePlace());
     $('deck-empty-new').addEventListener('click', () => { void openNew(); });
     /* Import a configuration: the import of the map (Access, Flows), a file chosen at once. */
