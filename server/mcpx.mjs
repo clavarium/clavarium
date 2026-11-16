@@ -149,10 +149,15 @@ export async function mcpSeen({ tethers }, body = {}) {
 
 /* The vault's name for a server's OAuth tokens (mcpoauth.mjs): as long as its key's name. */
 export const oauthName = (id) => `${keyName(id).slice(0, -KEY_SUFFIX.length)}_TOK`;
+/* The vault's name for the client the owner pasted for it (an id and a secret, 16-11): host-only too. */
+export const clientName = (id) => `${keyName(id).slice(0, -KEY_SUFFIX.length)}_CLI`;
 
-/* A server taken away: its key goes with it, or its OAuth tokens (only those kept for it here). */
+/* A server taken away: its key goes with it, or its OAuth tokens (only those kept for it here), and its client. */
 export function forgetKey(secrets, target) {
-    const ref = target?.kind === 'mcp' ? String(target.secrets?.token ?? '') : '';
+    if (target?.kind !== 'mcp') return;
+    /* The client pasted for it goes as well, signed in or not. */
+    try { secrets?.remove(clientName(target.id)); } catch { /* not there */ }
+    const ref = String(target.secrets?.token ?? '');
     if (!ref || (ref !== keyName(target.id) && ref !== oauthName(target.id))) return;
     try { secrets?.remove(ref); } catch { /* not there */ }
 }

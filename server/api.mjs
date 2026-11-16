@@ -541,8 +541,10 @@ export async function handleApi(request, response, conversations, headers, resou
                provider. A page, not JSON; its state is the proof it was started from this page. */
             if (pathname === BACK_PATH && tethers?.oauth) {
                 let page;
-                try { const done = await tethers.oauth.finish({ tethers }, { code: query.get('code'), state: query.get('state'), error: query.get('error') }); page = backPage({ ok: true, title: done.title }); }
-                catch (error) { page = backPage({ ok: false, message: error instanceof Refusal ? error.message : 'The sign-in failed.' }); }
+                /* Said in the language of the page that started it; one never started here, in the browser's. */
+                const lang = String(request.headers['accept-language'] ?? '').slice(0, 2);
+                try { const done = await tethers.oauth.finish({ tethers }, { code: query.get('code'), state: query.get('state'), error: query.get('error') }); page = backPage({ ok: true, title: done.title, lang: done.lang, back: done.back, sameTab: done.sameTab }); }
+                catch (error) { page = backPage({ ok: false, message: error instanceof Refusal ? error.message : '', why: error?.why ?? 'failed', lang: error?.lang ?? lang, back: error?.back }); }
                 response.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }).end(page);
                 return true;
             }

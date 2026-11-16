@@ -196,7 +196,12 @@ export const SETTINGS_WORDS_FR = {
     'set-mcp-need': 'Collez le bloc, ou donnez nom et adresse.', 'set-mcp-tools': 'Outils', 'set-mcp-refresh': 'Actualiser', 'set-mcp-seen': 'Marquer comme vu',
     'set-mcp-none': 'Aucun outil listé pour l\'instant.', 'set-mcp-unreached': 'Injoignable : {why}', 'set-mcp-open': 'atteint l\'extérieur',
     'set-mcp-fresh': 'Nouveau : demandé jusqu\'à ce que vous l\'ayez vu',
-    'set-mcp-oauth': 'Se connecter (OAuth)', 'set-mcp-client': 'Identifiant client', 'set-mcp-client-need': 'Collez son identifiant client.',
+    'set-mcp-oauth': 'Se connecter', 'set-mcp-client': 'Identifiant client', 'set-mcp-client-need': 'Collez son identifiant et son secret, une fois.',
+    /* Its client pasted once, the permissions asked, signed out (16-11). */
+    'set-mcp-reconnect': 'Reconnecter', 'set-mcp-client-box': 'Identifiant et secret client', 'set-mcp-secret': 'Secret client',
+    'set-mcp-scopes': 'Autorisations demandées', 'set-mcp-redirect': 'Adresse de retour de son appli', 'set-mcp-client-kept': 'Gardés sur le serveur. Aucune IA ne les voit.',
+    'set-mcp-secret-need': 'Collez aussi son secret client.', 'set-ap-edit': 'Modifier', 'set-ap-send-edited': 'Accepter ainsi modifié',
+    'set-mcp-guess': 'semble seulement lire', 'set-mcp-out': '{name} est déconnecté. Reconnectez-le.',
     'set-mcp-c-read': 'Lecture seule', 'set-mcp-c-write': 'Écrit', 'set-mcp-c-destructive': 'Supprime ou écrase',
     'set-mcp-custom': 'Droits personnalisés', 'set-mcp-yes': 'Oui', 'set-mcp-ask': 'Demander', 'set-mcp-no': 'Non',
     'set-rt-mcp-none': 'Coupé', 'set-rt-mcp-watch': 'Lit', 'set-rt-mcp-propose': 'Tout, approuvé', 'set-rt-mcp-free': 'Tout', 'set-rt-mcp-frame': 'Personnalisé',

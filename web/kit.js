@@ -518,6 +518,8 @@
     /* The table's key of an asset: a live link is a connexion, whatever it links; else its kind. */
     const rightsKey = (a) => (a?.target?.kind === 'mcp' ? 'mcp' : a?.live || a?.target ? 'connexion' : a?.kind ?? '');
     const rightsFor = (key, holder = 'conversation') => [...(RIGHTS[key]?.[HOLDERS.includes(holder) ? holder : 'conversation'] ?? [])];
+    /* The level a new grant starts at, where it is not the lightest (16-11): an MCP server's actions each asked. */
+    const FIRST_LEVEL = { mcp: 'propose' };
     /* The lightest real level (what "give the group" gives): the first after none. */
     const lightest = (key, holder) => rightsFor(key, holder)[1] ?? null;
     /* AS THE SERVER KEEPS THEM -> a level, and back. A secret is 'off' / 'use' (secrets.mjs); a device's
@@ -853,7 +855,8 @@
             const key = rightsKey(a);
             const levels = rightsFor(key).filter((l) => l !== 'none');
             if (!levels.length) return null;
-            let level = levels[0];
+            /* An MCP server is given at « All with approval » first (16-11, the owner's choice): each action asked. */
+            let level = levels.includes(FIRST_LEVEL[key]) ? FIRST_LEVEL[key] : levels[0];
             const bar = node('div', 'kit-aspick-give');
             const pick = Segmented({ options: levels.map((l) => ({ value: l, label: wordOf(key, l, 'pick') })), value: level, label: say('set-acc-what', 'What {who} may do with {name}').replace('{who}', w.who ?? '').replace('{name}', a.name ?? ''), onChange: (l) => { level = l; } });
             addClass(pick, 'kit-rights-pick');

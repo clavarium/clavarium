@@ -25,7 +25,7 @@ const KEY = 'sk-old-key-never-shown-0123456789';
 
 /* A fake MCP server and its authorization server, answering by URL. Every token it mints is remembered, so a test
    can look for each of them where none may be. */
-function provider({ register = true, rotate = true, life = 3600, prmResource = SERVER, s256 = true } = {}) {
+function provider({ register = true, rotate = true, life = 3600, prmResource = SERVER, s256 = true, methods = ['none', 'client_secret_post'], secret = '', slack = false, refuse = '' } = {}) {
     const minted = [];
     const seen = { registered: [], codes: new Map(), tokenCalls: [] };
     let n = 0;
@@ -38,17 +38,23 @@ function provider({ register = true, rotate = true, life = 3600, prmResource = S
         if (u.href === 'https://mcp.example.com/.well-known/oauth-protected-resource/mcp') return json(200, { resource: prmResource, authorization_servers: [AUTH] });
         if (u.href === `${AUTH}/.well-known/oauth-authorization-server`) {
             return json(200, { issuer: AUTH, authorization_endpoint: `${AUTH}/authorize`, token_endpoint: `${AUTH}/token`, ...(register ? { registration_endpoint: `${AUTH}/register` } : {}),
-                code_challenge_methods_supported: s256 ? ['S256'] : ['plain'], token_endpoint_auth_methods_supported: ['none', 'client_secret_post'] });
+                code_challenge_methods_supported: s256 ? ['S256'] : ['plain'], ...(methods ? { token_endpoint_auth_methods_supported: methods } : {}) });
         }
         if (u.href === `${AUTH}/register` && method === 'POST') { const b = JSON.parse(init.body); seen.registered.push(b); return json(201, { client_id: 'client-made-1', redirect_uris: b.redirect_uris }); }
         if (u.href === `${AUTH}/token` && method === 'POST') {
             const f = Object.fromEntries(new URLSearchParams(init.body));
+            const basic = /^Basic (.+)$/.exec(String(init.headers?.authorization ?? ''));
+            if (basic) { const [id, pw] = Buffer.from(basic[1], 'base64').toString().split(':').map(decodeURIComponent); f.client_id = id; f.basic_secret = pw; }
             seen.tokenCalls.push(f);
+            /* A confidential client (16-11): its secret, by post or basic; Slack's way of refusing, 200 { ok: false }. */
+            if (secret && (f.client_secret ?? f.basic_secret) !== secret) return slack ? json(200, { ok: false, error: 'bad_client_secret' }) : json(401, { error: 'invalid_client' });
+            if (refuse) return slack ? json(200, { ok: false, error: refuse }) : json(400, { error: refuse });
             if (f.grant_type === 'authorization_code') {
                 const c = seen.codes.get(f.code);
                 if (!c || c.redirect_uri !== f.redirect_uri || c.client_id !== f.client_id || f.resource !== SERVER) return json(400, { error: 'invalid_grant' });
                 if (createHash('sha256').update(f.code_verifier).digest('base64url') !== c.code_challenge) return json(400, { error: 'invalid_grant' });
                 seen.codes.delete(f.code);
+                if (slack) return json(200, { ok: true, authed_user: { id: 'U1', access_token: mint('at'), token_type: 'user', ...(rotate ? { refresh_token: mint('rt'), expires_in: life } : {}) } });
                 return json(200, { access_token: mint('at'), refresh_token: mint('rt'), expires_in: life, token_type: 'Bearer' });
             }
             if (f.grant_type === 'refresh_token') {
@@ -137,7 +143,7 @@ test('signed in through the routes: discovery from the 401, a client registered,
     assert.equal(b.p.seen.registered[0].token_endpoint_auth_method, 'none', 'a public client');
     assert.equal(page.status, 200);
     assert.match(page.type, /text\/html/);
-    assert.match(page.text, /Signed in to Sales CRM/);
+    assert.match(page.text, /Connected to Sales CRM/);
     const name = tokenName('sales-crm');
     assert.equal(name, 'MCP_SALES_CRM_TOK');
     assert.equal(b.tethers.store().target('sales-crm').secrets.token, name, 'Tether holds the name');
@@ -177,19 +183,20 @@ test('signed out at the provider: said plainly, never a token in the error', asy
     await signedIn(t, b);
     b.p.seen.revoked = true;
     b.tick(120_000);
-    await assert.rejects(b.tethers.oauth.access(tokenName('sales-crm')), (e) => { noToken(b, e.message, 'the error'); return /sign in again/.test(e.message); });
+    await assert.rejects(b.tethers.oauth.access(tokenName('sales-crm')), (e) => { noToken(b, e.message, 'the error'); return /reconnect/.test(e.message) && e.reconnect === true; });
 });
 
 test('no registration offered: the page is asked for a client id, then it goes on with it', async (t) => {
     const b = bench(t, { register: false });
     await b.call('POST', '/api/tether/mcp-add', { name: 'Sales CRM', url: SERVER });
     const need = await b.call('POST', '/api/tether/mcp-oauth', { target: 'sales-crm' });
-    assert.deepEqual(need.body, { need: 'client' });
+    assert.equal(need.body.need, 'client');
+    assert.equal(need.body.secret, false, 'this service takes public clients');
     const start = await b.call('POST', '/api/tether/mcp-oauth', { target: 'sales-crm', clientId: 'pasted-client' });
     assert.equal(new URL(start.body.url).searchParams.get('client_id'), 'pasted-client');
     const back = b.p.allow(start.body.url);
     const page = await b.call('GET', `${BACK_PATH}?code=${back.code}&state=${back.state}`);
-    assert.match(page.text, /Signed in/);
+    assert.match(page.text, /Connected to Sales CRM/);
 });
 
 test('refused: a forged or used state, a denied consent, metadata about another address, no PKCE', async (t) => {
@@ -227,4 +234,89 @@ test('a server taken away: its tokens go too; a key given again replaces them', 
     const gone = await b.call('POST', '/api/tether/remove-target', { target: 'sales-crm' });
     assert.equal(gone.status, 200, gone.text);
     assert.equal(b.secrets.reveal(name), undefined);
+});
+
+/* A CONFIDENTIAL CLIENT (16-11), as Slack's: no registration, only client_secret_post. The page is asked for the id
+   AND the secret, given the address its app must name and the permissions offered; the secret goes to the token
+   endpoint, is kept host-only with the id, never said back; a second sign-in needs no paste; only the permissions
+   the owner kept are asked. */
+const SECRET = 'client-secret-never-shown-0123456789';
+test('a confidential client: id and secret asked, the secret kept host-only and sent as the service says, the kept permissions only', async (t) => {
+    const lines = capture(t);
+    const b = bench(t, { register: false, methods: ['client_secret_post'], secret: SECRET });
+    await b.call('POST', '/api/tether/mcp-add', { name: 'Sales CRM', url: SERVER });
+    const need = await b.call('POST', '/api/tether/mcp-oauth', { target: 'sales-crm' });
+    assert.equal(need.body.need, 'client');
+    assert.equal(need.body.secret, true, 'a secret is asked: the service takes no public client');
+    assert.equal(need.body.redirect, `${ORIGIN}${BACK_PATH}`, 'the address its app must name');
+    assert.deepEqual(need.body.scopes, ['crm.read', 'crm.write']);
+    const half = await b.call('POST', '/api/tether/mcp-oauth', { target: 'sales-crm', clientId: 'app-1' });
+    assert.equal(half.body.missing, 'secret', 'an id alone is not enough here');
+    const start = await b.call('POST', '/api/tether/mcp-oauth', { target: 'sales-crm', clientId: 'app-1', clientSecret: ` ${SECRET} `, scope: 'crm.read', lang: 'fr', back: '/?c=alpha' });
+    assert.equal(start.status, 200, start.text);
+    assert.equal(new URL(start.body.url).searchParams.get('scope'), 'crm.read', 'only what the owner kept');
+    const back = b.p.allow(start.body.url);
+    const page = await b.call('GET', `${BACK_PATH}?code=${back.code}&state=${back.state}`);
+    assert.match(page.text, /Connecté à Sales CRM/, 'said in the page\'s language');
+    assert.match(page.text, /lang="fr"/);
+    assert.match(page.text, /href="\/\?c=alpha"/, 'a way back to where the owner was');
+    const call = b.p.seen.tokenCalls.at(-1);
+    assert.equal(call.client_secret, SECRET, 'sent by post, as the metadata says');
+    const kept = b.secrets.list({ held: true }).find((s) => s.name === 'MCP_SALES_CRM_CLI');
+    assert.equal(kept?.hostOnly, true, 'the client kept host-only');
+    assert.ok(!b.secrets.list().some((s) => s.name === 'MCP_SALES_CRM_CLI'));
+    /* Again, nothing pasted: the client kept, its permissions too. */
+    const again = await b.call('POST', '/api/tether/mcp-oauth', { target: 'sales-crm' });
+    assert.equal(new URL(again.body.url).searchParams.get('client_id'), 'app-1');
+    assert.equal(new URL(again.body.url).searchParams.get('scope'), 'crm.read');
+    const state = await b.call('GET', '/api/tether');
+    for (const text of [need.text, half.text, start.text, again.text, page.text, state.text, ...filesOf(join(b.dir, 'tether')), ...lines]) assert.ok(!text.includes(SECRET), 'the secret never said back');
+    /* Taken away: its client goes too. */
+    await b.call('POST', '/api/tether/remove-target', { target: 'sales-crm' });
+    assert.equal(b.secrets.reveal('MCP_SALES_CRM_CLI'), undefined);
+});
+
+test('basic where the service says only basic; Slack\'s answers: the token under authed_user, a refusal in a 200, said plainly', async (t) => {
+    const b = bench(t, { register: false, methods: ['client_secret_basic'], secret: SECRET, slack: true, rotate: false });
+    await b.call('POST', '/api/tether/mcp-add', { name: 'Chat', url: SERVER });
+    const start = await b.call('POST', '/api/tether/mcp-oauth', { target: 'chat', clientId: 'app:2', clientSecret: SECRET });
+    const back = b.p.allow(start.body.url);
+    const page = await b.call('GET', `${BACK_PATH}?code=${back.code}&state=${back.state}`);
+    assert.match(page.text, /Connected to Chat/);
+    const call = b.p.seen.tokenCalls.at(-1);
+    assert.equal(call.basic_secret, SECRET, 'by basic');
+    assert.equal(call.client_secret, undefined, 'not in the form too');
+    assert.ok(await b.tethers.oauth.access(tokenName('chat')), 'the token read under authed_user');
+    /* No refresh token, refused at once: the owner must reconnect, said so. */
+    await assert.rejects(b.tethers.oauth.access(tokenName('chat'), { fresh: true }), (e) => e.reconnect === true);
+    const wrong = bench(t, { register: false, methods: ['client_secret_post'], secret: SECRET, slack: true });
+    await wrong.call('POST', '/api/tether/mcp-add', { name: 'Chat', url: SERVER });
+    const s2 = await wrong.call('POST', '/api/tether/mcp-oauth', { target: 'chat', clientId: 'app', clientSecret: 'not-it', lang: 'fr' });
+    const b2 = wrong.p.allow(s2.body.url);
+    const p2 = await wrong.call('GET', `${BACK_PATH}?code=${b2.code}&state=${b2.state}`);
+    assert.match(p2.text, /identifiant ou le secret client/, 'the client refused, said in French');
+    assert.match(p2.text, /bad_client_secret/, 'the service\'s word under it');
+    const scope = bench(t, { register: false, methods: ['client_secret_post'], secret: SECRET, slack: true, refuse: 'invalid_scope' });
+    await scope.call('POST', '/api/tether/mcp-add', { name: 'Chat', url: SERVER });
+    const s3 = await scope.call('POST', '/api/tether/mcp-oauth', { target: 'chat', clientId: 'app', clientSecret: SECRET });
+    const b3 = scope.p.allow(s3.body.url);
+    assert.match((await scope.call('GET', `${BACK_PATH}?code=${b3.code}&state=${b3.state}`)).text, /refused the permissions asked/);
+});
+
+test('a token refused before its end: refreshed at once when asked fresh; a way back only to this site; in the same tab, back by itself', async (t) => {
+    const b = bench(t);
+    await signedIn(t, b);
+    const name = tokenName('sales-crm');
+    const first = await b.tethers.oauth.access(name);
+    const fresh = await b.tethers.oauth.access(name, { fresh: true });
+    assert.notEqual(fresh, first, 'refreshed although not due');
+    assert.equal(await b.tethers.oauth.access(name), fresh);
+    b.p.seen.revoked = true;
+    await assert.rejects(b.tethers.oauth.access(name, { fresh: true }), (e) => e.reconnect === true && /reconnect/.test(e.message));
+    const s = await b.call('POST', '/api/tether/mcp-oauth', { target: 'sales-crm', back: '//elsewhere.example.com/x', tab: 'same' });
+    const back = b.p.allow(s.body.url);
+    const page = await b.call('GET', `${BACK_PATH}?code=${back.code}&state=${back.state}`);
+    assert.match(page.text, /http-equiv="refresh" content="1;url=\/"/, 'back by itself, to this site only');
+    assert.ok(!page.text.includes('elsewhere'));
+    assert.ok(!page.text.includes('close this tab'), 'nothing to close: it is the page\'s own tab');
 });

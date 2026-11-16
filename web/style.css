@@ -2257,6 +2257,11 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .mcp-tool-class { color: var(--ink2); }
 .mcp-tool-class[data-class="destructive"] { color: var(--danger); }
 .mcp-tool-fresh { color: var(--warn); }
+/* The client pasted once for a service that registers none (16-11): stacked, full width, on a phone too. */
+.mcp-client { margin: .4rem 0; }
+.mcp-client summary { cursor: pointer; color: var(--ink2); }
+.mcp-client-field { display: flex; flex-direction: column; gap: 2px; margin: .4rem 0; }
+.mcp-client-field input { width: 100%; box-sizing: border-box; min-width: 0; }
 .mcp-custom { display: flex; flex-direction: column; gap: 4px; margin: .4rem 0 .8rem; }
 .mcp-custom-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
 #mcp-config { width: 100%; font: .8125rem var(--mono, monospace); }
@@ -3212,3 +3217,5 @@ span.tile-spark { display: block; height: 22px; }
 .share-donut.kit-bone { border-radius: 50%; }
 .server-parts-bones { display: grid; gap: 8px; flex: 1 1 auto; min-width: 0; padding-top: 4px; }
 .list-bones { display: grid; gap: 10px; padding: 8px 0; }
+.ap-edit { flex: 1 1 100%; }
+.ap-edit textarea { width: 100%; box-sizing: border-box; }
