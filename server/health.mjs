@@ -78,6 +78,9 @@ export const PROBE = [
 export const PROBE_NAME = 'clavarium-health';
 
 export const EVERY_MS = 120_000;
+/* WITH A HEARTBEAT (beat.mjs), a look by command still, this often, whatever the beat says: what the agent
+   wrote in its /work is believed only between two looks of our own. */
+export const SPOT_MS = 30 * 60_000;
 /* The looks of one tick start this far apart, one machine after another (at most a tick shared out
    between them): a burst of probes lines up at the VM manager in front of every other command. */
 export const STAGGER_MS = 5_000;
@@ -180,7 +183,7 @@ export function judge(record) {
 }
 
 export class Health {
-    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen; #links;
+    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen; #links; #beat; #now; #execAt = new Map();
     /* Set by the server: told each judgment (the chat of a conversation says what is wrong: talk.mjs). */
     judged = () => {};
     /* Set by the server: told a conversation is forgotten (what else is kept of its machine goes too). */
@@ -194,8 +197,9 @@ export class Health {
        `lookMs`: how long the clock waits for one conversation's look. */
     /* `seen`: a store of the problems its owner marked seen ("Seen"), by conversation. */
     /* `links`: the guard of links its folders cannot serve (linkguard.mjs), or null. */
-    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS, seen = null, links = null }) {
-        this.#seen = seen; this.#links = links;
+    /* `beat`: the heartbeats read from the work folders (beat.mjs), or null: every look by command. */
+    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS, seen = null, links = null, beat = null, now = () => Date.now() }) {
+        this.#seen = seen; this.#links = links; this.#beat = beat; this.#now = now;
         this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#settleMs = settleMs; this.#probeMs = probeMs; this.#lookMs = lookMs;
     }
 
@@ -209,7 +213,7 @@ export class Health {
         this.#seen?.put({ name, keys, at: new Date().toISOString() });
         return this.of(name);
     }
-    forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#seen?.remove?.(name); try { this.forgotten(name); } catch { /* told */ } }
+    forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#execAt.delete(name); this.#beat?.forget?.(name); this.#seen?.remove?.(name); try { this.forgotten(name); } catch { /* told */ } }
 
     /* The look under way (it may be mounting a folder again), or null. */
     busy(name) { return this.#running.get(name) ?? null; }
@@ -238,11 +242,20 @@ export class Health {
            the VM manager for seconds, and every other machine waits behind it (21-10). */
         const quiet = this.#quiet.get(name);
         if (quiet && !asked && Date.now() < quiet.until) return this.#keep(name, { at, state, answering: false });
-        let facts = await this.#probe(name, paths);
+        /* Its heartbeat, when it says enough (#fromBeat): no command. Else the look by command, as always. */
+        const beating = Boolean(this.#beat?.on) && c.work === 'kept';
+        let facts = beating ? this.#fromBeat(name, paths, asked) : undefined;
+        if (beating) this.#vms.noteBeat?.(Boolean(facts));
         if (!facts) {
-            const times = (quiet?.times ?? 0) + 1;
-            this.#quiet.set(name, { times, until: Date.now() + Math.min(QUIET_MAX_MS, QUIET_MS * 2 ** (times - 1)) });
-            return this.#keep(name, { at, state, answering: false });
+            facts = await this.#probe(name, paths);
+            if (!facts) {
+                const times = (quiet?.times ?? 0) + 1;
+                this.#quiet.set(name, { times, until: Date.now() + Math.min(QUIET_MAX_MS, QUIET_MS * 2 ** (times - 1)) });
+                return this.#keep(name, { at, state, answering: false });
+            }
+            this.#execAt.set(name, this.#now());
+            /* Its beat put in its machine when it is not there or not of this version (bounded: beat.mjs, ensure). */
+            if (beating) void Promise.resolve().then(() => this.#beat.ensure?.(name)).catch(() => {});
         }
         this.#quiet.delete(name);
         try { void Promise.resolve(this.probed(name, facts)).catch(() => {}); } catch { /* told, nothing more */ }
@@ -312,6 +325,24 @@ export class Health {
         for (const l of links?.found ?? []) items.push({ kind: 'link-found', folder: l.folder, path: l.path, why: l.kind });
         for (const c of links?.cut ?? []) items.push({ kind: 'links-cut', folder: c.folder, why: c.why });
         return { at: record.at, items, health: this.of(name) };
+    }
+
+    /* ITS HEARTBEAT AS THE PROBE'S ANSWER (beat.mjs), or undefined -- then the look is a command, as before:
+       a look asked (its owner, a start, a wake), the first look of a machine or one just back (not seen
+       running and answering at the last look), a spot check every SPOT_MS, a beat not newer than our own last
+       look, not fresh or not what it should be, or one that does not say each path that should be mounted. */
+    #fromBeat(name, paths, asked) {
+        this.#beat.expect?.(name, paths);
+        if (asked) return undefined;
+        const last = this.#records.get(name);
+        if (last?.state !== 'Running' || last.answering !== true) return undefined;
+        const ours = this.#execAt.get(name);
+        if (ours === undefined || this.#now() - ours >= SPOT_MS) return undefined;
+        const beat = this.#beat.read(name);
+        if (!beat.ok || !(beat.at > ours)) return undefined;
+        const facts = readProbe(beat.text, paths);
+        if (!facts.memory || paths.some((p) => facts.mounts[p] === undefined)) return undefined;
+        return facts;
     }
 
     async #probe(name, paths) {

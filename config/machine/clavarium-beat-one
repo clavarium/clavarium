@@ -1,0 +1,40 @@
+#!/bin/sh
+# ONE BEAT OF ONE CONVERSATION, as its own user (ubuntu in a machine of its own, c-NAME behind its door):
+#   beat-one NAME SEQ VERSION
+# Runs its server's look (probe.sh, exactly PROBE of health.mjs) with the paths its server expects mounted
+# (/work/.clavarium/expected, written by the server), and writes what it printed, as JSON, to
+# /work/.clavarium/beat.json -- whole or not at all (a file aside, then moved). Its server checks every word
+# of it: the agent is root here, and may write anything there.
+# CLAVARIUM_BEAT_WORK, CLAVARIUM_BEAT_LIB: other places, for its tests only.
+set -u
+name="$1"; seq="$2"; version="$3"
+work="${CLAVARIUM_BEAT_WORK:-/work}"
+lib="${CLAVARIUM_BEAT_LIB:-/usr/local/lib/clavarium}"
+dir="$work/.clavarium"
+[ -d "$work" ] || exit 0
+# A link there is not followed: the agent may have put it.
+[ -L "$dir" ] && exit 0
+mkdir -p "$dir" 2>/dev/null || exit 0
+set --
+if [ -f "$dir/expected" ] && [ ! -L "$dir/expected" ]; then
+    n=0
+    while IFS= read -r p; do
+        [ "$n" -lt 100 ] || break
+        printf '%s' "$p" | grep -Eq '^/[A-Za-z0-9._/-]{1,200}$' || continue
+        set -- "$@" "$p"; n=$((n + 1))
+    done < "$dir/expected"
+fi
+out=$(timeout -k 2 30 sh "$lib/probe.sh" "$@" 2>/dev/null | head -c 12000)
+# Its text as a JSON string: backslash and quote escaped, a tab written \t, lines joined by \n, any other
+# control character left out. Character by character: every awk reads it the same way.
+probe=$(printf '%s\n' "$out" | awk 'BEGIN { for (i = 1; i < 32; i++) drop[sprintf("%c", i)] = 1 }
+    { s = ""; n = length($0)
+      for (i = 1; i <= n; i++) { c = substr($0, i, 1)
+          if (c == "\\") s = s "\\\\"; else if (c == "\"") s = s "\\\""; else if (c == "\t") s = s "\\t"; else if (!(c in drop)) s = s c }
+      all = all (NR > 1 ? "\\n" : "") s }
+    END { printf "%s", all }')
+tmp="$dir/.beat.$$"
+printf '{"v":1,"conversation":"%s","seq":%s,"version":"%s","probe":"%s"}\n' "$name" "$seq" "$version" "$probe" > "$tmp" || { rm -f "$tmp"; exit 0; }
+# A share that does not replace a file by a rename: the old one taken away first.
+mv -f "$tmp" "$dir/beat.json" 2>/dev/null || { rm -f "$dir/beat.json"; mv -f "$tmp" "$dir/beat.json"; } || rm -f "$tmp"
+exit 0

@@ -125,7 +125,9 @@ export class Vms {
     /* HOW MUCH THIS SERVER ASKS OF THE HOST (17-11: the owner saw a page wait 10-15 s with an idle CPU --
        every command to a machine goes through the VM manager, one after another): each command counted by
        what it is, with its time; every COUNT_EVERY_MS the tally is said in the log, the busiest first. */
-    #tally = new Map(); #tallyFrom = 0;
+    #tally = new Map(); #tallyFrom = 0; #beats = [0, 0];
+    /* A look of health answered by its heartbeat (`read`: no command; beat.mjs), or by a command after all. */
+    noteBeat(read) { this.#beats[read ? 0 : 1] += 1; }
     #count(argv, ms) {
         const now = this.#now();
         if (!this.#tallyFrom) this.#tallyFrom = now;
@@ -133,8 +135,9 @@ export class Vms {
         if (now - this.#tallyFrom < COUNT_EVERY_MS) return;
         const rows = [...this.#tally].sort((a, b) => b[1][1] - a[1][1]);
         const all = rows.reduce((n, [, v]) => n + v[0], 0); const busy = rows.reduce((n, [, v]) => n + v[1], 0);
-        console.log(`host: ${all} commands in ${Math.round((now - this.#tallyFrom) / 60_000)} min, ${Math.round(busy / 1000)} s spent; ${rows.slice(0, 8).map(([k, v]) => `${k} ${v[0]}x ${Math.round(v[1] / 1000)}s max ${Math.round(v[2] / 1000)}s`).join('; ')}`);
-        this.#tally = new Map(); this.#tallyFrom = now;
+        const beats = this.#beats[0] + this.#beats[1] ? `; beat read ${this.#beats[0]}x, fallback ${this.#beats[1]}x` : '';
+        console.log(`host: ${all} commands in ${Math.round((now - this.#tallyFrom) / 60_000)} min, ${Math.round(busy / 1000)} s spent; ${rows.slice(0, 8).map(([k, v]) => `${k} ${v[0]}x ${Math.round(v[1] / 1000)}s max ${Math.round(v[2] / 1000)}s`).join('; ')}${beats}`);
+        this.#tally = new Map(); this.#tallyFrom = now; this.#beats = [0, 0];
     }
 
     /* EVERY MACHINE'S STATE, in one question to the VM manager, shared by every caller for a

@@ -99,6 +99,7 @@ import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
 import { attachConsole } from './sshconsole.mjs';
 import { copyWorkFolder } from './copywork.mjs';
+import { Beat, beatWanted } from './beat.mjs';
 import { accessesOf, relinkAccesses } from './carry.mjs';
 import { Jobs, withUpdates } from './jobs.mjs';
 
@@ -442,7 +443,12 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line), reread: () => talk?.rereadCommand() ?? null });
     /* Why Parley is not in a machine, said once in the log, not at each opening. */
     const parleySaid = new Map();
+    /* ITS HEARTBEAT (beat.mjs): with CLAVARIUM_BEAT=health, its health read from its work folder instead of
+       a command every two minutes; put in its machine at an opening (once per version), never waited for. */
+    const beat = new Beat({ on: beatWanted(env.CLAVARIUM_BEAT, 'health'), vms, workFolder: (name) => folders.workFolder(name), conversations: all });
+    if (beat.on) console.log('beat: the health of the machines read from their heartbeat (CLAVARIUM_BEAT)');
     all.prepare = async (name, woke) => {
+        void beat.ensure(name, { woke }).catch(() => {});
         await hostReady;
         secrets.check();
         const wanted = secrets.signature(name);
@@ -689,7 +695,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         try { if (dockets.on(name)) { dockets.post(name, { kind: 'shared-folder', text: line, data: { folder: link.folder, path: link.path } }); return; } } catch { /* typed instead */ }
         if (all.list().find((c) => c.name === name)?.ai === true) void wakeups.say(name, line).catch(() => {});
     };
-    const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
+    const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, beat, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs, { quietMs: quietStartMs });
     /* What is wrong with its machine is said in its chat too, where it happened. */
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */

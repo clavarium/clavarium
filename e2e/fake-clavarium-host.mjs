@@ -449,6 +449,12 @@ if (area === 'vm') {
             console.log(lines.join('\n'));
             process.exit(0);
         }
+        /* Its heartbeat put in the machine (server/beat.mjs): written down, never run here (it is root's, for a
+           real machine's systemd). */
+        if (program === 'sh' && rest[0] === '-c' && rest[2] === 'clavarium-beat-install') {
+            appendFileSync(join(home(vm), 'beat-installs'), `${rest.slice(3).join(' ')}\n`);
+            process.exit(0);
+        }
         /* A conversation carried elsewhere (#351): the server's own script, run in the machine's home here. */
         if (program === 'sh' && rest[0] === '-c' && (rest[2] === 'export' || rest[2] === 'import')) {
             const homeDir = inVm(vm, '/home/ubuntu'); mkdirSync(homeDir, { recursive: true });
