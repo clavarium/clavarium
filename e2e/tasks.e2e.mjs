@@ -79,5 +79,19 @@ test('Batches beside the chat: none until its tool makes its binder of batches; 
     await phone.page.goBack();
     await phone.until('Back closes it', async () => !(await small.locator('.parley-panel').isVisible()));
 
+    /* The chat shown, left alone a while: each thing asked by one clock only -- the thread by Parley's (3 s), not
+       again by the page's own (5 s); the files of the plain screen not read under the chat. */
+    const asked = [];
+    const note = (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/api/')) asked.push(`${u.pathname}${u.search}`); };
+    phone.page.on('request', note);
+    await new Promise((r) => setTimeout(r, 12_000));
+    phone.page.off('request', note);
+    const count = (re) => asked.filter((x) => re.test(x)).length;
+    const looks = count(/^\/api\/conversations\/coder\/talk\?.*since=/);
+    console.log(`in 12 s: ${asked.length} asked, ${looks} looks at the thread, ${count(/state=1/)} states, ${count(/^\/api\/binder\/people/)} people, ${count(/^\/api\/conversations$/)} lists`);
+    assert.ok(looks >= 2 && looks <= 5, `the thread looked at by one clock: ${looks} in 12 s`);
+    assert.equal(count(/^\/api\/files\?/), 0, 'no files read under the chat');
+    assert.ok(count(/^\/api\/binder\/people/) <= 4, `people asked once a turn: ${count(/^\/api\/binder\/people/)}`);
+
     assert.deepEqual([...me.errors, ...phone.errors], []);
 });
