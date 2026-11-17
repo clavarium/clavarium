@@ -6,8 +6,9 @@ import { mkdtempSync, rmSync, mkdirSync, symlinkSync, readFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../server/store.mjs';
-import { Dockets, WAKE, AGAIN_MS, TOLD_MAX } from '../server/dockets.mjs';
+import { Dockets, WAKE, AGAIN_MS, AGAIN_STEPS_MS, TOLD_MAX } from '../server/dockets.mjs';
 import { Wakeups } from '../server/wakeups.mjs';
+import { TYPED_AT } from '../server/terminaltype.mjs';
 import { pathToFileURL } from 'node:url';
 import { packageFile } from '../server/parley.mjs';
 
@@ -35,7 +36,7 @@ function bench(t) {
 }
 const settle = () => new Promise((r) => { setTimeout(r, 60); });
 
-test('a wake-up where the chat is on is an event in its docket: told in one line, told again when idle, then said not handled', async (t) => {
+test('a wake-up where the chat is on is an event in its docket: told in one line, told again when idle, further apart, said not handled, never given up', async (t) => {
     const b = bench(t);
     const e = b.dockets.post('worker', { kind: 'arrival', text: 'New in handoff: a.md', data: { wakeup: 'w1' } });
     assert.match(b.tool().out, /Waiting \(1\).*\n {2}\[\w{8}\] 2026-10-22 12:00 clavarium\/arrival: New in handoff: a\.md/s, 'the tool sees it with "docket"');
@@ -43,7 +44,7 @@ test('a wake-up where the chat is on is an event in its docket: told in one line
     assert.deepEqual(b.said, [['worker', WAKE]], 'told once, in one line: what woke it is never on that line');
     await b.dockets.tick();
     assert.equal(b.said.length, 1, 'not told again at once');
-    /* Busy in a turn: not told again; idle, after a while: told again, at most TOLD_MAX times. */
+    /* Busy in a turn: not told again; idle, after a while: told again, further apart each time, never given up. */
     b.later(AGAIN_MS); b.world.idle = false;
     await b.dockets.tick();
     assert.equal(b.said.length, 1);
@@ -51,13 +52,19 @@ test('a wake-up where the chat is on is an event in its docket: told in one line
     await b.dockets.tick();
     assert.equal(b.said.length, 2);
     b.later(AGAIN_MS); await b.dockets.tick();
+    assert.equal(b.said.length, 2, 'further apart: not yet');
+    b.later(AGAIN_STEPS_MS[1] - AGAIN_MS); await b.dockets.tick();
     assert.equal(b.said.length, TOLD_MAX);
     b.later(AGAIN_MS); await b.dockets.tick();
-    assert.equal(b.said.length, TOLD_MAX, 'no more');
     assert.deepEqual(b.lines.filter((l) => l[1] === 'docket-unhandled'), [['worker', 'docket-unhandled', `Not handled, told ${TOLD_MAX} times: New in handoff: a.md`]]);
     await b.dockets.tick();
     assert.equal(b.lines.filter((l) => l[1] === 'docket-unhandled').length, 1, 'said once');
-    assert.equal(b.dockets.of('worker').events[0].told, TOLD_MAX);
+    b.later(AGAIN_STEPS_MS.at(-1)); await b.dockets.tick();
+    assert.equal(b.said.length, TOLD_MAX + 1, 'still told: no silent give-up');
+    b.later(AGAIN_STEPS_MS.at(-1)); await b.dockets.tick();
+    assert.equal(b.said.length, TOLD_MAX + 2, 'the last step, for ever after');
+    assert.equal(b.lines.filter((l) => l[1] === 'docket-unhandled').length, 1, 'its chat said it once');
+    assert.equal(b.dockets.of('worker').events[0].told, TOLD_MAX + 2);
     assert.equal(e.from, 'clavarium');
 });
 
@@ -121,7 +128,7 @@ test('a wake-up of a conversation whose chat is on goes to its docket; with the 
     let on = true;
     const world = { now: new Date(2026, 0, 5, 6, 0, 0) };
     const wakeups = new Wakeups({ store: new Store(join(dir, 'w.json')), conversations: { list: () => [{ name: 'worker' }], awake: () => ['worker'] }, resources: { of: () => [] },
-        vms: { exec: async (name, argv) => { if (argv.includes('-l')) typed.push(argv.at(-1)); return { code: 0 }; } }, now: () => new Date(world.now), fired: (name, what) => fired.push(what.text),
+        vms: { exec: async (name, argv) => { if (argv.includes('-l')) typed.push(argv[TYPED_AT]); return { code: 0 }; } }, now: () => new Date(world.now), fired: (name, what) => fired.push(what.text),
         docket: { on: () => on, post: (name, e) => { posted.push([name, e]); return { id: 'e1' }; } } });
     const { items: [item] } = wakeups.add('worker', { kind: 'every', minutes: 5, message: 'Look at the inbox.' });
     world.now = new Date(world.now.getTime() + 5 * 60_000);
