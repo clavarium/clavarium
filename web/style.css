@@ -789,6 +789,12 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 #nav button[aria-current="page"] .nav-ic { stroke: var(--brass); }
 /* On a wide screen the list above is the menu, always there (the « button shows it when folded): the bar holds only the places of the whole. A phone keeps it: there the list is a screen of its own. */
 @media (min-width: 701px) { #nav #nav-conversations { display: none; } }
+/* Wide enough, the four places two by two (17-11: a lighter block under the list); narrow, one a line. */
+@media (min-width: 701px) {
+  #nav { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 6.5rem), 1fr)); }
+  #nav button { gap: 8px; padding-inline: 8px; min-width: 0; }
+  #nav button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 @media (max-width: 700px) {
   /* A phone: a bar along the bottom, above the system's own strip; gone inside a conversation and while typing. */
   #nav { grid-row: 2; flex-direction: row; gap: 0; padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0)); border-right: 0; }
@@ -1259,6 +1265,18 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .ag-bar button { padding: 4px 10px; }
 .as-agenda { display: flex; flex-direction: column; gap: 6px; }
 .as-agenda[aria-busy="true"] .ag-days { opacity: .6; }
+.as-reading { display: flex; flex-direction: column; gap: 8px; padding: 10px 2px; }
+.as-reading-head { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink2); font-size: .875rem; }
+.as-spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--ink2) 30%, transparent); border-top-color: var(--brass); animation: as-spin .8s linear infinite; }
+.as-skel { height: 12px; width: var(--w, 70%); border-radius: 6px; background: linear-gradient(90deg, color-mix(in srgb, var(--ink) 7%, transparent) 25%, color-mix(in srgb, var(--ink) 14%, transparent) 50%, color-mix(in srgb, var(--ink) 7%, transparent) 75%); background-size: 200% 100%; animation: as-shimmer 1.4s ease-in-out infinite; }
+/* Read again over what is shown: a bar moving along the top, the rows dimmed. */
+.as-agenda { position: relative; }
+.as-agenda[aria-busy="true"]:has(> :not(.as-reading))::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; border-radius: 3px; z-index: 1; background: linear-gradient(90deg, transparent, var(--brass), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: as-bar 1.1s ease-in-out infinite; }
+.as-agenda[aria-busy="true"] > :not(.as-reading) { opacity: .6; transition: opacity .2s; }
+@keyframes as-spin { to { transform: rotate(360deg); } }
+@keyframes as-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@keyframes as-bar { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@media (prefers-reduced-motion: reduce) { .as-spin, .as-skel, .as-agenda[aria-busy="true"]::before { animation: none; } }
 .ag-days { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); padding: 8px 12px; }
 .ag-day { display: flex; flex-direction: column; gap: 2px; }
 .ag-dayhead { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; font-size: .8125rem; color: var(--ink2); text-transform: capitalize; }

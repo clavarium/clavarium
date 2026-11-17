@@ -19,6 +19,8 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
     const connector = { run: async (verb, target, a, ctx) => {
         reads.push({ verb, from: a.from, by: ctx.person?.id });
         if (verb !== 'calendar.list') throw new Error(`${verb} is not done here`);
+        /* A calendar takes a moment to answer: the page shows it is reading (17-11). */
+        await new Promise((ok) => setTimeout(ok, 1500));
         const at = (n, hm) => `${addDays(today, n)}T${hm}`;
         return { text: 'listed', size: 6, events: [
             { id: 'e1', title: 'Early call', start: at(0, '00:05'), end: at(0, '00:35'), location: 'Room 2', show: 'busy' },
@@ -36,7 +38,11 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
     await me.until('the Assets place', async () => page.locator('#assets').isVisible());
     await page.locator('#assets-rows .as-row[data-asset="connexion:work-calendar"]').click();
     const agenda = page.locator('#assets-detail .as-agenda');
+    await me.until('reading, seen', async () => (await agenda.locator('.as-reading[role="status"] .as-spin').count()) === 1 && (await agenda.locator('.as-reading .as-skel').count()) === 4);
+    assert.match(await agenda.locator('.as-reading').innerText(), /Reading/);
+    await shot(page, 'desktop-agenda-reading');
     await me.until('its week', async () => (await agenda.locator('.ag-event').count()) === 5, 20_000);
+    assert.equal(await agenda.locator('.as-reading').count(), 0, 'the reading sign gone');
     assert.equal(await agenda.locator('.ag-day[data-today] .ag-now').count(), 1, 'now, once, on today');
     assert.deepEqual(await agenda.locator('.ag-day[data-today] .ag-title').allInnerTexts(), ['Early call', 'Annulé: Grooming', 'Team review']);
     /* A cancelled meeting stays shown, struck out, and said in words (17-11). */
@@ -65,6 +71,9 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
     assert.equal(await agenda.locator('.ag-event[open]').count(), 1, 'the event stays open');
     /* Next week: read from 7 days on; Today: back. */
     await page.locator('#assets-detail .ag-bar button').nth(2).click();
+    /* Read again over what is shown: busy, its bar moving on top, the old week dimmed. */
+    await me.until('busy over the old week', async () => (await agenda.getAttribute('aria-busy')) === 'true');
+    assert.notEqual(await agenda.evaluate((n) => getComputedStyle(n, '::before').content), 'none', 'the bar on top');
     await me.until('next week read', async () => reads.length === 2);
     await me.until('no today there', async () => (await agenda.locator('.ag-day[data-today]').count()) === 0);
     await page.locator('#assets-detail .ag-bar button').nth(1).click();

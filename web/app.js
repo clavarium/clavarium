@@ -6364,10 +6364,20 @@
         if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-ag-partial', 'Start times only, for now')));
         holder.replaceChildren(shown, list, ...notes);
     }
+    /* WHILE A CALENDAR, A MAILBOX OR AN ADDRESS BOOK IS READ (17-11, the transitions persona): seen at once -- a turning
+       sign, the word, and grey lines where the rows will come; read again over what is shown, a moving bar on top
+       (style.css, [aria-busy]). Said once to a screen reader (role=status). */
+    function readingNote(rows) {
+        const box = el('div', 'as-reading'); box.setAttribute('role', 'status');
+        const head = el('p', 'as-reading-head'); head.append(el('span', 'as-spin'), el('span', '', uiSaid('set-ag-reading', 'Reading…')));
+        box.append(head);
+        for (let i = 0; i < rows; i++) { const r = el('div', 'as-skel'); r.setAttribute('aria-hidden', 'true'); r.style.setProperty('--w', `${[78, 62, 86, 54][i % 4]}%`); box.append(r); }
+        return box;
+    }
     async function agendaFill(holder, target, opts) {
         const from = agendaFrom.get(target) ?? wallNow(agendaZone).slice(0, 10);
         holder.setAttribute('aria-busy', 'true');
-        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        if (!holder.childElementCount) holder.append(readingNote(4));
         const answer = await agendaRead(target, from, opts);
         holder.removeAttribute('aria-busy');
         if (!holder.isConnected) return;
@@ -6760,7 +6770,7 @@
         const body = box.querySelector('.mv-body');
         if (body.dataset.filled) return;
         body.dataset.filled = '1';
-        body.replaceChildren(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        body.replaceChildren(readingNote(2));
         const got = await peekRead(`mail-read|${target}|${folder}|${m.id}`, 'mail-read', { target, id: m.id, folder }, uiSaid('set-mv-failed-one', 'This message could not be read.'));
         if (!body.isConnected) return;
         if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
@@ -6804,7 +6814,7 @@
     async function mailFill(holder, target, opts) {
         const s = peekOf(target);
         holder.setAttribute('aria-busy', 'true');
-        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        if (!holder.childElementCount) holder.append(readingNote(4));
         const answer = await peekRead(`mail-list|${target}|${s.folder}|${s.text}`, 'mail-list', { target, folder: s.folder, text: s.text }, uiSaid('set-mv-failed', 'The mailbox could not be read.'), opts);
         holder.removeAttribute('aria-busy');
         if (!holder.isConnected) return;
@@ -6846,7 +6856,7 @@
         const body = box.querySelector('.mv-body');
         if (body.dataset.filled) return;
         body.dataset.filled = '1';
-        body.replaceChildren(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        body.replaceChildren(readingNote(2));
         const got = await peekRead(`contact|${target}|${c.id}`, 'contact', { target, id: c.id }, uiSaid('set-ct-failed-one', 'This contact could not be read.'));
         if (!body.isConnected) return;
         if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
@@ -6877,7 +6887,7 @@
     async function contactsFill(holder, target, opts) {
         const s = peekOf(target);
         holder.setAttribute('aria-busy', 'true');
-        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        if (!holder.childElementCount) holder.append(readingNote(4));
         const answer = await peekRead(`contacts|${target}|${s.text}`, 'contacts', { target, text: s.text }, uiSaid('set-ct-failed', 'The address book could not be read.'), opts);
         holder.removeAttribute('aria-busy');
         if (!holder.isConnected) return;
