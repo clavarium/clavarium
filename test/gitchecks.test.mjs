@@ -176,3 +176,19 @@ test('the checks are told they run in a copy at the commit sent, whatever branch
     assert.match(r.stdout, new RegExp(`head=${sent} repo=${repo}`));
     assert.match(r.stdout, /\nsame\n/);
 });
+
+test('the agents\' copies are fetched two at a time at most, across repositories: never one sudo per repository and machine side by side', async () => {
+    let now = 0; let most = 0; const ends = [];
+    const vms = { exec: () => { now += 1; most = Math.max(most, now); return new Promise((resolve) => { ends.push(() => { now -= 1; resolve({ code: 0, stdout: '' }); }); }); } };
+    const checks = new GitChecks({ vms, conversations: { awake: () => [] }, resources: { of: () => [] } });
+    let settled = 0;
+    const all = Array.from({ length: 12 }, (_, i) => checks.fetchIn(`c${i % 4}`, `repo${i}`).finally(() => { settled += 1; }));
+    for (let i = 0; i < 200 && settled < 12; i++) { await new Promise((r) => setImmediate(r)); ends.shift()?.(); }
+    const got = await Promise.all(all);
+    assert.equal(most, 2, `at once: ${most}`);
+    assert.ok(got.every((x) => x.ok), 'each one done in its turn');
+    /* One that fails gives its place back. */
+    const failing = new GitChecks({ vms: { exec: async () => { throw new Error('gone'); } }, conversations: { awake: () => [] }, resources: { of: () => [] } });
+    const after = await Promise.all(Array.from({ length: 5 }, () => failing.fetchIn('c', 'r')));
+    assert.ok(after.every((x) => x.ok === false));
+});

@@ -1971,7 +1971,19 @@
         $('items').querySelector(again)?.focus();
     });
 
-    async function refresh() {
+    /* One reading of the list at a time: one asked while one runs waits for it, then one more is made for all
+       who asked meanwhile (what they just changed is in it) -- never two side by side, nor two timers left armed. */
+    let refreshing = null;
+    let refreshAgain = null;
+    function refresh() {
+        if (refreshing) { refreshAgain ??= refreshing.then(() => { refreshAgain = null; return refresh(); }); return refreshAgain; }
+        refreshing = refreshOnce().finally(() => { refreshing = null; });
+        return refreshing;
+    }
+    /* A page out of sight (another tab, a tablet asleep) reads its list seldom; shown again, at once. */
+    const HIDDEN_POLL_MS = 30_000;
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && home) void refresh(); });
+    async function refreshOnce() {
         clearTimeout(pollTimer);
         try {
             const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}/${Boolean(x.machine)}/${x.stopped === true}/${Boolean(x.lentTo)}` : '');
@@ -2024,7 +2036,9 @@
         if (!DEVICE && panelShown) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
         if (!DEVICE && home) void paintJobs();
         /* A start told step by step is asked about more often: its tool appears soon after its last step. */
-        if (home) pollTimer = setTimeout(refresh, conversations.some(holds) || conversations.some((c) => c.machine) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
+        clearTimeout(pollTimer);
+        const every = conversations.some(holds) || conversations.some((c) => c.machine) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000;
+        if (home) pollTimer = setTimeout(refresh, document.hidden ? Math.max(every, HIDDEN_POLL_MS) : every);
     }
 
     /* ---------- WHAT IT IS DOING (jobs.mjs, 14-11) ----------
@@ -3573,7 +3587,8 @@
                 : state === 'live' ? 'It is there. Below: what is ready, and what it says now.' : `Its screen: ${state}.`;
         $('simple-state').dataset.needs = String(Boolean(c?.answerer?.needs));
         $('simple-says').textContent = saysNow() || 'Nothing on its screen yet.';
-        if (Date.now() - simpleFilesAt > 8000) void paintSimpleFiles();
+        /* Its files are under the plain screen: not read while the chat covers it. */
+        if (Date.now() - simpleFilesAt > 8000 && !$('simple-plain').hidden) void paintSimpleFiles();
     }
     $('simple-toggle').addEventListener('click', () => toggleSimple());
     function toggleSimple() {
@@ -3596,6 +3611,7 @@
        it moved, and then only what changed (the server's cursor). The chat open keeps its own copy as it
        looks again. Opened, the copy is drawn at once, then the whole window is fetched and put in its place. */
     const KEPT_LAST = 50;
+    const KEPT_EVERY_MS = 10_000;
     const kept = new Map();
     /* Kept once loaded: an import() asked again resolves only after the next frame, a blank one. */
     let parleyLoaded = null;
@@ -3613,6 +3629,8 @@
                 const mark = JSON.stringify(c.talk);
                 const was = kept.get(c.name);
                 if (was?.mark === mark && was.thread) continue;
+                /* Moved again soon after (the list read every 1.5 s while a machine works): its copy waits a little. */
+                if (was?.thread && Date.now() - (was.at ?? 0) < KEPT_EVERY_MS) continue;
                 const cursor = typeof was?.thread?.cursor === 'string' && was.thread.cursor ? was.thread.cursor : null;
                 const ask = (params) => fetch(talkPath(c.name, '', params)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
                 const [state, got] = await Promise.all([ask({ state: 1 }), ask({ last: KEPT_LAST, ...(cursor ? { since: cursor } : {}) })]);
@@ -3620,7 +3638,7 @@
                 if (c.name === threadOf) continue;
                 if (state && state.on !== true) { kept.delete(c.name); continue; }
                 if (!state || !Array.isArray(got?.messages)) continue;
-                kept.set(c.name, { state, thread: cursor ? since(was.thread, got) : got, mark });
+                kept.set(c.name, { state, thread: cursor ? since(was.thread, got) : got, mark, at: Date.now() });
             }
         } finally { keeping = false; }
     }
@@ -3668,7 +3686,8 @@
         if (talk.on) keptOf(name).state = talk; else kept.delete(name);
         return talk;
     }
-    async function paintThread() {
+    /* `look`: false from the clock below -- the thread drawn already is not asked again (its own clock does). */
+    async function paintThread(look = true) {
         const box = $('simple-thread');
         const wanted = talk.on && talkOf === current;
         box.hidden = !wanted;
@@ -3696,7 +3715,7 @@
         if ((wanted || offer) && simple && stopListening) stopVoice();
         paintSimple();
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
-        if (thread && threadOf === current) { void thread.refresh(); return; }
+        if (thread && threadOf === current) { if (look !== false) void thread.refresh(); return; }
         thread?.destroy(); thread = null; threadOf = '';
         const name = current;
         /* From where this page is: a device's page lives under /c/, and nothing else is open to it. */
@@ -3851,7 +3870,7 @@
         tasksTimer = setInterval(async () => {
             if (!thread) { clearInterval(tasksTimer); tasksTimer = null; return; }
             if (document.hidden) return;
-            const now = await getJson('/binder/people', null);
+            const now = await peopleNow();
             if (!now || now.changes === tasksChanges) return;
             tasksChanges = now.changes; binderPeople = now.people;
             void paintTasks(threadOf);
@@ -4249,7 +4268,9 @@
         all.hidden = !all.hidden;
         if (!all.hidden && wordsSettings) all.textContent = JSON.stringify(Object.fromEntries(Object.entries(wordsSettings.english).filter(([key]) => key !== 'lang')), null, 2);
     });
-    setInterval(() => { if (!document.hidden && current) void readTalk().then(() => { if (simple) void paintThread(); paintSimple(); }); }, 5000);
+    /* Its chat drawn already: Parley's own clock looks at its thread (every 3 s) -- not asked again here,
+       which made two looks side by side (paintThread(false)). */
+    setInterval(() => { if (!document.hidden && current) void readTalk().then(() => { if (simple) void paintThread(false); paintSimple(); }); }, 5000);
 
     $('simple-say').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -4535,6 +4556,17 @@
             await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));   /* busy a moment: asked again */
         }
         return fallback;
+    };
+    /* WHO MAY OWN A CARD, and the binders' count of changes (GET /binder/people): asked by two clocks (the chat's
+       batches, the Binders tab) and a binder opened. One question at a time, and its answer kept a moment, under
+       the 4 s of those clocks: each still sees a change at its next turn, without asking twice. */
+    const PEOPLE_KEPT_MS = 3000;
+    let peopleAsked = null; let peopleAt = 0;
+    const peopleNow = () => {
+        if (peopleAsked && (peopleAt === 0 || Date.now() - peopleAt < PEOPLE_KEPT_MS)) return peopleAsked;
+        const asking = getJson('/binder/people', null).then((got) => { if (peopleAsked === asking) { if (got) peopleAt = Date.now(); else peopleAsked = null; } return got; });
+        peopleAsked = asking; peopleAt = 0;
+        return asking;
     };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     /* A commit: its line, and the rest of its message under it, opened by a click. */
@@ -6618,6 +6650,8 @@
             if (v.root.isConnected) { v.away = 0; continue; }
             v.away += 1;
             if (v.away >= 3 && v.socket) { const ws = v.socket; v.socket = null; v.phase = 'closed'; try { ws.close(); } catch { /* gone */ } }
+            /* Its chat too: not read every 3 s for a screen no longer there (drawn again when it is shown). */
+            if (v.away >= 3 && v.chat) { v.chat.destroy(); v.chat = null; v.chatOf = ''; }
         }
     }, 10_000);
     /* The parts: the console (kept), then what the AI proposes and has typed, then the journal (drawn each paint). */
@@ -6633,6 +6667,7 @@
             if (!v.opened) { v.term.open(v.screen); v.opened = true; }
             v.fit();
             if (!v.socket) consoleConnect(v);
+            if ((v.full || v.below) && !v.chatOf) void consoleChat(v);
             if (hadFocus) v.term.focus();
         });
         consolePaint(v);
@@ -7101,7 +7136,7 @@
         card.dataset.room = r.id;
         return card;
     }
-    let salonThread = null; let salonId = ''; let salonTimer = null;
+    let salonThread = null; let salonId = '';
     /* A room's bar while one of its AIs speaks: its dot at work (gold, breathing), the words under its name. */
     function salonLive(who) {
         const dot = $('salon-state'); const line = $('salon-live');
@@ -7118,7 +7153,7 @@
         const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? uiSaid('set-room-people', 'People') : k === 'ai' ? uiSaid('set-room-ais-of', 'AIs') : uiSaid('set-room-boxes-of', 'Boxes')), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', uiSaid('set-room-host-mark', 'host'))); return x; })); return row; }).filter(Boolean);
         $('salon-members').replaceChildren(...rows);
     }
-    function salonLeft() { clearInterval(salonTimer); salonTimer = null; salonThread?.destroy(); salonThread = null; salonId = ''; }
+    function salonLeft() { salonThread?.destroy(); salonThread = null; salonId = ''; }
     /* `step`: picked by the owner (the list, the deck): as a conversation picked, the list folds. */
     async function openSalon(id, push = true, { step = false } = {}) {
         if (DEVICE) return;
@@ -7204,7 +7239,7 @@
             draft: `room:${id}`,
             act: (action) => { tetherAct(action, () => salonThread?.refresh?.()); },
         });
-        salonTimer = setInterval(() => { if (salonThread && salonId === id) void salonThread.refresh(); }, 3000);
+        /* Looked at again by Parley's own clock (every 3 s, while the page is in sight): no second clock here. */
     }
     $('salon-close').addEventListener('click', () => leavePlace());
     $('salon-who').addEventListener('click', () => { const open = $('salon-members').hidden; $('salon-members').hidden = !open; $('salon-who').setAttribute('aria-expanded', String(open)); });
@@ -7902,7 +7937,7 @@
     /* `still()`: whether it is still wanted once its parts are read (another one asked meanwhile: not drawn). */
     async function mountBinder(holder, keep, { onLists, of, place: at = null, steps = null, still = () => true } = {}) {
         binderParts ??= Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${binderLang()}.json`).then((r) => r.json()).catch(() => ({}))]);
-        const [[{ mount }, words], seen] = await Promise.all([binderParts, getJson('/binder/people', null)]);
+        const [[{ mount }, words], seen] = await Promise.all([binderParts, peopleNow()]);
         if (seen) { binderPeople = seen.people; binderChanges = seen.changes; }
         if (!holder.isConnected || !still()) return null;
         let shown = [];
@@ -8099,7 +8134,7 @@
     /* Read again every screen of a binder when the binders changed. Taken as seen only once every
        screen read it again: one that failed (the server restarting) is read again at the next turn. */
     async function catchUpBinders() {
-        const now = await getJson('/binder/people', null);
+        const now = await peopleNow();
         if (!now) return;
         binderPeople = now.people;
         if (now.changes === binderChanges) return;
