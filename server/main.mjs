@@ -562,7 +562,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
            what is already known of a machine used instead of asking (talk.mjs). */
-        terminal: { open: (name) => bridge?.open(name) ?? false, type: (name, line, ms) => bridge?.type(name, line, ms) ?? false, droppedAt: (name) => bridge?.droppedAt(name) },
+        /* `settled` (17-11): how long its terminal has been open and quiet -- without it, the line after a restart
+           was typed REREAD_AFTER_MS after, into a tool maybe still loading (talk.mjs, READY). */
+        terminal: { open: (name) => bridge?.open(name) ?? false, type: (name, line, ms) => bridge?.type(name, line, ms) ?? false, droppedAt: (name) => bridge?.droppedAt(name), settled: (name) => bridge?.settled(name) ?? null },
         health: { of: (name) => health?.of(name) ?? null },
         /* A secret pasted in a message is lifted out before the message is kept:
            it goes to the short-lived vault and the message keeps only a marker
