@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 /* Loopback addresses other than 127.0.0.1, built so that no address-shaped literal sits in the code. */
 const at = (n) => ['127', '0', '0', String(n)].join('.');
-import { readTaps, readLeases, readBridgeAddress, ruleset, Network, TABLE, isMac, isAddress } from '../server/network.mjs';
+import { readTaps, readLeases, readBridgeAddress, ruleset, Network, TABLE, isMac, isAddress, WATCH_MS } from '../server/network.mjs';
 
 const PROCESSES = [
     '101 /snap/x/qemu-system-x86_64 -nic tap,ifname=tap-15921f81452,script=no,mac=52:54:00:aa:bb:cc -drive file=/var/x/vault/instances/clv-first/disk.img,if=none',
@@ -162,4 +162,20 @@ test('the address comes from the lease of the VM\'s MAC, and is pinned while its
     processes = line(501, 'third', 'tap-a3', MAC1);
     assert.equal(await old.apply(), true);
     assert.ok(applied.includes(`iifname "tap-a3" ether saddr != ${MAC1} drop`));
+});
+
+/* 17-11: three commands to the host every 20 s for a check that openings and machine actions make anyway. */
+test('the watch looks every two minutes, and not in the quiet after a start of the server', async (t) => {
+    assert.equal(WATCH_MS, 120_000);
+    const asked = [];
+    const network = new Network({ host: async (argv) => { asked.push(argv[1]); return { code: 0, stdout: '', stderr: '' }; }, offline: () => [] });
+    t.mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    const stop = network.watch(1000, { quietMs: 2500 });
+    t.after(stop);
+    t.mock.timers.tick(1000); t.mock.timers.tick(1000);
+    await new Promise((ok) => setImmediate(ok));
+    assert.deepEqual(asked, [], 'quiet');
+    t.mock.timers.tick(1000);
+    await new Promise((ok) => setImmediate(ok)); await new Promise((ok) => setImmediate(ok));
+    assert.deepEqual(asked.slice(0, 3), ['taps', 'bridge', 'leases'], 'then looked at');
 });

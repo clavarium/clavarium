@@ -393,6 +393,28 @@ test('the guard: a machine missing a secret, holding one too many, or holding an
     assert.equal(await down.reconcile('alpha', last), null);
 });
 
+test('the guard, given the names the health probe read: nothing asked of the machine when in order; put right otherwise, as when it looks itself', async (t) => {
+    const b = bench(t);
+    const calls = [];
+    const vms = { exec: async (name, argv, options) => { calls.push({ argv: argv.join(' '), input: options?.input }); return { code: 0, stdout: '', stderr: '' }; } };
+    const s = new Secrets({ store: new Store(join(b.dir, 'h.json')), vault: new Vault(join(b.dir, 'h.key')), vms, grants: new Grants(), now: () => b.clock.at });
+    s.set({ name: 'OVH_KEY', value: 'v1' }); s.attach('alpha', 'OVH_KEY', true);
+    const last = await s.reconcile('alpha', undefined, { count: 0, names: [] });
+    assert.ok(calls.some((c) => c.input === 'v1'), 'missing: delivered');
+    assert.ok(!calls.some((c) => c.argv.startsWith('sh -c ls')), 'not looked at by a command of its own');
+    calls.length = 0;
+    assert.equal(await s.reconcile('alpha', last, { count: 1, names: ['OVH_KEY'] }), last);
+    assert.equal(calls.length, 0, 'in order: nothing sent at all');
+    await s.reconcile('alpha', last, { count: 2, names: ['OVH_KEY', 'OLD_ONE'] });
+    assert.ok(calls.some((c) => c.argv.includes('find /run/secrets')), 'one too many: written again');
+    calls.length = 0;
+    await s.reconcile('alpha', last, { count: 2, names: ['OVH_KEY'] });
+    assert.ok(calls.some((c) => c.input === 'v1'), 'more there than were listed: never taken as in order');
+    calls.length = 0;
+    await s.reconcile('alpha', last, { count: 1, names: ['?'] });
+    assert.ok(calls.some((c) => c.input === 'v1'), 'a name that is not a plain one: written again');
+});
+
 test('in a shared machine its secrets go to its own folder, for its own user: never the others\' (#221)', async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'clv-sec-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));

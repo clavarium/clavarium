@@ -207,7 +207,7 @@ export class GitReview {
 
     /* Fetches the remote's branches into the reference, making it the first
        time. Under the reference's lock. Resolves { ok, message, rewritten,
-       made, brought }; `rewritten`: branches whose tip before is not an
+       made, brought, mark }; `rewritten`: branches whose tip before is not an
        ancestor of their tip now, or that are gone; `brought`: branches that
        came with commits the reference did not have, { branch, commits }.
        The only writer of the reference. */
@@ -289,7 +289,10 @@ export class GitReview {
         await this.#learnDefault(r, remote).catch(() => {});
         /* When the reference was last brought up to date: the list shown at once says "as of" it. */
         this.#store.put({ ...this.#record(r.name), name: r.name, fetchedAt: this.#now().toISOString() });
-        return said({ ok: true, message: 'Up to date with the remote.', rewritten, made, brought });
+        /* `mark`: the reference's branches as they are now, so that a caller can tell a
+           refresh that changed nothing (gitkeeper.mjs: no fetch into the machines then). */
+        const mark = [...after].map(([b, id]) => `${b} ${id}`).sort().join('\n');
+        return said({ ok: true, message: 'Up to date with the remote.', rewritten, made, brought, mark });
     }
 
     /* Is `tip` of the agent's branch `b` something the remote lacks? Not

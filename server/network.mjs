@@ -42,8 +42,10 @@ export const isAddress = (v) => typeof v === 'string' && ADDRESS.test(v) && v.sp
 /* An address a VM may hold: not 0.0.0.0, not broadcast, not multicast. */
 const isHostAddress = (v) => isAddress(v) && v.split('.')[0] !== '0' && Number(v.split('.')[0]) < 224;
 
-/* How often what runs is looked at, for the rules (see watch). */
-export const WATCH_MS = 20_000;
+/* How often what runs is looked at, for the rules (see watch): three commands to the host each
+   time. Every opening applies them anyway, and so does every action on a machine and a machine
+   found running that was not (main.mjs): this is only for what nothing told. */
+export const WATCH_MS = 120_000;
 export const RELOAD_MS = 10 * 60_000;
 
 /* The running conversation VMs, read from the process list:
@@ -185,8 +187,10 @@ export class Network {
     /* KEPT UP TO DATE (04-11): a machine started by the VM manager itself -- after the server
        restarted -- has a new tap that no opening told: looked at every `everyMs`, the table loaded
        again only when what runs changed. Returns the stop. */
-    watch(everyMs = WATCH_MS) {
-        const timer = setInterval(() => { void this.apply().catch(() => {}); }, everyMs);
+    /* `quietMs`: none that soon after a start of the server (main.mjs, quietStartMs; it applies them once anyway). */
+    watch(everyMs = WATCH_MS, { quietMs = 0 } = {}) {
+        const quietUntil = Date.now() + quietMs;
+        const timer = setInterval(() => { if (Date.now() >= quietUntil) void this.apply().catch(() => {}); }, everyMs);
         timer.unref?.();
         return () => clearInterval(timer);
     }

@@ -9,7 +9,7 @@
 import { isConversationName, identifierFrom, titleProblem, groupProblem } from './names.mjs';
 import { JsonFile } from './store.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
-import { WORK, VM_USER, SHARING_STEP, stepLine, vmName } from './vm.mjs';
+import { WORK, VM_USER, SHARING_STEP, stepLine, vmName, WAIT_FRESH_MS } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 import { homeExcludes, wholeStream, readManifest, workEmpty, unpackHere, restoreWork, CARRY } from './carry.mjs';
@@ -254,7 +254,7 @@ export class Conversations {
             while (!done) {
                 await new Promise((r) => { setTimeout(r, this.#pollMs).unref?.(); });
                 if (done) return;
-                const state = await this.#vms.state(name).catch(() => undefined);
+                const state = await this.#vms.state(name, { within: WAIT_FRESH_MS }).catch(() => undefined);
                 if (done) return;
                 if (how === 'stop' && (state === 'Stopping' || state === 'Suspending')) this.#reach(name, 'stopping');
                 if (how === 'start' && state === 'Running') this.#reach(name, 'answering');
@@ -899,7 +899,7 @@ export class Conversations {
     async #until(name, done, ms) {
         const end = Date.now() + ms;
         for (;;) {
-            const state = await this.#vms.state(name).catch(() => 'Unknown');
+            const state = await this.#vms.state(name, { within: WAIT_FRESH_MS }).catch(() => 'Unknown');
             if (done(state) || Date.now() >= end) return state;
             await new Promise((r) => setTimeout(r, this.#pollMs));
         }

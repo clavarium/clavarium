@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Health, PROBE, PROBE_NAME, readProbe, judge, STUCK_MOUNT, TOOLS_HOST_PATTERN } from '../server/health.mjs';
+import { Health, PROBE, PROBE_NAME, readProbe, judge, STUCK_MOUNT, TOOLS_HOST_PATTERN, SECRETS_LISTED } from '../server/health.mjs';
 import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 import { Grants } from '../server/grants.mjs';
@@ -360,4 +360,42 @@ test('the host of its tools left in a dead folder is looked for too (it serves P
     assert.ok(new RegExp(TOOLS_HOST_PATTERN).test('node /tools/launch/tools-host.mjs /run/user/1000/clavarium-tools-1000'));
     assert.equal(new RegExp(TOOLS_HOST_PATTERN).test(`sh -c for p in $(pgrep -f '${TOOLS_HOST_PATTERN}')`), false, 'never the shell that asks');
     assert.equal(readProbe('stale 4242\n').stale, true);
+});
+
+/* 17-11: the secrets' guard sent `ls /run/secrets` into every machine each minute, on top of this look. */
+test('the probe also lists the names in /run/secrets, how many then each; a name that is not a plain one is kept as "?"', () => {
+    const r = spawnSync('sh', ['-c', PROBE, PROBE_NAME], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const facts = readProbe(r.stdout);
+    assert.ok(facts.secrets && Number.isInteger(facts.secrets.count), r.stdout);
+    assert.deepEqual(readProbe('secrets 2\nsecret OVH_KEY\nsecret a;b c\n').secrets, { count: 2, names: ['OVH_KEY', '?'] });
+    assert.equal(readProbe('secret OVH_KEY\n').secrets, undefined, 'no count: not read');
+    assert.equal(readProbe('secrets 100\n' + Array.from({ length: 100 }, (_, i) => `secret S${i}`).join('\n')).secrets.names.length, SECRETS_LISTED);
+});
+
+test('what a probe that answered found is told (the secrets\' guard reads its names there); a probe that did not answer tells nothing', async (t) => {
+    const m = machine(t, { extra: ['secrets 1', 'secret OVH_KEY'] });
+    const told = [];
+    m.health.probed = (name, facts) => { told.push([name, facts.secrets]); throw new Error('a hook that fails'); };
+    assert.equal((await m.health.check('demo')).level, 'ok');
+    assert.deepEqual(told, [['demo', { count: 1, names: ['OVH_KEY'] }]]);
+    const silent = machine(t, { silent: true });
+    silent.health.probed = () => told.push('silent');
+    await silent.health.check('demo');
+    assert.equal(told.length, 1);
+});
+
+test('the clock waits out the quiet after a start, then looks one machine after another', async (t) => {
+    const probed = [];
+    const vms = { state: async () => 'Running', exec: async (name) => { probed.push([name, Date.now()]); return { code: 0, stdout: 'memory 2097152 1048576\noom 0\ndisk / 5000 8000\n', stderr: '' }; } };
+    const records = new Map(['a', 'b', 'c'].map((n) => [n, { name: n, phase: 'ready', work: 'disk' }]));
+    const health = new Health({ vms, conversations: { get: (n) => records.get(n), awake: () => [...records.keys()] } });
+    const began = Date.now();
+    const stop = health.start(60, { quietMs: 150 });
+    t.after(stop);
+    const until = Date.now() + 3000;
+    while (probed.length < 3 && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(probed.map(([n]) => n), ['a', 'b', 'c']);
+    assert.ok(probed[0][1] - began >= 150, 'not in the quiet');
+    assert.ok(probed[2][1] - probed[0][1] >= 30, 'spread over the tick, not all at once');
 });
