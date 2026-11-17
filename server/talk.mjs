@@ -67,8 +67,8 @@ import { featureWords } from './features.mjs';
 import { settingsWords } from './settingswords.mjs';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
-import { Refusal, SESSION } from './conversations.mjs';
-import { SOCKET } from './tmux.mjs';
+import { Refusal } from './conversations.mjs';
+import { TerminalType } from './terminaltype.mjs';
 import { isConversationName } from './names.mjs';
 
 export const FOLDER = '.parley';
@@ -90,18 +90,12 @@ export function partOf(query) {
     for (const k of ['before', 'from', 'since']) { const v = get(k); if (typeof v === 'string' && PART.test(v)) out[k] = v; }
     return Object.keys(out).length ? out : null;
 }
-const PANE = `=${SESSION}:`;
 /* Nothing is typed in a terminal somebody typed in this recently. */
 export const TYPING_QUIET_MS = 4000;
 /* A line that waits is tried again this often (a machine that does not run is not touched: only its state is asked). */
 export const RETRY_MS = 10_000;
-/* THE LINE AND ITS ENTER ARE TYPED APART, this long apart. Arriving in one
-   read, "text" and Enter look like a paste to a tool that guesses pastes from
-   how fast the keys come (measured in tmux: send-keys of both in one command
-   gives the program one read, "text\r"): the Enter is then a new line in its
-   input, not a send. Waited inside the same tmux command (run-shell -d) or
-   by the terminal bridge: no second call into the machine. */
-export const ENTER_AFTER_MS = 200;
+/* How a line is typed (copy mode left, the line, a pause, Enter: one command): terminaltype.mjs. */
+export { ENTER_AFTER_MS, typeCommand, TYPED_AT, enterCommand, escapeCommand } from './terminaltype.mjs';
 /* WHAT IS KNOWN, NOT ASKED. Asking the VM manager whether the machine runs
    costs half a second for every message (measured on a real server). The
    machine is known to run when its terminal is kept open (it is closed before
@@ -110,24 +104,6 @@ export const ENTER_AFTER_MS = 200;
    cases only if its terminal was not closed since. Anything else is asked. */
 export const TYPED_KNOWN_MS = 60_000;
 export const HEALTH_KNOWN_MS = 150_000;
-/* The one tmux command that types a line, waits, and presses Enter: an
-   argument vector, no shell. tmux reads an argument that ENDS with ";" as the
-   end of a command: such a last ";" is written "\;", which tmux gives back
-   as ";" (tried). */
-export const enterCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Enter'];
-/* Escape, alone: what the Esc key of the page's key row sends -- a tool's current turn stopped (an API key that may act, apikeys.mjs). */
-export const escapeCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Escape'];
-/* A PANE SCROLLED BACK IS IN COPY MODE (`mouse on`: the wheel of any screen puts it there, and it stays
-   there when that screen goes away): the keys of a line typed then are copy-mode commands, the line never
-   reaches the tool and its Enter only leaves the mode (tried with tmux 3.4). The mode is left first, in
-   the same command -- nothing is done to a pane that is not in a mode (no shell: -F reads a format). */
-const LEAVE_MODE = ['if-shell', '-F', '-t', PANE, '#{pane_in_mode}', `send-keys -t ${PANE} -X cancel`, ';'];
-export function typeCommand(line) {
-    const text = line.endsWith(';') ? `${line.slice(0, -1)}\\;` : line;
-    return ['tmux', '-L', SOCKET, ...LEAVE_MODE, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];
-}
-/* Where the line is in typeCommand's argument vector. */
-export const TYPED_AT = 3 + LEAVE_MODE.length + 5;
 /* Added to Parley's invitation, this server's own sentence: a branch can be
    checked out in one folder only, and /tmp is emptied when the machine
    restarts, with the work left there. Typed in a terminal: no quote, no
@@ -236,7 +212,7 @@ const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #spoke; #inRoom; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #ticking = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
-    #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret; #log;
+    #terminal; #typer; #health; #ranAt = new Map(); #kept; #screen; #dropSecret; #log;
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
@@ -246,8 +222,10 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null, log = (line) => console.log(line) }) {
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null, log = (line) => console.log(line), typer = null }) {
         this.#log = log;
+        /* `typer`: the server's one TerminalType (main.mjs), or one of its own made of what is given here. */
+        this.#typer = typer ?? new TerminalType({ vms, terminal, warm, log });
         this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen; this.#dropSecret = dropSecret;
         this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#spoke = spoke; this.#inRoom = inRoom; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
@@ -490,22 +468,16 @@ export class Talk {
         return this.of(name);
     }
 
-    /* Types a line and Enter in the tool's terminal. BY ONE COMMAND IN THE MACHINE FIRST (17-11): it
-       leaves copy mode before it types (typeCommand), which the terminal the bridge keeps open cannot --
-       bytes down it are copy-mode keys while the pane is scrolled back, and the line was lost, said
-       typed. That terminal, into the same tmux pane, when the command fails. Each line said in the log,
-       and each one lost, with why. */
+    /* Types a line and Enter in the tool's terminal, as every line of this server is (terminaltype.mjs):
+       copy mode left, the line, a pause, Enter, by one command in the machine (17-11: the terminal the
+       bridge keeps open cannot leave copy mode -- bytes down it were copy-mode keys while the pane was
+       scrolled back, and the line was lost, said typed); that terminal only when the command fails. Each
+       line said in the log, and each one lost, with why. */
+    /* WAKE and URGENT are the chat's doorbells (ring): heard once its read count moves (RENUDGE_MS). */
     async #type(name, line) {
-        const what = line === WAKE ? 'wake' : line === URGENT ? 'urgent' : line.length > 60 ? `${line.slice(0, 60)}...` : line;
-        await this.#warm(name);
-        const ran = await this.#vms.exec(name, typeCommand(line), { timeoutMs: 30_000 }).catch((error) => ({ code: -1, stderr: error?.message }));
-        if (ran.code === 0) { this.#ranAt.set(name, this.#now()); this.#log(`talk: ${name}: typed (${what})`); return true; }
-        const why = `exit ${ran.code}${ran.stderr ? `: ${String(ran.stderr).trim().slice(0, 200)}` : ''}`;
-        const down = this.#terminal?.open(name) ? await Promise.resolve(this.#terminal.type(name, line, ENTER_AFTER_MS)).catch(() => false) : false;
-        /* The line went, its Enter did not (the channel closed meanwhile): the Enter alone, never the line twice. */
-        const ok = down === true || (down === 'enter' && (await this.#vms.exec(name, enterCommand(), { timeoutMs: 30_000 }).catch(() => ({ code: -1 }))).code === 0);
+        const bell = line === WAKE ? 'chat' : line === URGENT ? 'chat-urgent' : null;
+        const ok = bell ? await this.#typer.ring(name, bell) : await this.#typer.typeLine(name, line, { why: 'talk' });
         if (ok) this.#ranAt.set(name, this.#now());
-        this.#log(ok ? `talk: ${name}: typed down its terminal (${what}), the command in the machine failed (${why})` : `talk: ${name}: NOT typed (${what}): ${why}; ${this.#terminal?.open(name) ? 'its terminal refused too' : 'no terminal open'}`);
         return ok;
     }
 
@@ -754,6 +726,7 @@ export class Talk {
         if (!this.#conversations.awake().includes(name)) return later(RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return later(TYPING_QUIET_MS - quiet + 100);
+        if (this.#typer.busy(name)) return later(RETRY_MS);
         if (!(await this.#runs(name))) return later(RETRY_MS);
         if (this.#terminal?.settled) {
             await this.#warm(name);
@@ -812,6 +785,8 @@ export class Talk {
         if (!this.#conversations.awake().includes(name)) return waits('asleep', RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return waits('typing', TYPING_QUIET_MS - quiet + 100);
+        /* A line left half typed there (TypingWatch): the line waits, never typed into it. */
+        if (this.#typer.busy(name)) return waits('typing', RETRY_MS);
         if (!(await this.#runs(name))) return waits('asleep', RETRY_MS);
         if (renudge) this.#log(`talk: ${name}: still unread ${Math.round((this.#now() - Date.parse(r.typedAt ?? '')) / 1000)} s after its line: typed again (${(r.renudged ?? 0) + 1})`);
         if (!(await this.#type(name, urgent ? URGENT : WAKE).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return waits('failed', RETRY_MS);

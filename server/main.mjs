@@ -27,7 +27,7 @@ import { Conversations, DRAWN_MS, Refusal } from './conversations.mjs';
 import { Store, JsonFile } from './store.mjs';
 import { Instance } from './instance.mjs';
 import { loadTools, screenRules } from './tools.mjs';
-import { SigninHelp, typeInto } from './signinhelp.mjs';
+import { SigninHelp } from './signinhelp.mjs';
 import { Vms, runner } from './vm.mjs';
 import { Resources, WORK_TAB } from './resources.mjs';
 import { download } from './files.mjs';
@@ -46,7 +46,9 @@ import { Dockets, copyPlans } from './dockets.mjs';
 import { PULSE_MS } from 'clavarium-parley/ui';
 import { Wakeups, TypingWatch, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
-import { Talk, escapeCommand } from './talk.mjs';
+import { Talk } from './talk.mjs';
+import { TerminalType } from './terminaltype.mjs';
+import { WAKE as DOCKET_WAKE } from 'clavarium-docket/host';
 import { Toolbox } from './toolbox.mjs';
 import { Guide, commonText } from './guide.mjs';
 import { SignInMailboxes } from './signin.mjs';
@@ -430,7 +432,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        its machine at a start and when a setting changes. `talk` and
        `wakeups` are made below; only asked once the server runs. */
     const guide = new Guide({ store: new Store(`${dataDir}/guide.json`), vms, conversations: all, resources: folders, secrets, toolbox, tools,
-        chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line), reread: () => talk?.rereadCommand() ?? null });
+        chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line, { why: 'guide' }), reread: () => talk?.rereadCommand() ?? null });
     /* Why Parley is not in a machine, said once in the log, not at each opening. */
     const parleySaid = new Map();
     all.prepare = async (name, woke) => {
@@ -473,16 +475,23 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Several models answer a tool's simple questions in the owner's place, where the owner asked: see answerer.mjs. */
     /* The owner's devices are told when something waits for them: see alerts.mjs. */
     const alerts = new Alerts({ store: new Store(`${dataDir}/alerts.json`), keyFile: `${dataDir}/alerts-keys.json`, subject: publicOrigin, ...(alertSend ? { send: alertSend } : {}) });
-    const answerer = new Answerer({ store: new Store(`${dataDir}/answerer.json`), vms, config: answererConfig(env), conversations: all, dataDir, ...(answerFetcher ? { fetcher: answerFetcher } : {}),
+    /* WHO IS TYPING in a terminal from a screen (wakeups.mjs): nothing of this server is typed over them. */
+    const typingWatch = new TypingWatch();
+    let bridge;
+    /* THE ONE WAY THIS SERVER TYPES into a tool's terminal (terminaltype.mjs): its terminal warmed, copy mode
+       left, the line and its Enter in one command, the bridge's terminal only when that fails, each line said. */
+    const typer = new TerminalType({ vms, warm: (name) => bridge?.warm(name), typing: (name) => typingWatch.busy(name),
+        terminal: { open: (name) => bridge?.open(name) ?? false, type: (name, line, ms) => bridge?.type(name, line, ms) ?? false } });
+    const answerer = new Answerer({ typer, store: new Store(`${dataDir}/answerer.json`), vms, config: answererConfig(env), conversations: all, dataDir, ...(answerFetcher ? { fetcher: answerFetcher } : {}),
         onNeeds: (name, why) => { void alerts.tell({ title: `${instance.name()}: ${name} waits for you`, body: why, url: `/?c=${name}` }); } });
     const answerTimer = answerer.start(answerEveryMs);
     /* A tool is told to get to work when something arrives, or by the clock: see wakeups.mjs. */
-    let bridge;
     /* A wake-up typed is said in its chat (talk, made below: called only once a wake-up fires). */
     /* Where its chat is on, what wakes a tool is an event it acknowledges: see dockets.mjs. */
     let signinHelp = null;
     const dockets = new Dockets({ store: new Store(`${dataDir}/dockets.json`), resources: folders,
-        say: (name, line) => wakeups.say(name, line),
+        /* Its one line, WAKE, is a doorbell: heard once the tool acknowledges (dockets.mjs). */
+        say: (name, line) => (line === DOCKET_WAKE ? wakeups.ring(name, 'docket') : wakeups.say(name, line, { why: 'docket' })),
         event: (name, line) => talk.event(name, line),
         alert: (message) => { void alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }); },
         /* Not in a turn: its pulse ended, or is old (Parley's own measure). */
@@ -490,11 +499,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         awake: () => all.awake(), chatOn: (name) => talk.isOn(name),
         /* A sign-in a companion did for another conversation (signinhelp.mjs, made below): its answer typed there. */
         acked: (name, e) => signinHelp?.acked(name, e) });
-    const typingWatch = new TypingWatch();
     /* WHO WOKE IT (16-11): this server opens a terminal for others (a wake-up, a key); said once it wakes one. */
     const wakeWhy = { why: new Map(), set(name, by) { this.why.set(name, by); }, take(name) { const by = this.why.get(name); this.why.delete(name); return by ?? 'the server'; } };
     all.woken = (name, by, was) => events.add({ kind: 'machine', text: `Machine of ${name}: woken by ${by} (it was ${was})`, conversation: name });
-    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => { if (!all.awake().includes(name)) wakeWhy.set(name, 'its wake-up'); return bridge?.warm(name); }, docket: dockets, typing: (name) => typingWatch.busy(name),
+    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => { if (!all.awake().includes(name)) wakeWhy.set(name, 'its wake-up'); return bridge?.warm(name); }, docket: dockets, typing: (name) => typingWatch.busy(name), typer,
         fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
     const wakeTimer = wakeups.start(wakeEveryMs);
     const docketTimer = dockets.start(wakeEveryMs);
@@ -546,7 +554,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         for (const conversation of writers) {
             let path = null;
             if (full) { try { path = talk.keepText(conversation, 'git-remote-refused.txt', full); } catch { path = null; } }
-            if (await wakeups.say(conversation, path ? `${line.replace(/\.$/, '')}; all it said: ${path}.` : line) === true) heard = true;
+            if (await wakeups.say(conversation, path ? `${line.replace(/\.$/, '')}; all it said: ${path}.` : line, { why: 'git keeper' }) === true) heard = true;
         }
         return heard;
     };
@@ -564,7 +572,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
            what is already known of a machine used instead of asking (talk.mjs). */
         /* `settled` (17-11): how long its terminal has been open and quiet -- without it, the line after a restart
            was typed REREAD_AFTER_MS after, into a tool maybe still loading (talk.mjs, READY). */
-        terminal: { open: (name) => bridge?.open(name) ?? false, type: (name, line, ms) => bridge?.type(name, line, ms) ?? false, droppedAt: (name) => bridge?.droppedAt(name), settled: (name) => bridge?.settled(name) ?? null },
+        typer, terminal: { open: (name) => bridge?.open(name) ?? false, droppedAt: (name) => bridge?.droppedAt(name), settled: (name) => bridge?.settled(name) ?? null },
         health: { of: (name) => health?.of(name) ?? null },
         /* A secret pasted in a message is lifted out before the message is kept:
            it goes to the short-lived vault and the message keeps only a marker
@@ -609,7 +617,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         conversations: () => all.list(), tools: () => tools, awake: () => all.awake(), chatOn: (name) => talk.isOn(name),
         workFolder: (name) => folders.workFolder(name),
         browsers: (name) => { try { return tethers.store().targets().filter((t) => t.kind === 'browser').map((t) => ({ id: t.id, level: t.grants?.[`conversation:${name}`]?.level ?? '' })).filter((b) => b.level); } catch { return []; } },
-        post: (name, event) => dockets.post(name, event), type: (name, text) => typeInto(vms, name, text),
+        post: (name, event) => dockets.post(name, event), type: (name, text) => typer.typeLine(name, text, { why: 'sign-in', secret: true }),
         event: (name, line) => talk.event(name, line) });
     const stopSigninHelp = signinHelp.start();
     all.signinHelp = signinHelp;
@@ -676,13 +684,13 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* Its tool told it may install them again: through its docket where its chat is on, else typed to its agent. */
         const line = toolLine(link);
         try { if (dockets.on(name)) { dockets.post(name, { kind: 'shared-folder', text: line, data: { folder: link.folder, path: link.path } }); return; } } catch { /* typed instead */ }
-        if (all.list().find((c) => c.name === name)?.ai === true) void wakeups.say(name, line).catch(() => {});
+        if (all.list().find((c) => c.name === name)?.ai === true) void wakeups.say(name, line, { why: 'link guard' }).catch(() => {});
     };
     const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);
     /* What is wrong with its machine is said in its chat too, where it happened. */
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
-    const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line), exec: (name, argv, options) => vms.exec(name, argv, options),
+    const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line, { why: 'health' }), exec: (name, argv, options) => vms.exec(name, argv, options),
         isAgent: (name) => all.list().find((c) => c.name === name)?.ai === true, event: (name, line) => talk.event(name, line) });
     /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs);
        not where its owner turned on its own reaction (above): one way of telling it, not two. */
@@ -895,8 +903,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             stop: async (name) => {
                 const c = all.get(name);
                 if (c?.phase !== 'ready' || c.asleep === true) throw new Refusal(409, 'This conversation is asleep: nothing to stop.');
-                const r = await vms.exec(name, escapeCommand(), { timeoutMs: 30_000 });
-                if (r.code !== 0) throw new Refusal(502, 'Its turn could not be stopped.');
+                if (!(await typer.sendKey(name, 'Escape', { why: 'API key' }))) throw new Refusal(502, 'Its turn could not be stopped.');
                 return { state: 'awake' };
             },
         },

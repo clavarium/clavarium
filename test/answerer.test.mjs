@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../server/store.mjs';
 import { Answerer, answererConfig, readVerdict, consult, typedByAPerson, sameAs } from '../server/answerer.mjs';
+import { typeCommand, keyCommand, TYPED_AT } from '../server/terminaltype.mjs';
 
 const CONFIG = { url: 'http://127.0.0.1:9/chat', key: 'k', models: ['one', 'two', 'three'] };
 const MANDATE = { objectives: 'Finish the report.', charter: 'You may say yes to going on. Never delete.' };
@@ -76,7 +77,9 @@ function bench(t, say, { limit } = {}) {
     const machine = { screen: 'ready>', typed: [], asked: 0 };
     const vms = { exec: async (name, argv) => {
         if (argv.includes('capture-pane')) return { code: 0, stdout: `${machine.screen}\n\n\n`, stderr: '' };
-        if (argv.includes('send-keys')) { machine.typed.push(argv.slice(argv.indexOf('send-keys') + 3).join(' ')); return { code: 0, stdout: '', stderr: '' }; }
+        /* A line: one command, copy mode left, the line, a pause, Enter; a key: copy mode left, the key (terminaltype.mjs). */
+        if (argv.includes('-l')) { assert.deepEqual(argv, typeCommand(argv[TYPED_AT])); machine.typed.push(`-l -- ${argv[TYPED_AT]}`, 'Enter'); return { code: 0, stdout: '', stderr: '' }; }
+        if (argv.includes('send-keys')) { assert.deepEqual(argv, keyCommand(argv.at(-1))); machine.typed.push(argv.at(-1)); return { code: 0, stdout: '', stderr: '' }; }
         return { code: 1, stdout: '', stderr: '' };
     } };
     const conversations = { list: () => [{ name: 'job' }], awake: () => ['job'] };

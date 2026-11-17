@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../server/store.mjs';
 import { Wakeups, TypingWatch, look, withFiles, cleanMessage, plainName, cron } from '../server/wakeups.mjs';
+import { typeCommand, TYPED_AT } from '../server/terminaltype.mjs';
+
+/* What one command into the machine typed: a line and its Enter, in one command (terminaltype.mjs). */
+const keysOf = (argv) => { assert.deepEqual(argv, typeCommand(argv[TYPED_AT]), 'one command: copy mode left, the line, a pause, Enter'); return [argv[TYPED_AT], 'Enter']; };
 
 function bench(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-wake-'));
@@ -12,7 +16,7 @@ function bench(t) {
     for (const name of ['handoff', 'site', 'mail']) mkdirSync(join(dir, name));
     const typed = [];
     const world = { now: new Date(2026, 0, 5, 6, 0, 0), awake: ['worker'], attached: ['handoff', 'site', 'mail'], runs: true };
-    const vms = { exec: async (name, argv) => { if (!world.runs) return { code: 1 }; const rest = argv.slice(argv.indexOf('send-keys') + 3); typed.push(rest[0] === '-l' ? rest.slice(2).join(' ') : rest.join(' ')); return { code: 0 }; } };
+    const vms = { exec: async (name, argv) => { if (!world.runs) return { code: 1 }; typed.push(...keysOf(argv)); return { code: 0 }; } };
     const conversations = { list: () => [{ name: 'worker' }], awake: () => world.awake };
     const resources = { of: () => world.attached.map((name) => ({ name, access: 'write' })), folder: (name) => join(dir, name), get: (name) => ({ name, type: name === 'site' ? 'git' : name === 'mail' ? 'mailbox' : 'folder' }) };
     const warmed = [];
@@ -269,7 +273,7 @@ test('a line from the server waits while someone types in the terminal, then is 
     const dir = mkdtempSync(join(tmpdir(), 'clv-wake-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const typed = []; let busy = true; let paused = 0;
-    const vms = { exec: async (name, argv) => { const rest = argv.slice(argv.indexOf('send-keys') + 3); typed.push(rest[0] === '-l' ? rest.slice(2).join(' ') : rest.join(' ')); return { code: 0 }; } };
+    const vms = { exec: async (name, argv) => { typed.push(...keysOf(argv)); return { code: 0 }; } };
     const wakeups = new Wakeups({ store: new Store(join(dir, 'w.json')), vms, conversations: { list: () => [{ name: 'worker' }], awake: () => ['worker'] }, resources: { of: () => [] },
         typing: () => busy, pause: async () => { paused += 1; if (paused === 3) busy = false; } });
     assert.equal(await wakeups.say('worker', 'Clavarium, repository site: moved.'), true);
@@ -281,7 +285,7 @@ test('held a few minutes at most: a line left half typed does not keep the serve
     const dir = mkdtempSync(join(tmpdir(), 'clv-wake-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const typed = []; let now = 0;
-    const vms = { exec: async (name, argv) => { typed.push(argv.at(-1)); return { code: 0 }; } };
+    const vms = { exec: async (name, argv) => { typed.push(...keysOf(argv)); return { code: 0 }; } };
     const wakeups = new Wakeups({ store: new Store(join(dir, 'w.json')), vms, conversations: { list: () => [{ name: 'worker' }], awake: () => ['worker'] }, resources: { of: () => [] },
         now: () => new Date(now), typing: () => true, pause: async (ms) => { now += ms; } });
     assert.equal(await wakeups.say('worker', 'hello'), true);
