@@ -57,6 +57,13 @@ export const SETTINGS_WORDS_FR = {
     'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs',
     'set-backup-now': 'Exporter · importer', 'set-git-key': '1 clé git', 'set-git-keys': '{n} clés git', 'set-restart': 'redémarrer',
     'set-logs-now': 'Clavarium, machines, système',
+    /* Diagnostics › Charge (vm.mjs HostTally): les commandes à l'hôte, par fenêtre de 5 minutes. */
+    'set-ch-s-load': 'Charge', 'set-load-about': 'Commandes à l\'hôte, par 5 minutes', 'set-load-copy': 'Copier',
+    'set-load-open': 'maintenant', 'set-load-line': '{n} commandes · {s} s', 'set-load-loop': 'boucle {p50}/{p99} ms',
+    'set-load-none': 'Rien de compté pour le moment', 'set-load-unread': 'Illisible pour le moment', 'set-load-copied': 'Copié',
+    /* Mises à jour: sudo discret (deploy/updater.mjs ensureQuietSudo). */
+    'set-sudo-on': 'Sudo discret : oui ({setting})', 'set-sudo-off': 'Sudo discret : non appliqué : {why}',
+    'set-sudo-seen': '{n} lignes sudo en 10 min',
     'set-dict-backup': 'Secours en service', 'set-dict-expired': 'Clé expirée', 'set-dict-with-backup': 'avec secours', 'set-dict-server': 'réglée sur le serveur',
     'set-offline': 'hors ligne',
     'set-device': '1 appareil', 'set-devices': '{n} appareils', 'set-no-device': 'Aucun appareil', 'set-chat': 'Chat',

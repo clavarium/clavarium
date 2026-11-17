@@ -142,6 +142,7 @@
  *   POST /api/server/machines/<name>/force  its machine forced off, as from its conversation (202)
  *   POST /api/server/vm-manager             {mode: night|always|ask}: when it hangs, restarted by itself at night (default), always, or never
  *   POST /api/server/vm-manager/restart     {confirm: true}: restarted now; every machine is suspended and resumed
+ *   GET  /api/server/load                    host commands by 5-minute window, event-loop delay
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart   POST /api/server/reboot (the whole server)
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
@@ -478,6 +479,8 @@ export async function handleApi(request, response, conversations, headers, resou
                 }));
                 return send(200, history.together(query.get('span') ?? '1h', machines, { memoryMb: a?.memory?.totalMb, cores: room?.cpu?.cores, diskMb: a?.disk?.sizeMb })), true;
             }
+            /* What this server asked of the host, by 5-minute window, and its own event loop (vm.mjs HostTally). */
+            if (pathname === '/api/server/load' && serverLogs) return send(200, serverLogs.load()), true;
             if (pathname === '/api/server/logs' && serverLogs) { const r = await serverLogs.start(query.get('source') ?? 'clavarium', query.get('span') ?? '10m'); return send(r.pending ? 202 : 200, r), true; }
             if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;
             if (pathname === '/api/machines/places' && machinesMove) return send(200, await machinesMove.places()), true;

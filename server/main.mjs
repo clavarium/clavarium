@@ -28,7 +28,7 @@ import { Store, JsonFile } from './store.mjs';
 import { Instance } from './instance.mjs';
 import { loadTools, screenRules } from './tools.mjs';
 import { SigninHelp, typeInto } from './signinhelp.mjs';
-import { Vms, runner } from './vm.mjs';
+import { Vms, runner, HostTally } from './vm.mjs';
 import { Resources, WORK_TAB } from './resources.mjs';
 import { download } from './files.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
@@ -99,6 +99,7 @@ import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
 import { WebSocketServer } from 'ws';
 import { attachConsole } from './sshconsole.mjs';
 import { copyWorkFolder } from './copywork.mjs';
+import { Beat, beatWanted } from './beat.mjs';
 import { accessesOf, relinkAccesses } from './carry.mjs';
 import { Jobs, withUpdates } from './jobs.mjs';
 
@@ -332,11 +333,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const originOk = makeOriginCheck(publicOrigin);
     const instance = new Instance({ file: new JsonFile(`${dataDir}/instance.json`, {}), origin: publicOrigin, given: appName });
     let repairTerminal = async () => { throw new Error('not ready'); };
-    const asHost = runner(host);
+    /* Every command to the host counted (vm.mjs HostTally): said in the log every 5 minutes, and in Settings
+       (Diagnostics, Load). The machines' own commands are counted by Vms, with the same tally. */
+    const hostTally = new HostTally({ loop: true });
+    const hostRun = runner(host);
+    const asHost = hostTally.wrap(hostRun);
     /* A conversation in a shared machine (#221) says which: the machine its VM operations reach. */
     const jobs = new Jobs({ path: `${dataDir}/jobs.json` });
     const conversationStore = new Store(`${dataDir}/conversations.json`, { onChange: (before, after) => jobs.seen(before, after) });
-    const vms = new Vms(asHost, host, {
+    const vms = new Vms(hostRun, host, { tally: hostTally,
         machineOf: (name) => { const m = conversationStore.get(name)?.sharedMachine; return typeof m === 'string' && m ? m : undefined; },
         userOf: (name) => { const u = conversationStore.get(name)?.machineUser; return u && Number.isInteger(u.uid) && Number.isInteger(u.gid) ? u : undefined; },
     });
@@ -442,7 +447,12 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line), reread: () => talk?.rereadCommand() ?? null });
     /* Why Parley is not in a machine, said once in the log, not at each opening. */
     const parleySaid = new Map();
+    /* ITS HEARTBEAT (beat.mjs): with CLAVARIUM_BEAT=health, its health read from its work folder instead of
+       a command every two minutes; put in its machine at an opening (once per version), never waited for. */
+    const beat = new Beat({ on: beatWanted(env.CLAVARIUM_BEAT, 'health'), vms, workFolder: (name) => folders.workFolder(name), conversations: all });
+    if (beat.on) console.log('beat: the health of the machines read from their heartbeat (CLAVARIUM_BEAT)');
     all.prepare = async (name, woke) => {
+        void beat.ensure(name, { woke }).catch(() => {});
         await hostReady;
         secrets.check();
         const wanted = secrets.signature(name);
@@ -689,7 +699,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         try { if (dockets.on(name)) { dockets.post(name, { kind: 'shared-folder', text: line, data: { folder: link.folder, path: link.path } }); return; } } catch { /* typed instead */ }
         if (all.list().find((c) => c.name === name)?.ai === true) void wakeups.say(name, line).catch(() => {});
     };
-    const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
+    const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, beat, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs, { quietMs: quietStartMs });
     /* What is wrong with its machine is said in its chat too, where it happened. */
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
@@ -828,7 +838,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* All the machines to another disk, from Settings (machinesmove.mjs). */
     const machinesMove = new MachinesMove({ host: asHost, usedMb: () => capacity.machinesUsedMb() });
     /* What the server's programs said, and this server started again, from Settings (serverlogs.mjs). */
-    const serverLogs = new ServerLogs({ host: asHost });
+    const serverLogs = new ServerLogs({ host: asHost, load: () => hostTally.windows() });
     /* This server's Wi-Fi, from Settings (wifi.mjs): how a switch ended, said in What happened. */
     const wifi = new Wifi({ host: asHost, said: (text) => events.add({ kind: 'server', text }) });
     /* The remote screen (MeshCentral), from Settings (meshcentral.mjs): how a turn-on ended, said in What happened. */

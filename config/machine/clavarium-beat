@@ -1,0 +1,44 @@
+#!/bin/sh
+# THE HEARTBEAT OF A MACHINE (step 6), run as root by its timer (clavarium-beat.timer, every minute or so):
+# for the conversation of a machine of its own, or for each conversation living in a shared one, the look its
+# server made by a command every two minutes (health.mjs, PROBE) is made here, as that conversation's own user,
+# and written into its /work (beat-one). Its server reads it from its own side: no command into the machine.
+#
+# Root reads nothing that a conversation wrote: only its own settings (beat.conf, written at install) and its
+# own counters (/var/lib/clavarium/beat). Each conversation is given a bounded time; a dead /work only stops
+# its beat, and its server then looks the usual way.
+set -u
+lib=/usr/local/lib/clavarium
+state=/var/lib/clavarium/beat
+mode=""; conversation=""; version=""
+[ -r "$lib/beat.conf" ] || exit 0
+while IFS='=' read -r k v; do
+    case "$k" in mode) mode=$v ;; conversation) conversation=$v ;; version) version=$v ;; esac
+done < "$lib/beat.conf"
+printf '%s' "$version" | grep -Eq '^[0-9A-Za-z.+-]{1,64}$' || exit 0
+ok_name() { printf '%s' "$1" | grep -Eq '^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$'; }
+mkdir -p "$state"; chmod 700 "$state"
+# Its next number: a beat that does not grow is not a new one (read by its server).
+next() {
+    n=$(head -c 20 "$state/$1.seq" 2>/dev/null) || n=0
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    n=$((n + 1)); printf '%s\n' "$n" > "$state/$1.seq"; printf '%s' "$n"
+}
+case "$mode" in
+    own)
+        ok_name "$conversation" || exit 0
+        n=$(next "$conversation")
+        cd / && timeout -k 5 45 runuser -u ubuntu -- env HOME=/home/ubuntu sh "$lib/beat-one" "$conversation" "$n" "$version" </dev/null >/dev/null 2>&1 || true ;;
+    shared)
+        # Only a conversation whose work is shown here now (the host mounts it at /srv/clavarium/NAME/work);
+        # at most 64 of them, one after another.
+        i=0
+        for d in /srv/clavarium/*/; do
+            [ "$i" -lt 64 ] || break
+            c=$(basename "$d"); ok_name "$c" || continue
+            mountpoint -q "/srv/clavarium/$c/work" 2>/dev/null || continue
+            i=$((i + 1)); n=$(next "$c")
+            timeout -k 5 45 /usr/local/sbin/clavarium-enter "$c" -- sh "$lib/beat-one" "$c" "$n" "$version" </dev/null >/dev/null 2>&1 || true
+        done ;;
+esac
+exit 0

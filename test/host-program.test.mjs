@@ -558,6 +558,43 @@ test('machines old / forget-old: read-only size, and no removal when nothing was
     if (f.status === 0) assert.match(f.stdout, /rm -rf \/var\/snap\/multipass\/common\/data\/multipassd\/vault/);
 });
 
+test('server logs: the server read by its own output, sudo and PAM lines left out, a slow journal cut with a note (17-11)', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-logs-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const say = spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', 'server', 'logs', 'clavarium', '10m'], { encoding: 'utf8' });
+    assert.match(say.stdout, /_SYSTEMD_UNIT=clavarium\.service _TRANSPORT=stdout _TRANSPORT=journal \+ UNIT=clavarium\.service _PID=1 \+ _SYSTEMD_UNIT=clavarium-tools-view\.service/);
+    assert.match(say.stdout, /--since -10min -o short-iso --no-pager -q -n 20000/);
+    assert.doesNotMatch(say.stdout, /\+ \(/, 'no trailing +');
+    /* A stand-in journal: what it was asked, a few lines, then as told (slow, failing). */
+    const stand = (body) => { writeFileSync(join(dir, 'journalctl'), `#!/bin/bash\nprintf '%s\\n' "$*" > "${dir}/asked"\n${body}\n`); chmodSync(join(dir, 'journalctl'), 0o755); };
+    const lines = [
+        '2026-11-17T10:00:00+0000 host clavarium[812]: host: 300 commands in 5 min',
+        '2026-11-17T10:00:01+0000 host sudo[9001]: clavarium : PWD=/ ; USER=root ; COMMAND=/usr/local/sbin/clavarium-host vm states',
+        '2026-11-17T10:00:01+0000 host sudo[9001]: pam_unix(sudo:session): session opened for user root(uid=0) by (uid=999)',
+        '2026-11-17T10:00:02+0000 host clavarium[812]: vm manager: ok',
+    ];
+    const run = (source = 'clavarium') => spawnSync('/bin/bash', [PROGRAM, '--test', dir, 'server', 'logs', source, '1'], { encoding: 'utf8' });
+    stand(`printf '%s\\n' ${lines.map((l) => `'${l}'`).join(' ')}`);
+    let r = run('web');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, `${lines[0]}\n${lines[3]}\n`);
+    assert.equal(r.stderr, '');
+    assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /^-u caddy\.service -u oauth2-proxy\.service --since -1h -o short-iso --no-pager -q -n 20000$/m);
+    r = run('clavarium');
+    assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /^_SYSTEMD_UNIT=clavarium\.service _TRANSPORT=stdout _TRANSPORT=journal \+ UNIT=clavarium\.service _PID=1 \+ .*_SYSTEMD_UNIT=clavarium-move-machines\.service \+ UNIT=clavarium-move-machines\.service _PID=1 --since -1h/m);
+    /* Slow: what it said by then, and a note -- exit 0, never a bare failure. */
+    stand(`printf '%s\\n' '${lines[0]}'; sleep 30`);
+    r = run();
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, `${lines[0]}\n`);
+    assert.match(r.stderr, /^NOTE: the journal took more than 2s: what it said by then$/m);
+    /* Failing: its last word said. */
+    stand("echo 'Failed to open journal: Too many open files' >&2; exit 1");
+    r = run();
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /^NOTE: journalctl ended with 1: Failed to open journal: Too many open files$/m);
+});
+
 test('server logs / restart: a source and a span from fixed lists only', () => {
     const say = (...args) => spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', ...args], { encoding: 'utf8' });
     assert.match(say('server', 'logs', 'system', 'boot').stdout, /journalctl -k -b/);

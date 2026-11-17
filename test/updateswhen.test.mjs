@@ -41,6 +41,26 @@ test('what became of the relay at the updater\'s last turn is said with the rest
     assert.equal(u.about().relay, null, 'a state it does not know: nothing');
 });
 
+test('whether sudo is quiet, at the updater\'s last turn, is said with the rest: only what is known, bounded', async (t) => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { Updates } = await import('../server/updates.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-sudo-state-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ version: '0.2.18' }));
+    writeFileSync(join(dir, 'update.conf'), 'MODE=auto\n');
+    const u = new Updates({ host: async () => ({ code: 0 }), version: '0.2.18', stateFile: join(dir, 'state.json'), confFile: join(dir, 'update.conf'), lastLook: () => null });
+    assert.equal(u.about().sudoQuiet, null, 'nothing said yet');
+    writeFileSync(join(dir, 'sudo-quiet.json'), JSON.stringify({ on: true, setting: '!syslog, !pam_session', account: 'clavarium', sudo: 'Sudo version 1.9.15p5', lines10m: 3, at: '2026-11-17T10:00:00.000Z' }));
+    assert.deepEqual(u.about().sudoQuiet, { on: true, setting: '!syslog, !pam_session', why: null, sudo: 'Sudo version 1.9.15p5', lines10m: 3, at: '2026-11-17T10:00:00.000Z' });
+    writeFileSync(join(dir, 'sudo-quiet.json'), JSON.stringify({ on: false, why: 'x'.repeat(900), lines10m: 'many' }));
+    const off = u.about().sudoQuiet;
+    assert.equal(off.on, false); assert.equal(off.why.length, 300); assert.equal(off.lines10m, null);
+    writeFileSync(join(dir, 'sudo-quiet.json'), JSON.stringify({ on: 'yes' }));
+    assert.equal(u.about().sudoQuiet, null, 'not a state: nothing');
+});
+
 test('the history says which failures were only a fetch: the page then says it is tried again by itself, not that it did not start (17-11)', async (t) => {
     const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
     const { join } = await import('node:path');

@@ -3,12 +3,13 @@
  * what belongs to the original alone:
  *   .docket   its reminders and what woke it: they would fire twice;
  *   .tether, .binder   its asks to the keepers and their answers, being answered: the copy asks its own;
- *   .parley's live files   its pulse, its voice boxes, its restart asked, its program (put again by the server).
+ *   .parley's live files   its pulse, its voice boxes, its restart asked, its program (put again by the server);
+ *   .clavarium   its machine's heartbeat and what it looks at (beat.mjs): the copy's machine beats its own.
  * Only plain files, folders and links: anything else (a socket, a pipe) is no work. Its copy keeps their times. */
 import { cp, lstat } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
 
-export const NOT_COPIED = Object.freeze(['.docket', '.tether', '.binder', '.clavarium-carry', '.parley/pulse.json', '.parley/speakers.json', '.parley/restart-asked', '.parley/server.mjs']);
+export const NOT_COPIED = Object.freeze(['.docket', '.tether', '.binder', '.clavarium', '.clavarium-carry', '.parley/pulse.json', '.parley/speakers.json', '.parley/restart-asked', '.parley/server.mjs']);
 
 /* Whether a path of the work folder (relative, '' for the folder itself) is copied. */
 export function copied(path) {
