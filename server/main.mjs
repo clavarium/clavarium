@@ -309,11 +309,20 @@ export function start({ port, command, cwd, env = process.env }) {
 const MAIL_EVERY_MS = 120_000;
 /* An opening waits this long at most for Parley to be installed in its machine (toolbox.mjs). */
 const PARLEY_WAIT_MS = 20_000;
+/* A QUIET START (17-11): after the server starts, its background work on the machines (the
+   references' refreshes and the fetches into the machines, the health looks with the secrets'
+   names, the network watch, every machine's terminal opened beforehand) waits this long, then
+   comes one machine after another: the machines starting again, and the owner's first pages,
+   come first. What a page asks is never held. The server run as a service passes it; a test
+   or a bench that calls startHome itself gets none (quietStartMs: 0). */
+export const QUIET_START_MS = 150_000;
+/* Between two machines of that first round. */
+const QUIET_STEP_MS = 5_000;
 
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS, tetherConnectors, sshProbe }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS, tetherConnectors, sshProbe, quietStartMs = 0 }) {
     /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
     const migrated = migrateData(dataDir);
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
@@ -414,7 +423,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        and the tool is started through the runner. */
     const network = new Network({ host: asHost, offline: () => all.offline() });
     /* A machine the VM manager started by itself (after a reboot) is put in its silo too (04-11). */
-    const stopNetworkWatch = network.watch();
+    const stopNetworkWatch = network.watch(undefined, { quietMs: quietStartMs });
     /* The rules follow what runs: applied now, and again each time a
        conversation is opened, since a VM that just started has a new tap. */
     const hostReady = (async () => { await hostSteps; await network.apply().catch((error) => console.error(`network rules: ${error.message}`)); })();
@@ -554,7 +563,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), last: new Store(`${dataDir}/git-checks.json`), review: gitReview, resources: folders, alerts, tellAgent,
         thread: (conversation, event) => talk.event(conversation, event),
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
-    const gitTimer = gitKeeper.start(gitEveryMs);
+    const gitTimer = gitKeeper.start(gitEveryMs, { quietMs: quietStartMs });
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
     let boxes; let rooms; let machineList;
@@ -598,6 +607,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     };
     /* What an owner did to a machine (start, stop, sleep, force, restart): in the journal, and a line in its chat. */
     all.machineSaid = (name, text, ok, chat) => {
+        /* What runs changed (a start, a stop, a sleep): the rules follow at once, not at the next watch. */
+        void network.apply().catch(() => {});
         events.add({ kind: 'machine', text: `Machine of ${name}: ${text}`, conversation: name });
         if (chat) try { talk.event(name, ok ? { kind: 'machine-ok', text, topic: 'Machine' } : { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine', brief: 'Machine action failed' }); } catch { /* its chat is off */ }
     };
@@ -679,7 +690,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         if (all.list().find((c) => c.name === name)?.ai === true) void wakeups.say(name, line).catch(() => {});
     };
     const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
-    const stopHealth = health.start(healthEveryMs);
+    const stopHealth = health.start(healthEveryMs, { quietMs: quietStartMs });
     /* What is wrong with its machine is said in its chat too, where it happened. */
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
     const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line), exec: (name, argv, options) => vms.exec(name, argv, options),
@@ -701,7 +712,12 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         },
         tell: (name, text, started) => all.renewed(name, text, started),
         alert: (payload) => { events.add({ kind: 'machine', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
+    /* A machine found running that was not (the VM manager started it by itself): its rules at once. */
+    const wasRunning = new Map();
     health.judged = (name, record) => {
+        const running = record?.state === 'Running';
+        if (running && wasRunning.get(name) === false) void network.apply().catch(() => {});
+        if (record?.state !== undefined && record.state !== 'Unknown') wasRunning.set(name, running);
         void watchdog.judged(name, record).catch(() => {});
         try { revive.judged(name, record); } catch { /* its tool: nothing more */ }
         talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
@@ -782,12 +798,27 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const history = new History({ file: `${dataDir}/history.json` });
     const historyLook = () => capacity.room().then((room) => history.sample(room, all.list().filter((c) => c.phase === 'ready').map((c) => ({ name: c.name, vm: `clv-${c.name}`, cores: c.cpus ?? 1, memoryMb: c.memoryMb, health: health.of(c.name) })))).catch(() => {});
     const historyTimer = setInterval(() => { void historyLook(); }, historyEveryMs); historyTimer.unref?.();
-    /* THE SECRETS' GUARD: each minute, every machine that runs is looked at -- the names in its
-       /run/secrets against those it should hold now, and what was last put there against what would
-       be now. A missing one is put back, one too many taken away, a new value given: whatever path
-       changed them (a page, an expiry, a machine restarted behind our back). */
+    /* THE SECRETS' GUARD: every machine that runs is looked at -- the names in its /run/secrets
+       against those it should hold now, and what was last put there against what would be now. A
+       missing one is put back, one too many taken away, a new value given: whatever path changed
+       them (a page, an expiry, a machine restarted behind our back).
+       The names are read by the health probe (health.mjs), in the look made anyway every few
+       minutes: no command of its own. Each minute, what would be put there now is weighed against
+       what was, with nothing asked of the machine: a change (a page, an expiry) is given within
+       the minute, as before. */
+    const guarding = new Set();
+    const guardOne = async (name, listed) => {
+        if (guarding.has(name)) return;
+        guarding.add(name);
+        try { const now = await secrets.reconcile(name, delivered.get(name), listed).catch(() => null); if (now !== null) delivered.set(name, now); } finally { guarding.delete(name); }
+    };
+    health.probed = (name, facts) => (facts?.secrets && all.awake().includes(name) ? guardOne(name, facts.secrets) : undefined);
     const secretsGuard = async () => {
-        for (const name of all.awake()) { const now = await secrets.reconcile(name, delivered.get(name)).catch(() => null); if (now !== null) delivered.set(name, now); }
+        for (const name of all.awake()) {
+            if (!delivered.has(name) || delivered.get(name) === secrets.signature(name)) continue;
+            /* What it should hold changed: given again whatever is there, so nothing is asked of it first. */
+            await guardOne(name, { count: 0, names: [] });
+        }
     };
     const secretsTimer = setInterval(() => { void secretsGuard().catch(() => {}); }, 60_000); secretsTimer.unref?.();
     /* The machines' disks give back what was erased, every hour (conversations.trimAll, vm.mjs trim). */
@@ -988,7 +1019,19 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     all.ready = (name) => { toolbox.forget(name); void bridge.warm(name); };
     /* Their health too: after a restart of the host, a folder may not have come back. */
     /* The tools are shown in them first: a machine made before /tools existed gets it now, not as "a folder that came loose". */
-    void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) { await toolbox.show(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); } })();
+    /* After the quiet start, one machine after another (QUIET_STEP_MS apart). */
+    const warmAll = async () => {
+        let first = true;
+        for (const name of all.awake()) {
+            if (closing) return;
+            if (!await all.running(name).catch(() => false)) continue;
+            if (!first && quietStartMs > 0) await new Promise((r) => { setTimeout(r, QUIET_STEP_MS).unref?.(); });
+            first = false;
+            await toolbox.show(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name);
+        }
+    };
+    if (quietStartMs > 0) setTimeout(() => { void warmAll().catch(() => {}); }, quietStartMs).unref?.();
+    else void warmAll().catch(() => {});
     return listening;
 }
 
@@ -1018,7 +1061,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         const mntDir = hostSetting('MNT') || dataDir;
         /* --name: the name of this Clavarium until one is chosen in Settings (instance.mjs). */
         const name = option(argv, 'name', '') || undefined;
-        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey, appName: name }).catch((error) => { console.error(`start: FAILED: ${error.message}`); process.exit(1); });
+        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey, appName: name, quietStartMs: QUIET_START_MS }).catch((error) => { console.error(`start: FAILED: ${error.message}`); process.exit(1); });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);

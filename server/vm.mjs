@@ -94,7 +94,11 @@ export function commandKind(argv) {
     return `vm exec ${String(prog ?? '').slice(0, 40)}`;
 }
 const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'halt', 'hardstop', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive', 'reclaim']);
-export const STATES_FRESH_MS = 3000;
+/* How long one answer of the VM manager serves every caller. Each command that changes a machine
+   asks again (run, below); a caller that must see a change soon passes `fresh`, or `within`
+   (a wait for a machine to start or stop: WAIT_FRESH_MS, as before this was 15 s). */
+export const STATES_FRESH_MS = 15_000;
+export const WAIT_FRESH_MS = 3000;
 /* The VM manager did not say what a machine is in: not an answer about the machine. */
 export class VmUnknown extends Error {
     constructor(why) { super(`The VM manager does not answer just now (${why}): try again in a moment.`); this.status = 503; this.retry = true; }
@@ -103,7 +107,7 @@ export class VmUnknown extends Error {
 export class Vms {
     /* `run(argv, options)` reaches the host program; `prefix` is the same
        route as an argument vector, for the one caller that needs a terminal. */
-    #ask; #snapshot = null; #asking = null; #now; #freshMs; #machineOf; #userOf;
+    #ask; #snapshot = null; #asking = null; #changed = 0; #now; #freshMs; #machineOf; #userOf;
     /* `freshMs`: how long one answer serves every caller (0: only those asking meanwhile). */
     /* `machineOf(conversation)`: the shared machine it lives in (#221), or nothing -- its own, `clv-<conversation>`. */
     constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined, userOf = () => undefined } = {}) {
@@ -112,9 +116,9 @@ export class Vms {
         /* What changes a machine makes the states asked again (not taken from before it). */
         this.run = async (argv, options) => {
             const changes = argv[0] === 'vm' && CHANGES.has(argv[1]);
-            if (changes) this.#snapshot = null;
+            if (changes) { this.#snapshot = null; this.#changed += 1; }
             const began = this.#now();
-            try { return await this.#ask(argv, options); } finally { if (changes) this.#snapshot = null; this.#count(argv, this.#now() - began); }
+            try { return await this.#ask(argv, options); } finally { if (changes) { this.#snapshot = null; this.#changed += 1; } this.#count(argv, this.#now() - began); }
         };
     }
 
@@ -135,10 +139,14 @@ export class Vms {
 
     /* EVERY MACHINE'S STATE, in one question to the VM manager, shared by every caller for a
        few seconds (and by those who ask while it is being asked). */
-    async #states(fresh = false) {
-        if (!fresh && this.#snapshot && this.#now() - this.#snapshot.at < this.#freshMs) return this.#snapshot;
-        if (this.#asking) return this.#asking;
-        this.#asking = (async () => {
+    /* An answer asked before a machine changed is neither kept nor joined after it (`#changed`). */
+    async #states(fresh = false, within = this.#freshMs) {
+        if (!fresh && this.#snapshot && this.#now() - this.#snapshot.at < Math.min(within, this.#freshMs)) return this.#snapshot;
+        if (this.#asking && this.#asking.changed === this.#changed) return this.#asking.run;
+        const changed = this.#changed;
+        const asking = { changed, run: null };
+        this.#asking = asking;
+        asking.run = (async () => {
             const r = await this.#ask(['vm', 'states'], { timeoutMs: 130_000 }).catch((error) => ({ code: 1, stdout: '', stderr: String(error?.message ?? error) }));
             let states = null; let why = '';
             if (r.code === 0) {
@@ -146,10 +154,10 @@ export class Vms {
             } else why = String(r.stderr || r.stdout || `exit ${r.code}`).trim().split('\n').pop().slice(0, 200);
             const snap = { at: this.#now(), states, why };
             /* Not kept when it did not answer: the next caller asks again. */
-            this.#snapshot = states ? snap : null;
+            if (changed === this.#changed) this.#snapshot = states ? snap : null;
             return snap;
-        })().finally(() => { this.#asking = null; });
-        return this.#asking;
+        })().finally(() => { if (this.#asking === asking) this.#asking = null; });
+        return asking.run;
     }
 
     /* Whether it lives in a shared machine (#221). */
@@ -202,8 +210,8 @@ export class Vms {
     }
 
     /* Every machine's state, by VM name (a Map); throws VmUnknown when the VM manager did not answer. */
-    async states({ fresh = false } = {}) {
-        const snap = await this.#states(fresh);
+    async states({ fresh = false, within } = {}) {
+        const snap = await this.#states(fresh, within);
         if (!snap.states) throw new VmUnknown(snap.why);
         return new Map(snap.states);
     }
@@ -213,10 +221,11 @@ export class Vms {
        manager that does not answer (busy, timed out, restarting) says nothing of the machine:
        that throws (VmUnknown), and is never taken for a machine that is gone (21-10: a machine
        frozen inside had "multipass info" fail, read as "no longer exists"). */
-    /* `fresh`: asked now (an owner opening it, building it again), not taken from a few seconds ago. */
-    async state(conversation, { fresh = false } = {}) {
+    /* `fresh`: asked now (an owner opening it, building it again), not taken from a few seconds ago.
+       `within`: an answer at most this old does (a wait that looks again every few seconds). */
+    async state(conversation, { fresh = false, within } = {}) {
         const name = this.vmOf(conversation);
-        const snap = await this.#states(fresh);
+        const snap = await this.#states(fresh, within);
         if (!snap.states) throw new VmUnknown(snap.why);
         return snap.states.get(name);
     }

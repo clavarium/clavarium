@@ -27,6 +27,7 @@ import { SHARING_STEP } from './vm.mjs';
 import { WHY } from './linkguard.mjs';
 import { SOCKET } from './tmux.mjs';
 import { SESSION } from './conversations.mjs';
+import { SECRETS_DIR } from './secrets.mjs';
 
 /* A FILE OUTSIDE /work where its tool may ask to be restarted when /work itself is dead (16-11): the
    one in its chat's folder (talk.mjs, RESTART_ASKED) cannot be written then. Read by the probe. */
@@ -42,6 +43,8 @@ export const STUCK_MOUNT = /already mounted|terminate SSHFS mount process/i;
 
 /* How long installing the shared-folder helper in a machine may take (it comes from the snap store). */
 export const SHARING_MS = 180_000;
+/* At most this many names of its secrets are listed by the probe (their number always is). */
+export const SECRETS_LISTED = 64;
 export const PROBE = [
     'awk \'/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print "memory", t+0, a+0}\' /proc/meminfo',
     'awk \'$1=="oom_kill"{n=$2} END{print "oom", n+0}\' /proc/vmstat',
@@ -67,10 +70,17 @@ export const PROBE = [
     `for p in $(pgrep -f '${TOOLS_HOST_PATTERN}' 2>/dev/null); do [ -d "/proc/$p/cwd/." ] || { echo "stale $p"; break; }; done`,
     `tmux -L ${SOCKET} capture-pane -p -t '=${SESSION}:' 2>/dev/null | grep -c -i -E '${LOOSE_WORDS}' | awk '{print "screen", $1+0}'`,
     `if [ -f ${RESTART_OUTSIDE} ]; then echo "restart asked"; fi`,
+    /* THE NAMES IN ITS /run/secrets, for the secrets' guard (main.mjs, secrets.mjs reconcile): read
+       here, in the look made anyway, not by a command of their own. How many, then the first of them. */
+    `echo "secrets $(ls -1 ${SECRETS_DIR} 2>/dev/null | wc -l)"`,
+    `ls -1 ${SECRETS_DIR} 2>/dev/null | head -n ${SECRETS_LISTED} | sed 's/^/secret /'`,
 ].join('\n');
 export const PROBE_NAME = 'clavarium-health';
 
 export const EVERY_MS = 120_000;
+/* The looks of one tick start this far apart, one machine after another (at most a tick shared out
+   between them): a burst of probes lines up at the VM manager in front of every other command. */
+export const STAGGER_MS = 5_000;
 const PROBE_MS = 15_000;
 /* What the clock waits for one conversation's look before it goes on. */
 const LOOK_MS = 60_000;
@@ -105,6 +115,10 @@ export function readProbe(text, paths = []) {
         if (parts[0] === 'stale' && parts.length === 2 && a !== undefined) facts.stale = true;
         if (parts[0] === 'screen' && parts.length === 2 && a !== undefined) facts.screenLoose = a;
         if (line.trim() === 'restart asked') facts.restartAsked = true;
+        /* A name that is not a plain one (the agent may put anything there) is kept as '?': it
+           matches nothing that is given, so the guard writes the folder again, as it would have. */
+        if (parts[0] === 'secrets' && parts.length === 2 && a !== undefined) facts.secrets = { count: a, names: [] };
+        if (parts[0] === 'secret' && facts.secrets && facts.secrets.names.length < SECRETS_LISTED) facts.secrets.names.push(parts.length === 2 && /^[A-Za-z0-9_.-]{1,64}$/.test(parts[1]) ? parts[1] : '?');
     }
     return facts;
 }
@@ -171,6 +185,9 @@ export class Health {
     judged = () => {};
     /* Set by the server: told a conversation is forgotten (what else is kept of its machine goes too). */
     forgotten = () => {};
+    /* Set by the server: told what a probe that answered found (`facts`: readProbe's), not waited for.
+       The secrets' guard reads its names of /run/secrets there (main.mjs). */
+    probed = () => {};
 
     /* `settleMs`: how long a missing folder is given before it is mounted
        again (a machine that has just started may still be mounting it).
@@ -228,6 +245,7 @@ export class Health {
             return this.#keep(name, { at, state, answering: false });
         }
         this.#quiet.delete(name);
+        try { void Promise.resolve(this.probed(name, facts)).catch(() => {}); } catch { /* told, nothing more */ }
         const loose = () => paths.filter((p) => facts.mounts[p] !== 'ok');
         const remounted = []; const failed = [];
         if (loose().length > 0 && repair && this.#resources) {
@@ -316,18 +334,23 @@ export class Health {
 
     /* Every so often, each conversation whose machine should run. A machine
        that does not run is not touched (its state alone is asked). */
-    start(everyMs = EVERY_MS) {
+    /* `quietMs`: no look by the clock that soon after a start of the server (main.mjs, quietStartMs). */
+    start(everyMs = EVERY_MS, { quietMs = 0 } = {}) {
         if (!everyMs) return () => {};
         let going = false;
+        const quietUntil = Date.now() + quietMs;
         const timer = setInterval(async () => {
-            if (going) return;
+            if (going || Date.now() < quietUntil) return;
             going = true;
             /* All at once, each within its own time: one machine slow to
                answer (or a mount that hangs) does not hold up the others.
                A look still going when its time is up goes on; the next tick
                joins it rather than starting another (check). */
             try {
-                await Promise.all(this.#conversations.awake().map((name) => {
+                const names = this.#conversations.awake();
+                const apart = Math.min(STAGGER_MS, Math.floor(everyMs / Math.max(1, names.length)));
+                await Promise.all(names.map(async (name, i) => {
+                    if (i > 0 && apart > 0) await new Promise((resolve) => { setTimeout(resolve, i * apart).unref?.(); });
                     let timer;
                     const bound = new Promise((resolve) => { timer = setTimeout(resolve, this.#lookMs); timer.unref?.(); });
                     return Promise.race([this.check(name).catch(() => {}), bound]).finally(() => clearTimeout(timer));
