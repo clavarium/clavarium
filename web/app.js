@@ -5827,7 +5827,7 @@
        a new tool marked until seen (« Mark as seen »); then, for each conversation at Custom, what each kind may do. */
     /* A sign-in under way (its provider's tab open): the panel is painted again when this page is looked at again.
        The client form opened, and what the server said it needs, per server. */
-    let mcpSigningIn = ''; let mcpClientOpen = ''; const mcpClientNeed = new Map();
+    let mcpSigningIn = ''; let mcpClientOpen = ''; const mcpClientNeed = new Map(); const mcpSignLink = new Map();
     const backFromSignin = () => { if (!mcpSigningIn || document.visibilityState !== 'visible') return; mcpSigningIn = ''; void repaintAsset(); };
     document.addEventListener('visibilitychange', backFromSignin);
     window.addEventListener('focus', backFromSignin);
@@ -5860,18 +5860,31 @@
         const redirect = el('input'); redirect.type = 'text'; redirect.readOnly = true; redirect.name = 'mcp-redirect';
         const said = el('p', 'hint mcp-client-said', uiSaid('set-mcp-client-kept', 'Kept on the server. No AI sees them.'));
         const asked = mcpClientNeed.get(t.id);
-        if (asked) { redirect.value = asked.redirect ?? ''; scopes.value = (asked.scopes ?? []).join(' '); }
+        if (asked) { redirect.value = asked.redirect ?? ''; scopes.value = (asked.scopes ?? []).join(' '); clientId.value = asked.id ?? ''; }
         redirect.hidden = !redirect.value;
         clientBox.append(field('set-mcp-client', 'Client ID', clientId), field('set-mcp-secret', 'Client secret', clientSecret),
             field('set-mcp-scopes', 'Permissions asked', scopes), ...(redirect.value ? [field('set-mcp-redirect', 'Its app\'s redirect address', redirect)] : []), said);
         clientBox.addEventListener('toggle', () => { mcpClientOpen = clientBox.open ? t.id : ''; });
+        /* The sign-in address, shown to copy or open in another browser (17-11). */
+        const linkBox = el('div', 'mcp-sign-link');
+        const linkText = el('input'); linkText.type = 'text'; linkText.readOnly = true; linkText.name = 'mcp-sign-link'; linkText.spellcheck = false;
+        const linkCopy = el('button', '', uiSaid('set-mcp-link-copy', 'Copy')); linkCopy.type = 'button';
+        const linkOpen = el('a', 'button', uiSaid('set-mcp-link-open', 'Open')); linkOpen.target = '_blank'; linkOpen.rel = 'noopener noreferrer';
+        linkCopy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(linkText.value); linkCopy.textContent = uiSaid('set-mcp-link-copied', 'Copied'); } catch { linkText.select(); } });
+        linkText.addEventListener('focus', () => linkText.select());
+        const linkRow = el('div', 'mcp-sign-link-row'); linkRow.append(linkText, linkCopy, linkOpen);
+        linkBox.append(el('p', 'hint', uiSaid('set-mcp-link', 'Or open this link in another browser:')), linkRow);
+        const showSignLink = (url) => { if (!/^https?:\/\//.test(String(url))) { linkBox.hidden = true; return; } linkText.value = url; linkOpen.href = url; linkBox.hidden = false; };
+        showSignLink(mcpSignLink.get(t.id) ?? '');
         oauth.addEventListener('click', async () => {
             $(asErrId()).hidden = true;
             /* Opened now, empty; never told who opened it (the provider's page cannot reach this one). */
             let tab = null;
-            try { tab = window.open('', '_blank'); if (tab) tab.opener = null; } catch { tab = null; }
+            try { tab = window.open('', '_blank'); } catch { tab = null; }
+            try { if (tab) tab.opener = null; } catch { /* some browsers refuse it: the tab is still ours */ }
             oauth.disabled = true; oauth.setAttribute('aria-busy', 'true');
             const body = { target: t.id, lang: deviceLang(), back: location.pathname + location.search, tab: tab ? 'new' : 'same' };
+            if (asked && clientId.value.trim()) asked.id = clientId.value.trim();
             if (clientId.value.trim()) body.clientId = clientId.value.trim();
             if (clientSecret.value.trim()) body.clientSecret = clientSecret.value.trim();
             if (asked && scopes.value.trim() !== (asked.scopes ?? []).join(' ')) body.scope = scopes.value.trim();
@@ -5882,11 +5895,13 @@
                 const r = await post(`${API}/tether/mcp-oauth`, body);
                 if (r?.url) {
                     mcpSigningIn = t.id;
+                    /* Its address, also to copy: to sign in from another browser (17-11). */
+                    mcpSignLink.set(t.id, r.url); showSignLink(r.url);
                     if (tab) tab.location.href = r.url; else { location.assign(r.url); return; }
                 } else {
                     try { tab?.close(); } catch { /* gone */ }
                     if (r?.need === 'client') {
-                        mcpClientNeed.set(t.id, { redirect: r.redirect, scopes: r.scopes, secret: r.secret });
+                        mcpClientNeed.set(t.id, { redirect: r.redirect, scopes: r.scopes, secret: r.secret, id: clientId.value.trim() });
                         mcpClientOpen = t.id;
                         sayAsErr(new Error(r.missing === 'secret' ? uiSaid('set-mcp-secret-need', 'Paste its client secret too.') : uiSaid('set-mcp-client-need', 'Paste its client ID and secret, once.')));
                         await repaintAsset();
@@ -5924,7 +5939,7 @@
         if (signedOut) body.push(el('p', 'error mcp-out', uiSaid('set-mcp-out', '{name} is disconnected. Reconnect it.', { name: t.title })));
         else if (t.catalog?.error) body.push(el('p', 'error', uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: t.catalog.error })));
         body.push(tools.length ? list : el('p', 'hint', uiSaid('set-mcp-none', 'No tools listed yet.')));
-        body.push(clientBox);
+        body.push(linkBox, clientBox);
         out.push({ title: uiSaid('set-mcp-tools', 'Tools'), extra: [seen, oauth, refresh], body, cls: 'as-mcp-tools' });
         /* Custom: each kind of tool Yes / Ask / No, for each conversation set to it. */
         const custom = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');

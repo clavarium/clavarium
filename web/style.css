@@ -2311,6 +2311,9 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .mcp-client { margin: .4rem 0; }
 .mcp-client summary { cursor: pointer; color: var(--ink2); }
 .mcp-client-field { display: flex; flex-direction: column; gap: 2px; margin: .4rem 0; }
+.mcp-sign-link { margin: .4rem 0; }
+.mcp-sign-link-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.mcp-sign-link-row input { flex: 1; min-width: 0; font-family: var(--mono, monospace); font-size: 12px; }
 .mcp-client-field input { width: 100%; box-sizing: border-box; min-width: 0; }
 .mcp-custom { display: flex; flex-direction: column; gap: 4px; margin: .4rem 0 .8rem; }
 .mcp-custom-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
