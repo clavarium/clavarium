@@ -1961,6 +1961,19 @@ export class Conversations {
     /* The conversations whose machine should be running: built, not asleep. */
     /* (Stopped by its owner: not running either, until somebody starts it.) */
     awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true && c.stopped !== true).map((c) => c.name); }
+    /* Every machine running, its disk trimmed (vm.mjs trim), one machine at a time, a shared one once. */
+    async trimAll() {
+        const seen = new Set();
+        for (const name of this.awake()) {
+            const vm = this.#vms.vmOf?.(name) ?? name;
+            if (seen.has(vm)) continue;
+            seen.add(vm);
+            if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') continue;
+            await this.#trim(name);
+        }
+    }
+    /* Before a stop or a sleep: what it erased given back first, never holding the stop up long. */
+    async #trim(name, timeoutMs) { if (typeof this.#vms.trim !== 'function') return; await this.#vms.trim(name, timeoutMs).catch(() => undefined); }
     /* Put to sleep, and nothing else: not one being built (02-11: a reset machine was taken for a sleeper and
        suspended mid-build), not a failed one. */
     /* (One woken the time a copy reads it -- #borrowed -- is not asleep then: its memory is never "reclaimed" under it.) */
@@ -2171,6 +2184,7 @@ export class Conversations {
                 this.#plan(name, act, ['suspend']);
                 this.drop(name);
                 act.ctl = new AbortController();
+                await this.#trim(name, 60_000);
                 const r = await this.#vms.suspend(name, { signal: act.ctl.signal, onLine: (line) => this.#seen(name, act, line) });
                 if (r.aborted) result = { ok: false, preempted: true };
                 else {
@@ -2285,12 +2299,13 @@ export class Conversations {
        has its tool, a screen or an action: then only this one's programs end, the others go on. */
     async #stopUnlessShared(name) {
         const shared = this.#store.get(name)?.sharedMachine;
-        if (!shared) return this.#vms.stop(name);
+        if (!shared) { await this.#trim(name, 60_000); return this.#vms.stop(name); }
         for (const other of this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared)) {
             if (this.#watching.has(other.name) || this.#acts.has(other.name) || this.#timers.has(other.name)) return this.#endShared(name);
             const alive = await this.#vms.exec(other.name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`]).catch(() => ({ code: 1 }));
             if (alive.code === 0) return this.#endShared(name);
         }
+        await this.#trim(name, 60_000);
         return this.#vms.stop(name);
     }
     #endShared(name) { return this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: STEP_MS }).catch(() => undefined); }
