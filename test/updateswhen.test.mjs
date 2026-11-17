@@ -40,3 +40,22 @@ test('what became of the relay at the updater\'s last turn is said with the rest
     writeFileSync(join(dir, 'relay.json'), JSON.stringify({ state: '<script>' }));
     assert.equal(u.about().relay, null, 'a state it does not know: nothing');
 });
+
+test('the history says which failures were only a fetch: the page then says it is tried again by itself, not that it did not start (17-11)', async (t) => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { Updates } = await import('../server/updates.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-fetch-state-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ version: '0.2.18', history: [
+        { at: '2026-11-17T19:04:15.000Z', action: 'update', from: '0.2.18', to: '0.2.19', result: 'failed', why: 'npm could not install clavarium@0.2.19: code E404', fetch: true, log: '-- what npm said\nnpm error code E404' },
+        { at: '2026-11-17T10:00:00.000Z', action: 'update', from: '0.2.17', to: '0.2.18', result: 'rolled-back', why: 'it did not answer', fetch: 'yes' },
+    ] }));
+    writeFileSync(join(dir, 'update.conf'), 'MODE=auto\n');
+    const u = new Updates({ host: async () => ({ code: 0 }), version: '0.2.18', stateFile: join(dir, 'state.json'), confFile: join(dir, 'update.conf'), lastLook: () => null });
+    const [fetched, other] = u.about().history;
+    assert.equal(fetched.fetch, true);
+    assert.equal(fetched.log, '-- what npm said\nnpm error code E404');
+    assert.equal(other.fetch, false, 'only true is true');
+});

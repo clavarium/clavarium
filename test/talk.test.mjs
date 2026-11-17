@@ -163,7 +163,7 @@ test('a machine that never answers holds no other conversation: its "woke" is pu
     await until('the line that waited is typed', () => b.typed.length === 4);
 });
 
-test('a message left unread: its line typed again by itself, 1, 3, then every 10 minutes, till it reads; a restart of the server goes on (17-11)', async (t) => {
+test('a message left unread: its line typed again by itself, 1, 3, 10 minutes, then no more; a restart of the server goes on (17-11)', async (t) => {
     const b = bench(t);
     await b.talk.set('helper', true);
     assert.equal((await b.talk.say('helper', 'hello')).told, 'typed');
@@ -182,26 +182,18 @@ test('a message left unread: its line typed again by itself, 1, 3, then every 10
     t.after(() => again.stop());
     b.world.clock += 1;
     await until('typed a third time, by the new server', () => b.typed.length === 6);
-    for (let n = 8; n <= 12; n += 2) {
-        b.world.clock += RENUDGE_MS[2] - 1;
-        await tick();
-        assert.equal(b.typed.length, n - 2, 'not before its time');
-        b.world.clock += 1;
-        await until(`typed again (${n / 2})`, () => b.typed.length === n);
-    }
+    b.world.clock += RENUDGE_MS[2];
+    await until('typed a fourth time (the third again)', () => b.typed.length === 8);
+    /* Then no more, however long: never a reminder without end. */
+    for (let n = 0; n < 5; n += 1) { b.world.clock += RENUDGE_MS[2] * 3; await tick(); }
+    assert.equal(b.typed.length, 8, 'three times again at most');
     assert.ok(b.typed.every((x) => x === WAKE || x === 'Enter'));
-    /* Never while it sleeps: it waits, and is typed when it runs. */
-    b.world.awake = false; b.world.clock += RENUDGE_MS[2];
-    await tick();
-    assert.equal(b.typed.length, 12);
-    b.world.awake = true; b.world.clock += RETRY_MS;
-    await until('typed once it runs', () => b.typed.length === 14);
-    /* Read: no more, and the next message wakes it as usual. */
+    /* The owner's "Remind it" still types it. */
+    await again.remind('helper');
+    await until('typed when the owner asks', () => b.typed.length === 10);
+    /* Read: the next message wakes it as usual. */
     b.parley('read');
     await until('it is known to have read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
-    b.world.clock += 3_600_000;
-    await tick();
-    assert.equal(b.typed.length, 14, 'read: nothing more');
     assert.equal((await again.say('helper', 'next')).told, 'typed');
 });
 

@@ -80,6 +80,19 @@ export function runner(prefix) {
 
 /* The verbs that change a machine: its state is asked again after them. */
 export const TRIM_MS = 120_000;
+export const COUNT_EVERY_MS = 5 * 60_000;
+/* What a command to the host is, for the tally: its verb, and for a command in a machine the program it runs
+   (past `sudo -n clavarium-enter <name> --`, `timeout ...`, `sh -c`'s script left out). Never its arguments. */
+export function commandKind(argv) {
+    const a = argv.map(String);
+    if (a[0] !== 'vm' || a[1] !== 'exec') return a.slice(0, 2).join(' ');
+    let rest = a.slice(a.indexOf('--') + 1);
+    if (rest[0] === 'sudo' && rest[1] === '-n') rest = rest.slice(2);
+    if (rest[0] === 'clavarium-enter') rest = rest.slice(rest.indexOf('--') + 1);
+    if (rest[0] === 'timeout') rest = rest.slice(rest.findIndex((x, i) => i > 0 && !/^(-k|\d+)$/.test(x)));
+    const prog = rest[0] === 'sh' ? `sh:${(rest[3] ?? rest[2] ?? '').split('/').pop()}` : rest[0] === 'tmux' ? `tmux ${rest.find((x) => /^(send-keys|if-shell|capture-pane|has-session|kill-server|new-session)$/.test(x)) ?? ''}` : rest[0];
+    return `vm exec ${String(prog ?? '').slice(0, 40)}`;
+}
 const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'halt', 'hardstop', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive', 'reclaim']);
 export const STATES_FRESH_MS = 3000;
 /* The VM manager did not say what a machine is in: not an answer about the machine. */
@@ -100,8 +113,24 @@ export class Vms {
         this.run = async (argv, options) => {
             const changes = argv[0] === 'vm' && CHANGES.has(argv[1]);
             if (changes) this.#snapshot = null;
-            try { return await this.#ask(argv, options); } finally { if (changes) this.#snapshot = null; }
+            const began = this.#now();
+            try { return await this.#ask(argv, options); } finally { if (changes) this.#snapshot = null; this.#count(argv, this.#now() - began); }
         };
+    }
+
+    /* HOW MUCH THIS SERVER ASKS OF THE HOST (17-11: the owner saw a page wait 10-15 s with an idle CPU --
+       every command to a machine goes through the VM manager, one after another): each command counted by
+       what it is, with its time; every COUNT_EVERY_MS the tally is said in the log, the busiest first. */
+    #tally = new Map(); #tallyFrom = 0;
+    #count(argv, ms) {
+        const now = this.#now();
+        if (!this.#tallyFrom) this.#tallyFrom = now;
+        this.#tally.set(commandKind(argv), [(this.#tally.get(commandKind(argv))?.[0] ?? 0) + 1, (this.#tally.get(commandKind(argv))?.[1] ?? 0) + ms, Math.max(this.#tally.get(commandKind(argv))?.[2] ?? 0, ms)]);
+        if (now - this.#tallyFrom < COUNT_EVERY_MS) return;
+        const rows = [...this.#tally].sort((a, b) => b[1][1] - a[1][1]);
+        const all = rows.reduce((n, [, v]) => n + v[0], 0); const busy = rows.reduce((n, [, v]) => n + v[1], 0);
+        console.log(`host: ${all} commands in ${Math.round((now - this.#tallyFrom) / 60_000)} min, ${Math.round(busy / 1000)} s spent; ${rows.slice(0, 8).map(([k, v]) => `${k} ${v[0]}x ${Math.round(v[1] / 1000)}s max ${Math.round(v[2] / 1000)}s`).join('; ')}`);
+        this.#tally = new Map(); this.#tallyFrom = now;
     }
 
     /* EVERY MACHINE'S STATE, in one question to the VM manager, shared by every caller for a

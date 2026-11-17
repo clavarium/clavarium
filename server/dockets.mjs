@@ -8,9 +8,8 @@
  * Where the chat is off, a wake-up types its line as before.
  *
  * NOTHING IS LOST: an event not acknowledged is told again, when the tool is
- * idle (its pulse, Parley's, says it is not in a turn), AGAIN_MS apart, then
- * further apart (AGAIN_STEPS_MS), never given up -- as the chat's own line is
- * (talk.mjs, RENUDGE_MS); told TOLD_MAX times, its chat says it is not handled.
+ * idle (its pulse, Parley's, says it is not in a turn), every AGAIN_MS, at
+ * most TOLD_MAX times; then its chat says it was not handled.
  *
  * THE TOOL'S OWN REMINDERS (docket remind --at/--in/--cron) are turned into
  * events here (tick), and told the same way. Its owner sees them in the
@@ -50,11 +49,7 @@ export function copyPlans(fromWork, toWork, now = Date.now()) {
 export const TICK_MS = 5000;
 /* An event not acknowledged is told again after this long, the tool idle... */
 export const AGAIN_MS = 30 * 60_000;
-/* ...then these long after the last time, the last of them for ever after (17-11: told three times at
-   most, it was then silent for good -- one line lost, and the event waited unseen). */
-export const AGAIN_STEPS_MS = Object.freeze([AGAIN_MS, 60 * 60_000, 120 * 60_000]);
-const againAfter = (count) => AGAIN_STEPS_MS[Math.min(Math.max(count, 1), AGAIN_STEPS_MS.length) - 1];
-/* Told this many times (the first included): its chat says it is not handled, once; it is still told. */
+/* ...this many times at most (the first included); then its chat says so. */
 export const TOLD_MAX = 3;
 
 /* AN ANSWER NEVER SHOWN (15-11, #362): the note of a sign-in a companion did for another conversation is
@@ -173,12 +168,12 @@ export class Dockets {
                 const told = Object.fromEntries(Object.entries(record.told ?? {}).filter(([id]) => waiting.some((e) => e.id === id)));
                 const due = waiting.filter((e) => {
                     const t = told[e.id];
-                    return !t || now - t.at >= againAfter(t.count);
+                    return !t || (t.count < TOLD_MAX && now - t.at >= AGAIN_MS);
                 });
                 /* Told again only while it is not in a turn: a busy tool reads its docket when its turn ends. */
                 const fresh = due.filter((e) => !told[e.id]);
                 if (due.length && (fresh.length || this.#idle(name))) {
-                    if (await this.#say(name, WAKE).catch(() => false)) for (const e of due) told[e.id] = { ...told[e.id], count: (told[e.id]?.count ?? 0) + 1, at: now };
+                    if (await this.#say(name, WAKE).catch(() => false)) for (const e of due) told[e.id] = { count: (told[e.id]?.count ?? 0) + 1, at: now };
                 }
                 for (const e of waiting) {
                     const t = told[e.id];

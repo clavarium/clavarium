@@ -109,7 +109,9 @@ export class Updates {
             back: releases.filter((r) => !r.current && (VERSION.test(r.id) || LOCAL.test(r.id))).map((r) => ({ id: r.id, version: r.version })),
             /* What became of the relay at the updater's last turn (deploy/updater.mjs, relay.json beside the state). */
             relay: (() => { try { const r = JSON.parse(readFileSync(join(dirname(this.#state), 'relay.json'), 'utf8')); return RELAY_STATES.includes(r.state) ? { state: r.state, version: typeof r.version === 'string' ? r.version : null, why: typeof r.why === 'string' ? r.why.slice(0, 300) : null, at: typeof r.at === 'string' ? r.at : null } : null; } catch { return null; } })(),
-            history: (Array.isArray(s.history) ? s.history : []).slice(0, HISTORY_SHOWN).map(({ at, action, from, to, result, why, log }) => ({ at, action, from, to, result, why: why ?? null, log: typeof log === 'string' ? log : null })),
+            /* `fetch`: nothing of that version ran (npm could not fetch it): the page says it is tried again by itself
+               (app.js, updates-retry-note). Left out before 17-11, every such failure read "It did not start here". */
+            history: (Array.isArray(s.history) ? s.history : []).slice(0, HISTORY_SHOWN).map(({ at, action, from, to, result, why, log, fetch }) => ({ at, action, from, to, result, why: why ?? null, log: typeof log === 'string' ? log : null, fetch: fetch === true })),
         };
     }
 
