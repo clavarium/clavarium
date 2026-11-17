@@ -95,6 +95,10 @@ test('Settings, Logs, and a restart from Advanced: a source over a span, secrets
     /* No line folded into a narrow column: the box is as wide as the chapter. */
     const box = await me.page.locator('#logs-text').boundingBox();
     assert.ok(box.width > 300, JSON.stringify(box));
+    /* Load: the host commands of the window under way, readable without the journal. */
+    await me.chapter('s-load');
+    await me.until('the load is shown', async () => /\d+ commands · /.test(await me.page.locator('#load-list').innerText().catch(() => '')));
+    assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
     /* Restart: the first click asks, the second does. */
     /* Restarting is decided in Advanced (a log is read, a restart decided). */
     await me.chapter('s-advanced');

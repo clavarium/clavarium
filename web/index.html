@@ -1312,6 +1312,8 @@
           <div class="set-row updates-head"><div class="status-line" id="updates-line"><b id="updates-version">…</b><span id="updates-state" class="hint" role="status"></span></div><div class="set-control"><button type="button" id="updates-check">Check now</button></div></div>
           <p id="updates-news" class="updates-news callout" hidden></p>
           <div id="updates-relay" class="hint" hidden></div>
+          <!-- Whether sudo keeps the host program's calls out of the system log (deploy/updater.mjs ensureQuietSudo). -->
+          <p id="updates-sudo" class="hint" hidden></p>
           <div class="action-row" id="updates-offer" hidden><span class="hint" id="updates-retry-note" hidden></span><button type="button" id="updates-retry-no" hidden>Cancel</button><button type="button" id="updates-retry-yes" class="primary" hidden>Try again</button><button type="button" id="updates-apply" class="primary"></button></div>
           <div id="updates-settings" class="set-rows">
             <div class="set-row"><div class="set-what"><label for="updates-mode">Mode</label><small>When updates are installed</small></div><div class="set-control"><select id="updates-mode"><option value="auto">Automatic, in a window</option><option value="asap">As soon as out</option><option value="ask">Ask me</option><option value="off">Off</option></select></div></div>
@@ -1366,6 +1368,16 @@
           <div class="chapter-body">
           <div id="jobs-list" class="jobs-list" aria-live="polite"></div>
           <p class="hint" id="jobs-said" role="status"></p>
+          </div>
+        </details>
+        <!-- LOAD: what this server asked of the host, by 5-minute window, and its own event loop (server/vm.mjs
+             HostTally; GET /api/server/load) -- readable when the journal is too big to read. -->
+        <details class="chapter" id="settings-load-top" data-chapter="s-load">
+          <summary><span class="chapter-title" data-said="set-ch-s-load">Load</span><span class="chapter-about" data-said="set-load-about">Host commands, by 5 minutes.</span></summary>
+          <div class="chapter-body">
+          <div id="load-list" class="load-list" aria-live="polite"></div>
+          <p class="hint" id="load-said" role="status"></p>
+          <div class="row"><button type="button" id="load-copy" data-said="set-load-copy" hidden>Copy</button></div>
           </div>
         </details>
         <!-- WHAT THE SERVER'S PROGRAMS SAID, to read, copy whole or keep (server/serverlogs.mjs);

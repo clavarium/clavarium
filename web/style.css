@@ -1762,6 +1762,10 @@ svg.u-spark .u-oom { fill: var(--danger); stroke: var(--panel); stroke-width: 1.
 /* Settings, Jobs: one line each, as in the badge's list; opened, its log, one line a step. */
 .jobs-list { display: flex; flex-direction: column; margin: 8px 0; font-size: .875rem; }
 .jobs-list h3 { margin: 10px 0 2px; font-size: .8125rem; color: var(--ink2); }
+/* Settings, Diagnostics, Load: one window a row, its busiest commands under it, small. */
+.load-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; font-size: .875rem; }
+.load-list .load-row { display: flex; flex-direction: column; min-width: 0; }
+.load-list .load-kinds { font-size: .75rem; color: var(--ink2); overflow-wrap: anywhere; }
 .job-line { border-bottom: 1px solid var(--line); }
 .job-line > summary { display: grid; grid-template-columns: 16px 1fr; gap: 2px 8px; padding: 4px 0; cursor: pointer; list-style: none; }
 .job-line > summary::-webkit-details-marker { display: none; }

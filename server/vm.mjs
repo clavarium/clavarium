@@ -8,6 +8,7 @@
  * before it gets here, and it is checked again, because this is where it
  * turns into a command. */
 import { execFile } from 'node:child_process';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { isConversationName } from './names.mjs';
 
 /* Where the tool starts, in its VM. At the root rather than in a home
@@ -64,7 +65,9 @@ export function runner(prefix) {
     return (argv, { input, timeoutMs = 120_000, maxBytes = 8 * 1024 * 1024, onLine, signal } = {}) => new Promise((resolve) => {
         const all = [...prefix, ...argv];
         const child = execFile(all[0], all.slice(1), { timeout: timeoutMs, maxBuffer: maxBytes, encoding: 'utf8', ...(signal ? { signal } : {}) },
-            (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr, ...(error?.name === 'AbortError' ? { aborted: true } : {}) }));
+            (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr, ...(error?.name === 'AbortError' ? { aborted: true } : {}),
+                /* Why it ended without an exit of its own: cut at `timeoutMs`, or more output than `maxBytes`. */
+                ...(error?.killed && error?.name !== 'AbortError' ? { timedOut: true } : {}), ...(error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? { tooLong: true } : {}) }));
         if (onLine) {
             let rest = '';
             child.stdout.on('data', (chunk) => {
@@ -104,13 +107,66 @@ export class VmUnknown extends Error {
     constructor(why) { super(`The VM manager does not answer just now (${why}): try again in a moment.`); this.status = 503; this.retry = true; }
 }
 
+/* HOW MUCH THIS SERVER ASKS OF THE HOST (17-11: the owner saw a page wait 10-15 s with an idle CPU --
+   every command to a machine goes through the VM manager, one after another): each command counted by
+   what it is, with its time; every COUNT_EVERY_MS the tally is said in the log, the busiest first, and
+   the last LOAD_KEPT windows kept for Settings (Diagnostics, Load: GET /api/server/load) -- the journal
+   may be too big to read there. `loop`: this server's own event loop measured too (its delay, p50/p99:
+   a server stalled by itself, not by the host). */
+export const LOAD_KEPT = 12;
+export class HostTally {
+    #now; #log; #kinds = new Map(); #from = 0; #beats = [0, 0]; #kept = []; #loop = null;
+    constructor({ now = () => Date.now(), log = (line) => console.log(line), loop = false } = {}) {
+        this.#now = now; this.#log = log;
+        if (loop) { this.#loop = monitorEventLoopDelay({ resolution: 20 }); this.#loop.enable(); }
+    }
+    /* A look of health answered by its heartbeat (`read`: no command; beat.mjs), or by a command after all. */
+    noteBeat(read) { this.#beats[read ? 0 : 1] += 1; }
+    /* `run`, each of its commands counted. */
+    wrap(run) {
+        return async (argv, options) => { const began = this.#now(); try { return await run(argv, options); } finally { this.count(argv, this.#now() - began); } };
+    }
+    count(argv, ms) {
+        const now = this.#now();
+        if (!this.#from) this.#from = now;
+        const kind = commandKind(argv); const was = this.#kinds.get(kind) ?? [0, 0, 0];
+        this.#kinds.set(kind, [was[0] + 1, was[1] + ms, Math.max(was[2], ms)]);
+        if (now - this.#from >= COUNT_EVERY_MS) this.#close(now);
+    }
+    #window(now) {
+        const kinds = [...this.#kinds].sort((a, b) => b[1][1] - a[1][1]).map(([kind, [count, ms, maxMs]]) => ({ kind, count, ms, maxMs }));
+        const ms = (n) => Math.round(n / 1e6);
+        const loop = this.#loop && this.#loop.count ? { p50: ms(this.#loop.percentile(50)), p99: ms(this.#loop.percentile(99)), max: ms(this.#loop.max) } : null;
+        return { from: this.#from || now, to: now, commands: kinds.reduce((n, k) => n + k.count, 0), ms: kinds.reduce((n, k) => n + k.ms, 0), kinds, beats: { read: this.#beats[0], fallback: this.#beats[1] }, loop };
+    }
+    #close(now) {
+        const w = this.#window(now);
+        const beats = w.beats.read + w.beats.fallback ? `; beat read ${w.beats.read}x, fallback ${w.beats.fallback}x` : '';
+        const loop = w.loop ? `; loop p50 ${w.loop.p50}ms p99 ${w.loop.p99}ms` : '';
+        this.#log(`host: ${w.commands} commands in ${Math.round((now - w.from) / 60_000)} min, ${Math.round(w.ms / 1000)} s spent; ${w.kinds.slice(0, 8).map((k) => `${k.kind} ${k.count}x ${Math.round(k.ms / 1000)}s max ${Math.round(k.maxMs / 1000)}s`).join('; ')}${beats}${loop}`);
+        this.#kept = [{ ...w, kinds: w.kinds.slice(0, 20) }, ...this.#kept].slice(0, LOAD_KEPT);
+        this.#kinds = new Map(); this.#from = now; this.#beats = [0, 0]; this.#loop?.reset();
+    }
+    /* The windows, the newest first: the one under way (`open`), then the closed ones. A window past its
+       time with no command since is closed here: an idle server still says so. */
+    windows() {
+        const now = this.#now();
+        if (this.#from && now - this.#from >= COUNT_EVERY_MS) this.#close(now);
+        const open = { ...this.#window(now), open: true };
+        if (!this.#from) open.from = now;
+        return { everyMs: COUNT_EVERY_MS, windows: [{ ...open, kinds: open.kinds.slice(0, 20) }, ...this.#kept] };
+    }
+}
+
 export class Vms {
     /* `run(argv, options)` reaches the host program; `prefix` is the same
        route as an argument vector, for the one caller that needs a terminal. */
-    #ask; #snapshot = null; #asking = null; #changed = 0; #now; #freshMs; #machineOf; #userOf;
+    #ask; #snapshot = null; #asking = null; #changed = 0; #now; #freshMs; #machineOf; #userOf; tally;
     /* `freshMs`: how long one answer serves every caller (0: only those asking meanwhile). */
     /* `machineOf(conversation)`: the shared machine it lives in (#221), or nothing -- its own, `clv-<conversation>`. */
-    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined, userOf = () => undefined } = {}) {
+    /* `tally`: where its commands are counted (HostTally), shared with the server's other commands to the host. */
+    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined, userOf = () => undefined, tally } = {}) {
+        this.tally = tally ?? new HostTally({ now });
         /* `userOf(conversation)`: its own user in a shared machine, { uid, gid } -- what its mounts are owned by there. */
         this.#ask = run; this.prefix = prefix; this.#now = now; this.#freshMs = freshMs; this.#machineOf = machineOf; this.#userOf = userOf;
         /* What changes a machine makes the states asked again (not taken from before it). */
@@ -122,23 +178,9 @@ export class Vms {
         };
     }
 
-    /* HOW MUCH THIS SERVER ASKS OF THE HOST (17-11: the owner saw a page wait 10-15 s with an idle CPU --
-       every command to a machine goes through the VM manager, one after another): each command counted by
-       what it is, with its time; every COUNT_EVERY_MS the tally is said in the log, the busiest first. */
-    #tally = new Map(); #tallyFrom = 0; #beats = [0, 0];
-    /* A look of health answered by its heartbeat (`read`: no command; beat.mjs), or by a command after all. */
-    noteBeat(read) { this.#beats[read ? 0 : 1] += 1; }
-    #count(argv, ms) {
-        const now = this.#now();
-        if (!this.#tallyFrom) this.#tallyFrom = now;
-        this.#tally.set(commandKind(argv), [(this.#tally.get(commandKind(argv))?.[0] ?? 0) + 1, (this.#tally.get(commandKind(argv))?.[1] ?? 0) + ms, Math.max(this.#tally.get(commandKind(argv))?.[2] ?? 0, ms)]);
-        if (now - this.#tallyFrom < COUNT_EVERY_MS) return;
-        const rows = [...this.#tally].sort((a, b) => b[1][1] - a[1][1]);
-        const all = rows.reduce((n, [, v]) => n + v[0], 0); const busy = rows.reduce((n, [, v]) => n + v[1], 0);
-        const beats = this.#beats[0] + this.#beats[1] ? `; beat read ${this.#beats[0]}x, fallback ${this.#beats[1]}x` : '';
-        console.log(`host: ${all} commands in ${Math.round((now - this.#tallyFrom) / 60_000)} min, ${Math.round(busy / 1000)} s spent; ${rows.slice(0, 8).map(([k, v]) => `${k} ${v[0]}x ${Math.round(v[1] / 1000)}s max ${Math.round(v[2] / 1000)}s`).join('; ')}${beats}`);
-        this.#tally = new Map(); this.#tallyFrom = now; this.#beats = [0, 0];
-    }
+    /* HOW MUCH THIS SERVER ASKS OF THE HOST: the tally (HostTally, below), its own unless one is given. */
+    noteBeat(read) { this.tally.noteBeat(read); }
+    #count(argv, ms) { this.tally.count(argv, ms); }
 
     /* EVERY MACHINE'S STATE, in one question to the VM manager, shared by every caller for a
        few seconds (and by those who ask while it is being asked). */

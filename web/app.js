@@ -9063,6 +9063,15 @@
             relayBox.className = asks ? 'callout' : 'hint';
             relayBox.dataset.state = relay.state;
         }
+        /* Whether sudo keeps the host program's calls out of the system log, at the updater's last turn: one line. */
+        const q = u.sudoQuiet;
+        $('updates-sudo').hidden = !q;
+        if (q) {
+            const seen = [Number.isInteger(q.lines10m) ? uiSaid('set-sudo-seen', '{n} sudo lines in 10 min', { n: q.lines10m }) : '', q.sudo ?? ''].filter(Boolean).join(' · ');
+            $('updates-sudo').textContent = [q.on ? uiSaid('set-sudo-on', 'Sudo quiet: on ({setting})', { setting: q.setting ?? '' }) : uiSaid('set-sudo-off', 'Sudo quiet: not applied: {why}', { why: q.why ?? '?' }), seen].filter(Boolean).join(' · ');
+            /* Said loud when the journal still gets them: a line a second or more is the trouble seen 17-11. */
+            $('updates-sudo').className = !q.on || q.lines10m >= 300 ? 'callout' : 'hint';
+        }
         paintUpdatesWhen(u);
         void paintCertificate();
         for (const id of ['updates-check', 'updates-settings', 'updates-back']) $(id).hidden = !u.installed;
@@ -9642,6 +9651,42 @@
         const text = eventsShown.map((e) => `${e.at}\t${e.kind}\t${e.conversation ?? ''}\t${e.text}${e.who ? `\t${e.who}` : ''}`).join('\n');
         try { await navigator.clipboard.writeText(text); $('events-said').textContent = `Copied: ${eventsShown.length} lines.`; } catch { $('events-said').textContent = 'The clipboard is not available here.'; }
     });
+    /* LOAD: what this server asked of the host, by 5-minute window, the busiest commands first, and its own
+       event loop (server/vm.mjs HostTally; GET /api/server/load) -- when the journal is too big to read. */
+    let loadShown = null; let loadTimer;
+    const loadClock = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const loadSec = (ms) => (ms >= 10_000 ? Math.round(ms / 1000) : Math.round(ms / 100) / 10);
+    const loadKind = (k) => `${k.kind} ${k.count}× ${loadSec(k.ms)} s (max ${loadSec(k.maxMs)} s)`;
+    const loadHead = (w) => [`${loadClock(w.from)}–${w.open ? uiSaid('set-load-open', 'now') : loadClock(w.to)}`,
+        uiSaid('set-load-line', '{n} commands · {s} s', { n: w.commands, s: loadSec(w.ms) }),
+        w.loop ? uiSaid('set-load-loop', 'loop {p50}/{p99} ms', { p50: w.loop.p50, p99: w.loop.p99 }) : ''].filter(Boolean).join(' · ');
+    async function paintLoad() {
+        clearTimeout(loadTimer);
+        if (!$('settings-load-top').open) return;
+        const got = await fetch(`${API}/server/load`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!got) { $('load-said').textContent = uiSaid('set-load-unread', 'Unreadable for now'); return; }
+        loadShown = got;
+        const rows = (got.windows ?? []).map((w) => {
+            const row = el('div', 'load-row');
+            row.append(el('span', '', loadHead(w)));
+            if (w.kinds?.length) row.append(el('span', 'load-kinds', w.kinds.slice(0, 3).map(loadKind).join(' · ')));
+            return row;
+        });
+        $('load-list').replaceChildren(...rows);
+        const any = (got.windows ?? []).some((w) => w.commands);
+        $('load-said').textContent = any ? '' : uiSaid('set-load-none', 'Nothing counted yet');
+        $('load-copy').hidden = !rows.length;
+        loadTimer = setTimeout(() => { void paintLoad(); }, 30_000);
+    }
+    $('settings-load-top').addEventListener('toggle', () => { void paintLoad(); });
+    $('load-copy').addEventListener('click', async () => {
+        if (!loadShown) return;
+        /* All of it, as text: each window, then every kind it counted. */
+        const text = (loadShown.windows ?? []).map((w) => [loadHead(w), ...(w.kinds ?? []).map((k) => `  ${loadKind(k)}`),
+            ...(w.beats && (w.beats.read || w.beats.fallback) ? [`  beat read ${w.beats.read}×, fallback ${w.beats.fallback}×`] : []),
+            ...(w.loop ? [`  loop max ${w.loop.max} ms`] : [])].join('\n')).join('\n');
+        try { await navigator.clipboard.writeText(text); $('load-said').textContent = uiSaid('set-load-copied', 'Copied'); } catch { $('load-said').textContent = 'The clipboard is not available here.'; }
+    });
     /* WHAT THE SERVER'S PROGRAMS SAID: one source over a span, to read, copy whole or keep as a file. */
     let logsShown = null;
     $('logs-show').addEventListener('click', async () => {
@@ -9661,7 +9706,7 @@
             logsShown = body;
             $('logs-text').textContent = body.text || '';
             $('logs-text').hidden = !body.text; $('logs-acts').hidden = !body.text;
-            $('logs-said').textContent = body.lines ? `${body.lines} line${body.lines > 1 ? 's' : ''}${body.cut ? ' (the newest only: there were more)' : ''}.` : 'Nothing was said over that span.';
+            $('logs-said').textContent = `${body.lines ? `${body.lines} line${body.lines > 1 ? 's' : ''}${body.cut ? ' (the newest only: there were more)' : ''}.` : 'Nothing was said over that span.'}${body.note ? ` ${body.note}.` : ''}`;
             /* The newest at the bottom, in sight. */
             $('logs-text').scrollTop = $('logs-text').scrollHeight;
         } catch (error) { $('logs-said').textContent = error.message; }

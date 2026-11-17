@@ -155,30 +155,52 @@ export const SUDOERS = '/etc/sudoers.d/clavarium';
 export const QUIET_SETTINGS = ['!syslog, !pam_session', '!pam_session'];
 export const quietLine = (account, setting = QUIET_SETTINGS[0]) => `Defaults:${account} ${setting}`;
 const QUIET_COMMENT = '# Added by the Clavarium updater: its probes every few seconds are not written to the system log.';
-export async function ensureQuietSudo({ file = SUDOERS, run = runCommand } = {}) {
+/* `told(outcome)`: what is in place after this turn, for Settings (sudo-quiet.json beside the state, server/updates.mjs):
+   { on: true, setting } or { on: false, why } -- the file missing, no account in it, visudo refusing (its words). */
+export async function ensureQuietSudo({ file = SUDOERS, run = runCommand, told = () => {} } = {}) {
     let text;
-    try { text = readFileSync(file, 'utf8'); } catch { return false; }
+    try { text = readFileSync(file, 'utf8'); } catch (error) { told({ on: false, why: `${file} not readable (${error.code ?? error.message})` }); return false; }
     const account = text.match(/^([a-z_][a-z0-9_-]*)\s+ALL=\(root\)\s+NOPASSWD:/m)?.[1];
-    if (!account) return false;
+    if (!account) { told({ on: false, why: `no "<account> ALL=(root) NOPASSWD:" line in ${file}` }); return false; }
+    let refusal = '';
     const accepted = async (candidate) => {
         rmSync(`${file}.new`, { force: true });
         writeFileSync(`${file}.new`, candidate, { mode: 0o440 });
         const r = await run(['visudo', '-cf', `${file}.new`], { timeoutMs: 30_000 });
-        return r.code === 0 && !/unknown setting|syntax error|parse error/i.test(`${r.stdout}\n${r.stderr}`);
+        const said = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+        const ok = r.code === 0 && !/unknown setting|syntax error|parse error/i.test(said);
+        if (!ok) refusal = said.split('\n').map((l) => l.trim()).filter(Boolean).pop()?.slice(0, 200) || `visudo exit ${r.code}`;
+        return ok;
     };
     /* The rule as it is, without any line of ours. */
     const base = text.split('\n').filter((l) => l !== QUIET_COMMENT && !l.startsWith(`Defaults:${account} `)).join('\n').replace(/\n*$/, '\n');
-    const current = QUIET_SETTINGS.map((q) => quietLine(account, q)).find((l) => text.includes(l));
+    const current = QUIET_SETTINGS.find((q) => text.includes(quietLine(account, q)));
     try {
-        if (current && await accepted(text)) return false;   /* ours, and taken as it is */
+        if (current && await accepted(text)) { told({ on: true, setting: current, account }); return false; }   /* ours, and taken as it is */
+        const refused = [];
         for (const setting of QUIET_SETTINGS) {
             const next = `${base}${QUIET_COMMENT}\n${quietLine(account, setting)}\n`;
-            if (await accepted(next)) { renameSync(`${file}.new`, file); return true; }
+            if (await accepted(next)) {
+                try { renameSync(`${file}.new`, file); } catch (error) { told({ on: false, why: `${file} not replaced (${error.code ?? error.message})` }); throw error; }
+                told({ on: true, setting, account }); return true;
+            }
+            refused.push(`${setting}: ${refusal}`);
         }
         /* None taken: the rule alone, as install.sh wrote it -- never a file sudo complains about. */
+        told({ on: false, why: `visudo refused ${refused.join('; ')}`.slice(0, 300) });
         if (current && await accepted(base)) { renameSync(`${file}.new`, file); return true; }
         return false;
     } finally { rmSync(`${file}.new`, { force: true }); }
+}
+/* WHETHER IT WORKS, for Settings (17-11: the owner's journal still had a sudo line a second, the rule said to be
+   written): which sudo this is (`sudo --version`, its first line), and how many sudo lines the journal got over
+   the last ten minutes -- read by its own field, which the journal indexes: no long read. */
+export async function sudoSeen({ run = runCommand } = {}) {
+    const v = await run(['sudo', '--version'], { timeoutMs: 10_000 }).catch(() => ({ code: 1, stdout: '' }));
+    const sudo = String(v.stdout ?? '').split('\n')[0].trim().slice(0, 80) || null;
+    const j = await run(['journalctl', 'SYSLOG_IDENTIFIER=sudo', '--since', '-10min', '-o', 'cat', '--no-pager', '-q'], { timeoutMs: 20_000 }).catch(() => ({ code: 1, stdout: '' }));
+    const lines10m = j.code === 0 ? String(j.stdout ?? '').split('\n').filter((l) => l.trim()).length : null;
+    return { sudo, lines10m };
 }
 
 /* FFMPEG, kept by the updater: the voice boxes play a radio, a podcast, a music file through it
@@ -1071,7 +1093,17 @@ async function main(argv) {
             try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
             try { if (await ensureFfmpeg()) console.error('updater: ffmpeg installed, for the sounds the voice boxes play'); } catch (error) { console.error(`updater: ffmpeg could not be installed: ${error.message}`); }
-            try { if (await ensureQuietSudo()) console.error('updater: sudo no longer logs the host program\'s probes'); } catch (error) { console.error(`updater: sudo could not be made quiet: ${error.message}`); }
+            /* What became of it is kept beside the state, for Settings (server/updates.mjs: sudoQuiet). */
+            {
+                let outcome = { on: false, why: 'not looked at' };
+                try { if (await ensureQuietSudo({ told: (o) => { outcome = o; } })) console.error('updater: sudo no longer logs the host program\'s probes'); } catch (error) { console.error(`updater: sudo could not be made quiet: ${error.message}`); if (outcome.on) outcome = { on: false, why: error.message.slice(0, 200) }; }
+                if (!outcome.on) console.error(`updater: sudo quiet: not applied: ${outcome.why}`);
+                try {
+                    const seen = await sudoSeen();
+                    writeFileSync(join(PATHS.stateDir, 'sudo-quiet.json.new'), `${JSON.stringify({ ...outcome, ...seen, at: new Date().toISOString() })}\n`, { mode: 0o644 });
+                    renameSync(join(PATHS.stateDir, 'sudo-quiet.json.new'), join(PATHS.stateDir, 'sudo-quiet.json'));
+                } catch (error) { console.error(`updater: the sudo quiet state could not be kept: ${error.message}`); }
+            }
             try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy set (one CSRF cookie per sign-in; /api/ext/ for API keys)'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
             try { const c = await ensureGenericClientId({ run: runCommand }); if (c.changed.length) console.error('updater: the sign-in client id was made generic (nothing names the product in the open)'); } catch (error) { console.error(`updater: the sign-in client id could not be made generic: ${error.message}`); }
             try { if (await ensureTunnel({ run: runCommand })) console.error('updater: the tunnel to the relay notices a cut sooner'); } catch (error) { console.error(`updater: the tunnel could not be set: ${error.message}`); }

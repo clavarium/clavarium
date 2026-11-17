@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fakeRegistry } from './fake-registry.mjs';
-import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS, ensureQuietSudo, quietLine, FETCH_AGAIN_MS, FETCH_TRIES, RELEASE_SETTLE_MS, FetchFailed, redact, npmLogTail, runCommand } from '../deploy/updater.mjs';
+import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS, ensureQuietSudo, quietLine, sudoSeen, FETCH_AGAIN_MS, FETCH_TRIES, RELEASE_SETTLE_MS, FetchFailed, redact, npmLogTail, runCommand } from '../deploy/updater.mjs';
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 const DOCKET_REPO = 'https://github.com/clavarium/clavarium-docket';
@@ -523,6 +523,44 @@ test('sudo is told not to log the host program\'s probes: with what its version 
     assert.equal(await ensureQuietSudo({ file, run: async () => ({ code: 1, stdout: '', stderr: 'parse error' }) }), false);
     assert.equal(readFileSync(file, 'utf8'), before);
     assert.equal(await ensureQuietSudo({ file: join(dir, 'none'), run: ok }), false);
+});
+
+test('what sudo quiet came to is told each turn: the setting in place, or why none (17-11)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sudoers-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, 'clavarium');
+    /* The line install.sh writes, exactly (deploy/install.sh, "the one privileged program"). */
+    const rule = '# Clavarium: the server account may run ONE program as root, and nothing else.\nclavarium ALL=(root) NOPASSWD: /usr/local/sbin/clavarium-host\n';
+    const ok = async () => ({ code: 0, stdout: '', stderr: '' });
+    let told;
+    const quiet = (run, f = file) => ensureQuietSudo({ file: f, run, told: (o) => { told = o; } });
+    writeFileSync(file, rule);
+    await quiet(ok);
+    assert.deepEqual(told, { on: true, setting: '!syslog, !pam_session', account: 'clavarium' });
+    await quiet(ok);
+    assert.deepEqual(told, { on: true, setting: '!syslog, !pam_session', account: 'clavarium' }, 'already in place: said all the same');
+    await quiet(async () => ({ code: 0, stdout: '', stderr: "unknown setting: 'syslog'" }));
+    assert.equal(told.on, false);
+    assert.match(told.why, /^visudo refused !syslog, !pam_session: unknown setting: 'syslog'; !pam_session: unknown setting/);
+    await quiet(ok, join(dir, 'none'));
+    assert.equal(told.on, false); assert.match(told.why, /not readable \(ENOENT\)/);
+    rmSync(file, { force: true }); writeFileSync(file, '%clavarium ALL=(ALL) NOPASSWD: ALL\n');
+    await quiet(ok);
+    assert.equal(told.on, false); assert.match(told.why, /no "<account> ALL=\(root\) NOPASSWD:" line/);
+    /* An account the regex takes as install.sh may write it: a tab, a dash, more spaces. */
+    for (const line of ['clavarium\tALL=(root) NOPASSWD: /x', 'clv-srv   ALL=(root)  NOPASSWD:/x']) {
+        rmSync(file, { force: true }); writeFileSync(file, `${line}\n`);
+        await quiet(ok);
+        assert.equal(told.on, true, line);
+    }
+});
+
+test('which sudo, and how many sudo lines the journal got in ten minutes, read by its indexed field', async () => {
+    const asked = [];
+    const run = async (argv) => { asked.push(argv.join(' ')); return argv[0] === 'sudo' ? { code: 0, stdout: 'Sudo version 1.9.15p5\nSudoers policy plugin version 1.9.15p5\n' } : { code: 0, stdout: 'a\nb\n\nc\n' }; };
+    assert.deepEqual(await sudoSeen({ run }), { sudo: 'Sudo version 1.9.15p5', lines10m: 3 });
+    assert.ok(asked.some((a) => a.startsWith('journalctl SYSLOG_IDENTIFIER=sudo --since -10min')), asked.join('\n'));
+    assert.deepEqual(await sudoSeen({ run: async () => ({ code: 1, stdout: '' }) }), { sudo: null, lines10m: null });
 });
 
 test('a version said out but not served yet (npm could not fetch it): nothing switched, tried again by itself later, a few times at most (16-11)', async (t) => {

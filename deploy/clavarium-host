@@ -61,6 +61,9 @@ set -euo pipefail
 export LC_ALL=C
 
 MULTIPASS="multipass"
+# SERVER LOGS: the journal reader, and how long it is given before what it said by then is shown.
+JOURNALCTL="journalctl"
+LOGS_SECONDS="60"
 # THE WAY DOWN (vm halt, vm hardstop): how long each step is given before the next, in seconds --
 # a polite stop, a stop by force asked of the VM manager, SIGTERM to the machine's own qemu, SIGKILL
 # to it; then how long multipass may take to answer a list, and to see the machine stopped after.
@@ -196,7 +199,8 @@ while [ $# -gt 0 ]; do
                 DATA="$TEST"; MNT="$TEST"; WIFI_STATE="$TEST/wifi"; NM_KEYFILES="$TEST/system-connections"; WIFI_WAIT="3"; WIFI_UP_WAIT="3"; WIFI_STEP="0.2"
                 HAND_STATE="$TEST/network"; NETPLAN_DIR="$TEST/netplan"; HAND_WAIT="3"; SYS_NET="$TEST/sys-net"
                 MESH_DATA="$TEST/mesh"; MESH_STATE="$TEST/meshcentral"; CADDYFILE="$TEST/Caddyfile"; MESH_CADDY="$TEST/clavarium-meshcentral.caddy"
-                HALT_POLITE="2"; HALT_FORCE="2"; HALT_TERM="1"; HALT_KILL="2"; HALT_LIST="2"; HALT_SETTLE="2"; QEMU_SEEN="$TEST/qemu"; shift 2 ;;
+                HALT_POLITE="2"; HALT_FORCE="2"; HALT_TERM="1"; HALT_KILL="2"; HALT_LIST="2"; HALT_SETTLE="2"; QEMU_SEEN="$TEST/qemu"
+                JOURNALCTL="$TEST/journalctl"; LOGS_SECONDS="2"; shift 2 ;;
         *) break ;;
     esac
 done
@@ -1216,21 +1220,41 @@ case "$AREA $VERB" in
         # source, over a span; read-only, bounded. The page masks what looks
         # like a secret before showing it.
         #   server logs <clavarium|machines|updates|web|signin|tunnel|system> <10m|1|6|24|168|boot>
+        # 17-11: a journal flooded by sudo (a line a second, the server's own calls of this program)
+        # took more than the page waits. The server's unit is read by indexed fields, its own output
+        # only (stdout), not sudo's syslog lines; sudo and PAM session lines are left out of any
+        # source; the read is given LOGS_SECONDS, then what it said by then is shown, with a NOTE
+        # on stderr -- never a bare failure.
         [ $# -eq 2 ] || usage
+        # A unit by its fields: what it wrote, and what systemd said of it.
+        unit() { printf '%s\n' "_SYSTEMD_UNIT=$1" + "UNIT=$1" "_PID=1" +; }
         case "$1" in
-            clavarium) units=(-u clavarium.service -u 'clavarium-view-*' -u clavarium-tools-view.service -u clavarium-move-machines.service) ;;
-            machines)  units=(-u snap.multipass.multipassd.service) ;;
-            updates)   units=(-u clavarium-update.service -u clavarium-certificate.service) ;;
-            web)       units=(-u caddy.service -u oauth2-proxy.service) ;;
-            signin)    units=(-u dex.service) ;;
-            tunnel)    units=(-u clavarium-tunnel.service) ;;
-            system)    units=(-k) ;;
+            clavarium) matches=(_SYSTEMD_UNIT=clavarium.service _TRANSPORT=stdout _TRANSPORT=journal + UNIT=clavarium.service _PID=1 +)
+                       views=()
+                       if [ "$SAY" = "no" ]; then mapfile -t views < <(systemctl list-units --all --plain --no-legend 'clavarium-view-*' 2>/dev/null | awk '$1 ~ /^clavarium-view-[A-Za-z0-9_.@-]+$/ {print $1}' | head -50); fi
+                       for u in "${views[@]}" clavarium-tools-view.service clavarium-move-machines.service; do mapfile -t -O "${#matches[@]}" matches < <(unit "$u"); done
+                       unset 'matches[-1]' ;;
+            machines)  matches=(-u snap.multipass.multipassd.service) ;;
+            updates)   matches=(-u clavarium-update.service -u clavarium-certificate.service) ;;
+            web)       matches=(-u caddy.service -u oauth2-proxy.service) ;;
+            signin)    matches=(-u dex.service) ;;
+            tunnel)    matches=(-u clavarium-tunnel.service) ;;
+            system)    matches=(-k) ;;
             *) refuse "not a source of logs: $1" ;;
         esac
         case "$2" in 10m) since=(--since "-10min") ;; 1|6|24|168) since=(--since "-$2h") ;; boot) since=(-b) ;; *) refuse "not a span: $2 (10m, 1, 6, 24, 168 hours, or boot)" ;; esac
         # The newest 20000 lines at most: more is too much to read on a page, and to send.
-        if [ "$SAY" = "yes" ]; then echo "journalctl ${units[*]} ${since[*]} -o short-iso --no-pager (the last 20000 lines)"; exit 0; fi
-        journalctl "${units[@]}" "${since[@]}" -o short-iso --no-pager -n 20000 2>/dev/null | cut -c1-2000 || true
+        if [ "$SAY" = "yes" ]; then echo "journalctl ${matches[*]} ${since[*]} -o short-iso --no-pager -q -n 20000 (sudo and PAM session lines left out; ${LOGS_SECONDS}s at most)"; exit 0; fi
+        out="$(mktemp)"; err="$(mktemp)"
+        trap 'rm -f -- "$out" "$err"' EXIT
+        code=0
+        timeout -k 5 "$LOGS_SECONDS" "$JOURNALCTL" "${matches[@]}" "${since[@]}" -o short-iso --no-pager -q -n 20000 >"$out" 2>"$err" || code=$?
+        grep -avE ' (sudo|pkexec)\[[0-9]+\]: | pam_unix\((sudo|sudo-i|pkexec):session\)' "$out" | cut -c1-2000 || true
+        case "$code" in
+            0) : ;;
+            124|137) echo "NOTE: the journal took more than ${LOGS_SECONDS}s: what it said by then" >&2 ;;
+            *) echo "NOTE: journalctl ended with $code: $(grep -av '^$' "$err" | tail -n 1 | cut -c1-200)" >&2 ;;
+        esac
         exit 0 ;;
     "server restart")
         # THIS SERVER STARTED AGAIN, asked from the page: in two seconds, by

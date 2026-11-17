@@ -34,3 +34,24 @@ test('a long read is answered "still reading", and the same read is given when a
     const r = await logs.start('clavarium', '10m', 20);
     assert.equal(r.text, 'one\n');
 });
+
+test('a slow or failing journal: what was read is shown with its note; a failure says its reason, never a bare exit (17-11)', async () => {
+    const said = (r) => new ServerLogs({ host: async () => r });
+    const sudo = '2026-11-17T10:00:01+0000 host sudo[9001]: clavarium : PWD=/ ; USER=root ; COMMAND=/usr/local/sbin/clavarium-host vm states';
+    const pam = '2026-11-17T10:00:01+0000 host sudo[9001]: pam_unix(sudo:session): session opened for user root(uid=0) by (uid=999)';
+    const got = await said({ code: 0, stdout: `one\n${sudo}\n${pam}\ntwo\n`, stderr: 'NOTE: the journal took more than 60s: what it said by then\n' }).read('clavarium', '1');
+    assert.equal(got.text, 'one\ntwo\n', 'sudo and PAM lines left out, from an older host program too');
+    assert.equal(got.lines, 2);
+    assert.equal(got.note, 'the journal took more than 60s: what it said by then');
+    assert.equal('note' in await said({ code: 0, stdout: 'a\n', stderr: '' }).read('clavarium', '1'), false);
+    await assert.rejects(said({ code: 1, stdout: '', stderr: '', timedOut: true }).read('clavarium', '1'), /could not be read: no answer in 120 s/);
+    await assert.rejects(said({ code: 1, stdout: '', stderr: '', tooLong: true }).read('clavarium', '1'), /more than 8 MB/);
+    await assert.rejects(said({ code: 1, stdout: '', stderr: 'sudo: a password is required\n' }).read('clavarium', '1'), /could not be read: sudo: a password is required$/);
+    await assert.rejects(said({ code: 1, stdout: '', stderr: '' }).read('clavarium', '1'), /could not be read: exit 1$/);
+});
+
+test('the load is what it is given (the host tally), read-only', () => {
+    const windows = { everyMs: 300_000, windows: [{ from: 1, to: 2, commands: 3, ms: 4, kinds: [], open: true }] };
+    assert.deepEqual(new ServerLogs({ host: async () => ({ code: 0 }), load: () => windows }).load(), windows);
+    assert.deepEqual(new ServerLogs({ host: async () => ({ code: 0 }) }).load(), { everyMs: 0, windows: [] });
+});

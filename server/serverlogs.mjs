@@ -6,6 +6,8 @@
  *   read(source, span)  { source, span, text, lines, cut } -- what looks like a
  *                       secret masked: a value after password=, token:, Bearer...;
  *                       any run of 32 letters and digits or more (a key, a token)
+ *                       `note`: why it may be short (the journal too slow, journalctl's last word)
+ *   load()              the host commands of the last windows (vm.mjs HostTally): Settings, Load
  *   restart()           this server starts again in two seconds (its machines go on)
  */
 import { Refusal } from './conversations.mjs';
@@ -27,9 +29,16 @@ export function mask(text) {
 export const WAIT_MS = 12_000;
 export const KEPT_MS = 120_000;
 
+/* Sudo's and PAM's lines for each call of the host program: a line a second on a busy server, nothing to read
+   (the host program leaves them out too: these are for one older than it). */
+export const NOISE = / (sudo|pkexec)\[\d+\]: | pam_unix\((sudo|sudo-i|pkexec):session\)/;
+/* The last line of what it said, without the host program's REFUSED:. */
+const lastWord = (text) => String(text ?? '').trim().split('\n').pop()?.replace(/^(REFUSED|NOTE): /, '').slice(0, 200) ?? '';
+
 export class ServerLogs {
-    #host; #reads = new Map(); #now;
-    constructor({ host, now = () => Date.now() }) { this.#host = host; this.#now = now; }
+    #host; #reads = new Map(); #now; #load;
+    constructor({ host, now = () => Date.now(), load = () => ({ everyMs: 0, windows: [] }) }) { this.#host = host; this.#now = now; this.#load = load; }
+    load() { return this.#load(); }
 
     /* The same read asked again while it runs is the same read; once done, kept a moment for
        the page that comes back for it. Resolves { pending: true } past `wait`. */
@@ -54,13 +63,19 @@ export class ServerLogs {
         if (!SOURCES.includes(source)) throw new Refusal(400, `Not a source of logs: say one of ${SOURCES.join(', ')}.`);
         if (!SPANS.includes(String(span))) throw new Refusal(400, 'Not a span: 10 minutes (10m), 1, 6, 24 or 168 hours, or since the server started (boot).');
         const r = await this.#host(['server', 'logs', source, String(span)], { timeoutMs: 120_000, maxBytes: TEXT_MAX * 2 });
-        if (r.code !== 0) throw new Refusal(502, `The logs could not be read: ${String(r.stderr ?? '').trim().split('\n').pop()?.replace(/^REFUSED: /, '').slice(0, 200) || `exit ${r.code}`}`);
+        if (r.code !== 0) {
+            const why = r.timedOut ? 'no answer in 120 s' : r.tooLong ? 'more than 8 MB' : lastWord(r.stderr) || `exit ${r.code}`;
+            throw new Refusal(502, `The logs could not be read: ${why}`);
+        }
+        /* What may make it short (the host program's NOTE: lines): said beside it. */
+        const note = String(r.stderr ?? '').split('\n').filter((l) => l.startsWith('NOTE: ')).map((l) => l.slice(6).slice(0, 200)).join('; ') || null;
         let text = String(r.stdout ?? '');
+        if (NOISE.test(text)) text = text.split('\n').filter((l) => !NOISE.test(l)).join('\n');
         /* The newest kept when there is too much: they matter most. */
         const cut = text.length > TEXT_MAX;
         if (cut) text = text.slice(text.length - TEXT_MAX).replace(/^[^\n]*\n/, '');
         text = mask(text);
-        return { source, span: String(span), text, lines: text ? text.split('\n').filter(Boolean).length : 0, cut };
+        return { source, span: String(span), text, lines: text ? text.split('\n').filter(Boolean).length : 0, cut, ...(note ? { note } : {}) };
     }
     async restart() {
         const r = await this.#host(['server', 'restart']);
