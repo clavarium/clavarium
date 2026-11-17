@@ -55,7 +55,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await page.locator('#cassets-attach').click();
     await me.until('the picker', async () => page.locator('#cassets-detail .kit-aspick').isVisible());
     assert.equal(await page.locator('#access-assets-here').count(), 0, 'one way to give');
-    assert.equal(await page.locator('#cassets-detail .kit-aspick .kit-newasset .as-kinds button').count(), 11, 'or a new one, of every kind (a voice box, a device, an MCP server, a browser too)');
+    assert.equal(await page.locator('#cassets-detail .kit-aspick .kit-newasset .as-kinds button').count(), 12, 'or a new one, of every kind (a voice box, a device, an MCP server, a machine, a browser too)');
     await page.locator('#cassets-detail .kit-aspick-row[data-name="seeds"]').click();
     await page.locator('#cassets-detail .kit-aspick-give .kit-aspick-go').click();
     await me.until('seeds is read by garden', async () => (await me.api('/api/conversations')).body[0].resources.some((r) => r.name === 'seeds' && r.access === 'read'));

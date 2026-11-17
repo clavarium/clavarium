@@ -175,6 +175,8 @@
  *   POST /api/tether/agenda                 {target, from?, to?}: a calendar's events of a window, read now (agenda.mjs)
  *   POST /api/tether/mail-list|mail-read    {target, folder?, text?} | {target, id, folder?}: a mailbox's latest messages, one as text (mailview.mjs)
  *   POST /api/tether/contacts|contact       {target, text?} | {target, id}: an address book's contacts, one (contactview.mjs)
+ *   POST /api/tether/ssh-add               {title, host, port?, user, key, pin?}: a machine over SSH, opened with a key made
+ *                                           here; its host key read and pinned first (sshmachine.mjs)
  *   POST /api/tether/console-journal        {target}: a machine's shared console, its short journal (sshconsole.mjs);
  *                                           the console itself is a WebSocket, /api/tether/console?target=ID
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>[&dir=<subfolders>&exists=keep|replace|skip&batch=<id>]  the body IS the file
@@ -183,6 +185,7 @@
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
+import { addMachine } from './sshmachine.mjs';
 import { openCodeConfig } from './catalog.mjs';
 import { writeFileSync } from 'node:fs';
 import { suggest } from './suggest.mjs';
@@ -709,6 +712,7 @@ export async function handleApi(request, response, conversations, headers, resou
         /* External MCP servers (mcpx.mjs): added with their key (kept host-only in the vault, Tether given its name),
            imported from a pasted mcpServers block, listed again, a conversation's rights on their tools, new tools seen. */
         /* Signing in to one with OAuth: the link the owner opens ({ url }), or { need: 'client' } for a client id to paste. */
+        if (pathname === '/api/tether/ssh-add' && tethers && gitAccess) return send(201, await addMachine({ tethers, keys: gitAccess, ...(tethers.sshProbe ? { probe: tethers.sshProbe } : {}) }, body ?? {})), true;
         if (pathname === '/api/tether/mcp-oauth' && tethers?.oauth) return send(200, await tethers.oauth.start({ tethers }, body ?? {}, sharing?.origin?.(request.headers) ?? `http://${request.headers.host}`)), true;
         const mcpOp = /^\/api\/tether\/mcp-(add|import|refresh|rights|seen)$/.exec(pathname);
         if (mcpOp && tethers) {

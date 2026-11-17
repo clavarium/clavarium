@@ -163,6 +163,13 @@ test('the desk: the page of arrival, placed anywhere, moved, folded, sized, tidi
 
     /* « Home » in the menu brings the desk back, and folds the list away as the other places do. */
     if ((await me.page.locator('#app').getAttribute('data-list')) === 'folded') await me.page.locator('#fold').click();
+    /* The four places under the list, two by two (17-11): two rows, two columns, each label whole. */
+    await me.until('the places shown', async () => me.page.locator('#nav-home').isVisible());
+    const places = await me.page.evaluate(() => ['nav-home', 'nav-assets', 'nav-access', 'nav-settings'].map((id) => { const b = document.getElementById(id); const r = b.getBoundingClientRect(); const t = b.querySelector('span'); return { top: Math.round(r.top), left: Math.round(r.left), whole: t.scrollWidth <= t.clientWidth + 1 }; }));
+    assert.equal(new Set(places.map((p) => p.top)).size, 2, JSON.stringify(places));
+    assert.equal(new Set(places.map((p) => p.left)).size, 2, JSON.stringify(places));
+    assert.ok(places.every((p) => p.whole), 'each label whole');
+    await shot(me.page, 'bureau-lieux-2x2');
     await me.page.locator('#nav-home').click();
     await me.until('the desk again by Home', async () => me.page.locator('#deck').isVisible());
     assert.equal(await me.page.locator('#nav-home').getAttribute('aria-current'), 'page');

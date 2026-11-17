@@ -83,6 +83,9 @@ const SHOW = { busy: 'busy', free: 'free', tentative: 'tentative', oof: 'away', 
    panels read only the top level, and fell back to the text lines: no invitation text, no link, no organizer). */
 export const handed = (got) => (got?.data?.data && typeof got.data.data === 'object' && !Array.isArray(got.data.data) ? { ...got, data: got.data.data } : got);
 
+/* A meeting its organiser cancelled: Tether says so (Microsoft's isCancelled), or its title does, as the calendar
+   servers write it on an invitee's copy (« Annulé : », "Canceled:"). The page strikes it out (17-11). */
+export const CANCELLED = /^\s*(annul[ée]e?|canceled|cancelled|abgesagt|cancelado|annullato)\s*:/i;
 /* One event Tether handed as data, kept to the fields the page shows. */
 export function eventOf(e) {
     const start = timeOf(e?.start);
@@ -93,6 +96,7 @@ export function eventOf(e) {
         id: line(e.id, 2048), title: line(e.title) || '(no title)', start, end: timeOf(e.end), allDay,
         location: line(e.location), organizer: line(e.organizer, 320), online: linkOf(e.online), notes: notesOf(e.notes),
         attendees: Number.isInteger(n) && n >= 0 ? n : null, show: SHOW[String(e.show ?? '').toLowerCase()] ?? null,
+        cancelled: e.cancelled === true || CANCELLED.test(String(e.title ?? '')),
     };
 }
 

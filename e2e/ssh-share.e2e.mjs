@@ -184,6 +184,15 @@ test('a machine\'s shared console: the person and the AI on one shell; proposals
     await page.keyboard.press('Escape');
     await me.until('full screen left', async () => (await full.count()) === 0);
     await me.until('back in the panel', async () => (await page.locator('#assets-detail .sc').count()) === 1);
+    /* Out of full screen, the same chat under the console, by its button (17-11); hidden again by it. */
+    await page.locator('#assets-detail .sc-chat-btn').click();
+    await me.until('the chat under the console', async () => (await page.locator('#assets-detail .sc.sc-below .sc-chat .parley-box, #assets-detail .sc.sc-below .sc-chat textarea').count()) > 0, 20_000);
+    const below = await page.evaluate(() => { const m = document.querySelector('#assets-detail .sc-main').getBoundingClientRect(); const c = document.querySelector('#assets-detail .sc-chat').getBoundingClientRect(); return c.top >= m.bottom - 1; });
+    assert.ok(below, 'under the console, not beside it');
+    assert.equal(await page.locator('#assets-detail .sc-chat-btn').getAttribute('aria-pressed'), 'true');
+    await shot(page, 'desktop-dark-chat-below');
+    await page.locator('#assets-detail .sc-chat-btn').click();
+    await me.until('the chat hidden', async () => page.locator('#assets-detail .sc-chat').isHidden());
 
     /* A tablet, light; then a phone: the keys bar, nothing wider than the screen. */
     await page.evaluate(() => localStorage.setItem('clavarium-theme', 'light'));

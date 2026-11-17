@@ -4546,7 +4546,7 @@
         line.append(summary, el('pre', '', rest));
         return line;
     }
-    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : kind === 'mcp' ? 'link' : kind === 'browser' ? 'globe' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : kind === 'mcp' ? 'link' : kind === 'browser' ? 'globe' : kind === 'machine' ? 'square-terminal' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
         const SVG = 'http://www.w3.org/2000/svg';
@@ -5368,7 +5368,7 @@
             onKind: (k) => {
                 giveNew.kind = k; giveNew.level = ''; justMade = null; $('cassets-error').hidden = true; void paintRoomAssets();
                 /* Its keys, read here too: Assets may not have been opened yet. */
-                if (k === 'git') void getJson('/git-keys', []).then((keys) => paintKeys(keys));
+                if (k === 'git' || k === 'machine') void getJson('/git-keys', []).then((keys) => paintKeys(keys));
             },
             onBack: () => { giveNew.kind = ''; $('cassets-error').hidden = true; void paintRoomAssets(); },
             onAnother: () => { giveNew.kind = made.kind; justMade = null; void paintRoomAssets(); },
@@ -5720,7 +5720,7 @@
     const newKinds = () => [['folder', uiSaid('set-na-k-folder', 'Folder')], ['git', uiSaid('set-na-k-git', 'Git repository')], ['mailbox', uiSaid('set-na-k-mailbox', 'Mailbox')],
         ['agenda', uiSaid('set-na-k-agenda', 'Calendar')], ['contacts', uiSaid('set-na-k-contacts', 'Contacts')], ['secret', uiSaid('set-na-k-secret', 'Secret')], ['list', uiSaid('set-na-k-list', LISTS_WORD.one)],
         /* Step 4: a voice box (paired with a code) and a device (the share sheet, its code) are two kinds of it too. */
-        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')], ['mcp', uiSaid('set-na-k-mcp', 'MCP server')], ['browser', uiSaid('set-na-k-browser', 'Browser')]]
+        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')], ['mcp', uiSaid('set-na-k-mcp', 'MCP server')], ['machine', uiSaid('set-na-k-machine', 'Machine (SSH)')], ['browser', uiSaid('set-na-k-browser', 'Browser')]]
         .map(([kind, label]) => ({ kind, label, icon: kindIcon(kind) }));
     /* A voice box's steps after its kind (the flow: "A NEW VOICE BOX", with the boxes), and the one under way. */
     const BOX_STEPS = ['where', 'plug', 'pair'];
@@ -5750,6 +5750,7 @@
                 if (kind === 'box') return paintBoxFlow();
                 const form = $(`${addForm(kind)}-box`); form.hidden = false;
                 if (kind === 'git') { fillKeyChoice(); showVia(); }
+                if (kind === 'machine') { fillKeyChoice(); void getJson('/git-keys', []).then((keys) => paintKeys(keys)); }
                 if (kind === 'list') void fillTemplates();
                 if (kind === 'browser') $('browser-address').value = browserAddress();
                 return form;
@@ -6302,11 +6303,14 @@
     }
     function agendaEvent(ev) {
         const box = el('details', 'ag-event'); box.dataset.show = ev.show ?? 'busy';
+        if (ev.cancelled) box.dataset.cancelled = '';
         if (agendaOpen === ev.id) box.open = true;
         box.addEventListener('toggle', () => { if (box.open) agendaOpen = ev.id; else if (agendaOpen === ev.id) agendaOpen = ''; });
         const head = el('summary', 'ag-row');
         head.append(el('span', 'ag-time', ev.allDay ? uiSaid('set-ag-allday', 'All day') : hourOf(ev.start)));
         const what = el('span', 'ag-what'); what.append(el('span', 'ag-title', ev.title));
+        /* Cancelled: struck out, and said in words (not by the line alone). */
+        if (ev.cancelled) what.prepend(el('span', 'ag-cancelled', uiSaid('set-ag-cancelled', 'Cancelled')));
         if (ev.location) what.append(el('span', 'ag-where hint', ev.location));
         head.append(what);
         const facts = el('dl', 'ag-facts');
@@ -6360,10 +6364,20 @@
         if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-ag-partial', 'Start times only, for now')));
         holder.replaceChildren(shown, list, ...notes);
     }
+    /* WHILE A CALENDAR, A MAILBOX OR AN ADDRESS BOOK IS READ (17-11, the transitions persona): seen at once -- a turning
+       sign, the word, and grey lines where the rows will come; read again over what is shown, a moving bar on top
+       (style.css, [aria-busy]). Said once to a screen reader (role=status). */
+    function readingNote(rows) {
+        const box = el('div', 'as-reading'); box.setAttribute('role', 'status');
+        const head = el('p', 'as-reading-head'); head.append(el('span', 'as-spin'), el('span', '', uiSaid('set-ag-reading', 'Reading…')));
+        box.append(head);
+        for (let i = 0; i < rows; i++) { const r = el('div', 'as-skel'); r.setAttribute('aria-hidden', 'true'); r.style.setProperty('--w', `${[78, 62, 86, 54][i % 4]}%`); box.append(r); }
+        return box;
+    }
     async function agendaFill(holder, target, opts) {
         const from = agendaFrom.get(target) ?? wallNow(agendaZone).slice(0, 10);
         holder.setAttribute('aria-busy', 'true');
-        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        if (!holder.childElementCount) holder.append(readingNote(4));
         const answer = await agendaRead(target, from, opts);
         holder.removeAttribute('aria-busy');
         if (!holder.isConnected) return;
@@ -6400,7 +6414,7 @@
     function consoleView(target) {
         let v = consoleViews.get(target.id);
         if (v) { v.target = target; return v; }
-        v = { id: target.id, target, state: null, socket: null, phase: 'connecting', focused: false, full: false, chat: null, chatOf: '', chatPick: '', waiting: [], opened: false, retry: 0, away: 0, from: '' };
+        v = { id: target.id, target, state: null, socket: null, phase: 'connecting', focused: false, full: false, below: false, chat: null, chatOf: '', chatPick: '', waiting: [], opened: false, retry: 0, away: 0, from: '' };
         consoleViews.set(target.id, v);
         const root = el('div', 'sc'); root.dataset.target = target.id;
         const presence = el('div', 'sc-presence'); presence.setAttribute('aria-live', 'polite');
@@ -6413,15 +6427,17 @@
         const secret = scButton('sc-secret', uiSaid('set-sc-secret', 'Hidden input')); secret.setAttribute('aria-pressed', 'false');
         const ctrlc = scButton('quiet sc-ctrlc', 'Ctrl C'); ctrlc.title = uiSaid('set-sc-ctrlc', 'Interrupts what is running');
         const full = scButton('quiet sc-full-btn', uiSaid('set-sc-full', 'Full screen')); full.setAttribute('aria-pressed', 'false');
+        /* The chat of the conversation that holds the machine, under the console (17-11: the same chat, never one of its own). */
+        const chatBtn = scButton('quiet sc-chat-btn', uiSaid('set-sc-chat', 'Chat')); chatBtn.setAttribute('aria-pressed', 'false');
         const reopen = scButton('primary sc-reopen', uiSaid('set-sc-reopen', 'Open it again')); reopen.hidden = true;
-        const tools = el('div', 'sc-tools'); tools.append(take, hideAi, secret, el('span', 'sc-space'), ctrlc, full);
+        const tools = el('div', 'sc-tools'); tools.append(take, hideAi, secret, el('span', 'sc-space'), ctrlc, chatBtn, full);
         const main = el('div', 'sc-main'); main.append(presence, screen, banner, keys, tools);
         /* Full screen: the chat of a conversation that holds the machine, beside the console. */
         const chatHead = el('div', 'sc-chat-head');
         const chatBox = el('div', 'sc-chat-thread');
         const side = el('aside', 'sc-chat'); side.setAttribute('aria-label', uiSaid('set-sc-chat', 'Chat')); side.hidden = true; side.append(chatHead, chatBox);
         root.append(main, side);
-        Object.assign(v, { root, presence, screen, banner, take, hideAi, secret, fullBtn: full, reopen, chatHead, chatBox, side });
+        Object.assign(v, { root, presence, screen, banner, take, hideAi, secret, fullBtn: full, chatBtn, reopen, chatHead, chatBox, side });
         const term = new Terminal({ ...terminalOptions(), scrollback: 3000 });
         const fitter = new FitAddon.FitAddon(); term.loadAddon(fitter);
         v.term = term; v.fit = () => { if (v.opened && screen.isConnected && screen.offsetWidth > 0) { try { fitter.fit(); } catch { /* not drawn yet */ } } };
@@ -6438,6 +6454,7 @@
         hideAi.addEventListener('click', () => { sendJson({ type: 'hide-ai', on: !(v.state?.hideAi) }); });
         secret.addEventListener('click', () => { sendJson({ type: 'hidden', on: !(v.state?.hidden) }); term.focus(); });
         full.addEventListener('click', () => consoleFull(v, !v.full));
+        chatBtn.addEventListener('click', () => consoleBelow(v, !v.below));
         reopen.addEventListener('click', () => { reopen.hidden = true; consoleConnect(v); });
         /* Where the focus is, kept across paints: given back once the console is in the new panel. */
         root.addEventListener('focusin', () => { v.focused = true; });
@@ -6513,7 +6530,8 @@
         if (v.full === on) return;
         v.full = on;
         v.root.classList.toggle('sc-full', on);
-        v.side.hidden = !on;
+        v.side.hidden = !on && !v.below;
+        v.chatBtn.hidden = on;
         const b = v.fullBtn;
         b.setAttribute('aria-pressed', String(on));
         b.textContent = on ? uiSaid('set-sc-leave-full', 'Leave full screen') : uiSaid('set-sc-full', 'Full screen');
@@ -6526,9 +6544,20 @@
             void consoleChat(v);
         } else {
             if (v.fullStep) { const step = v.fullStep; v.fullStep = null; nav.drop(step); }
-            v.chat?.destroy(); v.chat = null; v.chatOf = '';
+            if (!v.below) { v.chat?.destroy(); v.chat = null; v.chatOf = ''; }
         }
         requestAnimationFrame(() => { v.fit(); v.term.focus(); });
+    }
+    /* The chat under the console, out of full screen: shown or not (the button says which). */
+    function consoleBelow(v, on) {
+        if (v.below === on) return;
+        v.below = on;
+        v.root.classList.toggle('sc-below', on);
+        v.chatBtn.setAttribute('aria-pressed', String(on));
+        if (!v.full) v.side.hidden = !on;
+        if (on) void consoleChat(v);
+        else if (!v.full) { v.chat?.destroy(); v.chat = null; v.chatOf = ''; }
+        requestAnimationFrame(() => v.fit());
     }
     /* The conversations that hold the machine; the one whose chat is shown: picked, else the one on the console now,
        else the conversation this panel is seen from, else the first. */
@@ -6557,7 +6586,7 @@
         v.chatBox.replaceChildren();
         if (!conversations.find((c) => c.name === name)?.talk) { v.chatBox.append(el('p', 'hint', uiSaid('set-sc-chat-off', 'The chat of this conversation is off.'))); return; }
         const [{ mount }, words] = await Promise.all([parleyUi(), readWords()]);
-        if (!v.full || v.chatOf !== name) return;
+        if (!(v.full || v.below) || v.chatOf !== name) return;
         v.chatBox.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
         /* Parley's own chat view, as in the conversation: its thread read and written the same way. */
         v.chat = mount(v.chatBox, {
@@ -6741,7 +6770,7 @@
         const body = box.querySelector('.mv-body');
         if (body.dataset.filled) return;
         body.dataset.filled = '1';
-        body.replaceChildren(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        body.replaceChildren(readingNote(2));
         const got = await peekRead(`mail-read|${target}|${folder}|${m.id}`, 'mail-read', { target, id: m.id, folder }, uiSaid('set-mv-failed-one', 'This message could not be read.'));
         if (!body.isConnected) return;
         if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
@@ -6785,7 +6814,7 @@
     async function mailFill(holder, target, opts) {
         const s = peekOf(target);
         holder.setAttribute('aria-busy', 'true');
-        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        if (!holder.childElementCount) holder.append(readingNote(4));
         const answer = await peekRead(`mail-list|${target}|${s.folder}|${s.text}`, 'mail-list', { target, folder: s.folder, text: s.text }, uiSaid('set-mv-failed', 'The mailbox could not be read.'), opts);
         holder.removeAttribute('aria-busy');
         if (!holder.isConnected) return;
@@ -6827,7 +6856,7 @@
         const body = box.querySelector('.mv-body');
         if (body.dataset.filled) return;
         body.dataset.filled = '1';
-        body.replaceChildren(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        body.replaceChildren(readingNote(2));
         const got = await peekRead(`contact|${target}|${c.id}`, 'contact', { target, id: c.id }, uiSaid('set-ct-failed-one', 'This contact could not be read.'));
         if (!body.isConnected) return;
         if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
@@ -6858,7 +6887,7 @@
     async function contactsFill(holder, target, opts) {
         const s = peekOf(target);
         holder.setAttribute('aria-busy', 'true');
-        if (!holder.childElementCount) holder.append(el('p', 'hint', uiSaid('set-ag-reading', 'Reading…')));
+        if (!holder.childElementCount) holder.append(readingNote(4));
         const answer = await peekRead(`contacts|${target}|${s.text}`, 'contacts', { target, text: s.text }, uiSaid('set-ct-failed', 'The address book could not be read.'), opts);
         holder.removeAttribute('aria-busy');
         if (!holder.isConnected) return;
@@ -7563,7 +7592,7 @@
             copy.addEventListener('click', () => { void copyField(field, copy); });
             const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
             const why = document.createElement('span'); why.className = 'hint';
-            if (key.usedBy.length) { remove.disabled = true; why.textContent = `removing it would cut ${key.usedBy.join(', ')} off: remove ${key.usedBy.length > 1 ? 'those repositories' : 'that repository'} first`; }
+            if (key.usedBy.length) { remove.disabled = true; why.textContent = `removing it would cut ${key.usedBy.join(', ')} off: remove ${key.usedBy.length > 1 ? 'them' : 'it'} first`; }
             remove.addEventListener('click', () => {
                 const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, remove the key ${key.name} (it cannot be made again)`;
                 sure.addEventListener('click', async () => {
@@ -7607,9 +7636,57 @@
     for (const [id, key] of [['git-key-new', 'set-na-new-key'], ['git-key-make-go', 'set-na-create']]) { const b = gitKeyPick.querySelector?.(`#${id}`); if (b) b.dataset.said = key; }
     /* The key offered in "New repository": the one chosen stays chosen. */
     function fillKeyChoice(chosen = $('git-key').value) {
-        gitKeyPick.set(gitKeys.map((key) => ({ value: key.name, label: key.usedBy.length ? `${key.name} (used by ${key.usedBy.join(', ')})` : key.name })), chosen);
+        const offered = gitKeys.map((key) => ({ value: key.name, label: key.usedBy.length ? `${key.name} (used by ${key.usedBy.join(', ')})` : key.name }));
+        gitKeyPick.set(offered, chosen);
         showChosenKey();
+        machineKeyPick.set(offered, $('machine-key')?.value || chosen);
+        showMachineKey();
     }
+    /* A MACHINE (SSH, sshmachine.mjs): the same keys made here; the line for its authorized_keys under the one chosen. */
+    const machineKeyPick = KIT.SecretPicker({
+        ids: { select: 'machine-key', add: 'machine-key-new', row: 'machine-key-make', name: 'machine-key-name', go: 'machine-key-make-go' },
+        none: uiSaid('set-mc-no-key', 'No key yet: make one'), addLabel: uiSaid('set-na-new-key', '+ New key…'), makeLabel: uiSaid('set-na-create', 'Create'), nameLabel: uiSaid('set-mc-key-name', 'Name of the new key'),
+        nameAttrs: { maxlength: '32', pattern: '[a-z]([a-z0-9-]{0,30}[a-z0-9])?', placeholder: 'server-key', spellcheck: 'false', autocapitalize: 'off' },
+        suggest: () => {
+            const taken = new Set(gitKeys.map((k) => k.name));
+            const wanted = $('machine-title').value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+|-+$/g, '').slice(0, 32);
+            let suggestion = wanted && !taken.has(wanted) ? wanted : '';
+            for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
+            return suggestion;
+        },
+        onMake: async (name) => {
+            $('machine-error').hidden = true;
+            try {
+                const made = await post(`${API}/git-keys`, { name });
+                paintKeys(await fetch(`${API}/git-keys`).then((r) => r.json()));
+                machineKeyPick.set(gitKeys.map((key) => ({ value: key.name, label: key.name })), made.name);
+                fillKeyChoice($('git-key').value);
+                showMachineKey();
+                return true;
+            } catch (error) { $('machine-error').textContent = error.message; $('machine-error').hidden = false; return false; }
+        },
+        onChange: () => showMachineKey(),
+    });
+    $('machine-key-pick').append(machineKeyPick);
+    function showMachineKey() {
+        const key = gitKeys.find((k) => k.name === $('machine-key')?.value);
+        $('machine-key-shown').hidden = !key;
+        $('machine-key-line').value = key?.publicKey ?? '';
+    }
+    $('machine-key-copy').addEventListener('click', () => { void copyField($('machine-key-line'), $('machine-key-copy')); });
+    $('machine-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('machine-error').hidden = true;
+        const btn = $('machine-add'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/ssh-add`, { title: $('machine-title').value.trim(), host: $('machine-host').value.trim(), port: $('machine-port').value.trim(), user: $('machine-user').value.trim(), key: $('machine-key').value, pin: $('machine-pin').value.trim() });
+            $('machine-new').reset();
+            paintKeys(await getJson('/git-keys', []));
+            await assetMade($('machine-box'), { key: `connexion:${made.id}`, name: made.title, note: uiSaid('set-mc-pinned', 'Server fingerprint kept: {pin}', { pin: made.pin }), give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
+        } catch (error) { $('machine-error').textContent = error.message; $('machine-error').hidden = false; }
+        finally { btn.disabled = false; }
+        await paintAssets();
+    });
     function showChosenKey() {
         const key = gitKeys.find((k) => k.name === $('git-key').value);
         $('git-key-shown').hidden = !key;
