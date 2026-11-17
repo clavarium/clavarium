@@ -788,6 +788,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         for (const name of all.awake()) { const now = await secrets.reconcile(name, delivered.get(name)).catch(() => null); if (now !== null) delivered.set(name, now); }
     };
     const secretsTimer = setInterval(() => { void secretsGuard().catch(() => {}); }, 60_000); secretsTimer.unref?.();
+    /* The machines' disks give back what was erased, every hour (conversations.trimAll, vm.mjs trim). */
+    const trimTimer = setInterval(() => { void all.trimAll().catch(() => {}); }, 60 * 60_000); trimTimer.unref?.();
     /* The certificate the front serves, said in Settings (certificate.mjs). */
     const certificate = new Certificate({ origin: publicOrigin, alerts });
     /* All the machines to another disk, from Settings (machinesmove.mjs). */
@@ -924,7 +926,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         screen: await quick(screenNow(), 1500, null), catalogue: await quick(catalogue.providers().catch(() => []), 1500, []),
     }) });
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, desks: new Desks({ file: new JsonFile(`${dataDir}/desktops.json`, {}) }), apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); clearInterval(stopSigninHelp); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); clearInterval(trimTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); clearInterval(stopSigninHelp); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
     browsers.attach(server, WebSocketServer); server.on('close', () => browsers.shutdown());

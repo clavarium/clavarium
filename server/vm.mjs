@@ -79,6 +79,7 @@ export function runner(prefix) {
 }
 
 /* The verbs that change a machine: its state is asked again after them. */
+export const TRIM_MS = 120_000;
 const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'halt', 'hardstop', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive', 'reclaim']);
 export const STATES_FRESH_MS = 3000;
 /* The VM manager did not say what a machine is in: not an answer about the machine. */
@@ -141,6 +142,11 @@ export class Vms {
     }
     /* In a shared machine: its machine-wide work, as its admin user, never through a door (the door itself installed). */
     execMachine(conversation, argv, options) { return this.run(['vm', 'exec', this.vmOf(conversation), '--', ...argv], options); }
+    /* ITS DISK GIVES BACK WHAT WAS ERASED (17-11): the system inside tells the disk which blocks are free
+       (fstrim; the VM manager's disks take it, discard=unmap), and the disk file on the host shrinks to what
+       is really used. Ubuntu does it once a week by itself; asked here every hour and before each stop or
+       sleep. A second one is quick: only what changed since is looked at. */
+    trim(conversation, timeoutMs = TRIM_MS) { return this.execMachine(conversation, ['sudo', '-n', 'fstrim', '--all'], { timeoutMs }); }
     /* The host's list of who lives in a shared machine (vm share / unshare). */
     share(conversation) { return this.run(['vm', 'share', this.vmOf(conversation), conversation]); }
     unshare(conversation) { return this.run(['vm', 'unshare', this.vmOf(conversation), conversation]); }

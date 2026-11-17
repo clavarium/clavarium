@@ -21,11 +21,13 @@ const tick = (ms = 5) => new Promise((r) => { setTimeout(r, ms); });
 function bench(t, ways = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-acts-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
-    const calls = [];
+    const calls = []; const trims = [];
     const states = new Map();
-    const b = { calls, states };
+    const b = { calls, states, trims };
     const run = async (argv, options = {}) => {
         const [, verb, vm] = argv;
+        /* Its disk trimmed before a stop or a sleep: kept apart, the ways down are read alone. */
+        if (verb === 'exec' && argv.includes('fstrim')) { trims.push(`${calls.length}:${argv.slice(1).join(' ')}`); if (ways.exec) return ways.exec(argv, options, b); return { code: 0, stdout: '', stderr: '' }; }
         if (!['states', 'info'].includes(verb)) calls.push(argv.slice(1).join(' '));
         if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...states].map(([name, state]) => ({ name, state })) }), stderr: '' };
         if (ways[verb]) return ways[verb](argv, options, b);
@@ -292,4 +294,25 @@ test('a frozen machine is never left "going to sleep": refused at once, Force st
     const h = bench(t, { halt: hangs(() => ['step polite start']) });
     await h.all.machineAction('demo', 'stop');
     await assert.rejects(h.all.machineAction('demo', 'start'), /^Error: Its machine is busy: stopping for \d+ s\. Wait, or force it off\.$|busy: stopping/);
+});
+
+test('the disk gives back what was erased before a sleep, and every hour in each running machine', async (t) => {
+    const b = bench(t);
+    await b.all.machineAction('demo', 'sleep'); await b.all.acted;
+    assert.equal(b.trims.length, 1);
+    assert.equal(b.trims[0], `${b.calls.findLastIndex((c) => c.startsWith('suspend'))}:exec clv-demo -- sudo -n fstrim --all`, 'trimmed just before the sleep');
+    await b.all.machineAction('demo', 'start'); await b.all.acted;
+    await b.all.trimAll();
+    assert.equal(b.trims.length, 2);
+    /* Asleep: not woken for it. */
+    await b.all.machineAction('demo', 'sleep'); await b.all.acted;
+    await b.all.trimAll();
+    assert.equal(b.trims.length, 3, 'only the one before the sleep');
+});
+
+test('a disk that cannot be trimmed does not hold the sleep up', async (t) => {
+    const b = bench(t, { exec: () => { throw new Error('no answer'); } });
+    await b.all.machineAction('demo', 'sleep');
+    assert.equal((await b.all.acted).ok, true);
+    assert.equal(b.trims.length, 1);
 });
