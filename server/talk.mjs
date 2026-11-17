@@ -17,7 +17,8 @@
  *                            until the tool has read, never while somebody
  *                            types there, never into a machine that does not
  *                            run (the message waits, and the line is typed
- *                            when it runs again).
+ *                            when it runs again); still unread a while
+ *                            after, typed again by itself (RENUDGE_MS).
  *   agent-asked, waiting     the owner's devices are alerted.
  *   agent-showed             a file under /work or in an attached folder is
  *                            opened from the page; any other is said to be
@@ -116,15 +117,27 @@ export const HEALTH_KNOWN_MS = 150_000;
 export const enterCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Enter'];
 /* Escape, alone: what the Esc key of the page's key row sends -- a tool's current turn stopped (an API key that may act, apikeys.mjs). */
 export const escapeCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Escape'];
+/* A PANE SCROLLED BACK IS IN COPY MODE (`mouse on`: the wheel of any screen puts it there, and it stays
+   there when that screen goes away): the keys of a line typed then are copy-mode commands, the line never
+   reaches the tool and its Enter only leaves the mode (tried with tmux 3.4). The mode is left first, in
+   the same command -- nothing is done to a pane that is not in a mode (no shell: -F reads a format). */
+const LEAVE_MODE = ['if-shell', '-F', '-t', PANE, '#{pane_in_mode}', `send-keys -t ${PANE} -X cancel`, ';'];
 export function typeCommand(line) {
     const text = line.endsWith(';') ? `${line.slice(0, -1)}\\;` : line;
-    return ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];
+    return ['tmux', '-L', SOCKET, ...LEAVE_MODE, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];
 }
+/* Where the line is in typeCommand's argument vector. */
+export const TYPED_AT = 3 + LEAVE_MODE.length + 5;
 /* Added to Parley's invitation, this server's own sentence: a branch can be
    checked out in one folder only, and /tmp is emptied when the machine
    restarts, with the work left there. Typed in a terminal: no quote, no
    backquote, nothing a shell would run. */
 export const BRANCHES = 'Check out your branches in the main folder of the repository or under /work, never in /tmp: a branch can be checked out in one folder only, and /tmp is emptied when the machine restarts. The checks before sending run in a copy made at exactly the commit to send (CLAVARIUM_CHECK_COPY, CLAVARIUM_CHECK_HEAD): never write a check that needs the main folder on a branch or at that commit.';
+/* THE LINE TYPED AGAIN BY ITSELF (17-11): one line lost (a pane in copy mode, a tool drawing a modal)
+   silenced every later one, the tool "told" till it read. A message still unread this long after its
+   line was typed has it typed again, these long after the last, then every last one of them -- till the
+   tool reads (its read count moves). Kept in its record: a restart of this server goes on. */
+export const RENUDGE_MS = Object.freeze([60_000, 180_000, 600_000]);
 /* After a restart, the tool is given this long to start before REREAD is typed. */
 export const REREAD_AFTER_MS = 10_000;
 /* READY, NOT JUST STARTED. The tool starts when its terminal is opened, which
@@ -222,8 +235,8 @@ export const windowOf = (choice) => { const [kind, n] = String(choice).split(':'
 const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #spoke; #inRoom; #listening = new Map(); #every; #now;
-    #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
-    #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret;
+    #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #ticking = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
+    #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret; #log;
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
@@ -233,7 +246,8 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null }) {
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null, log = (line) => console.log(line) }) {
+        this.#log = log;
         this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen; this.#dropSecret = dropSecret;
         this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#spoke = spoke; this.#inRoom = inRoom; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
@@ -476,17 +490,22 @@ export class Talk {
         return this.of(name);
     }
 
-    /* Types a line and Enter in the tool's terminal. Through the terminal the
-       bridge keeps open into the same tmux pane when there is one (nothing
-       sent into the machine: the bytes go down a channel already open), or
-       else one command in the machine. */
+    /* Types a line and Enter in the tool's terminal. BY ONE COMMAND IN THE MACHINE FIRST (17-11): it
+       leaves copy mode before it types (typeCommand), which the terminal the bridge keeps open cannot --
+       bytes down it are copy-mode keys while the pane is scrolled back, and the line was lost, said
+       typed. That terminal, into the same tmux pane, when the command fails. Each line said in the log,
+       and each one lost, with why. */
     async #type(name, line) {
+        const what = line === WAKE ? 'wake' : line === URGENT ? 'urgent' : line.length > 60 ? `${line.slice(0, 60)}...` : line;
         await this.#warm(name);
+        const ran = await this.#vms.exec(name, typeCommand(line), { timeoutMs: 30_000 }).catch((error) => ({ code: -1, stderr: error?.message }));
+        if (ran.code === 0) { this.#ranAt.set(name, this.#now()); this.#log(`talk: ${name}: typed (${what})`); return true; }
+        const why = `exit ${ran.code}${ran.stderr ? `: ${String(ran.stderr).trim().slice(0, 200)}` : ''}`;
         const down = this.#terminal?.open(name) ? await Promise.resolve(this.#terminal.type(name, line, ENTER_AFTER_MS)).catch(() => false) : false;
-        if (down === true) { this.#ranAt.set(name, this.#now()); return true; }
         /* The line went, its Enter did not (the channel closed meanwhile): the Enter alone, never the line twice. */
-        const ok = (await this.#vms.exec(name, down === 'enter' ? enterCommand() : typeCommand(line), { timeoutMs: 30_000 })).code === 0;
+        const ok = down === true || (down === 'enter' && (await this.#vms.exec(name, enterCommand(), { timeoutMs: 30_000 }).catch(() => ({ code: -1 }))).code === 0);
         if (ok) this.#ranAt.set(name, this.#now());
+        this.#log(ok ? `talk: ${name}: typed down its terminal (${what}), the command in the machine failed (${why})` : `talk: ${name}: NOT typed (${what}): ${why}; ${this.#terminal?.open(name) ? 'its terminal refused too' : 'no terminal open'}`);
         return ok;
     }
 
@@ -749,16 +768,22 @@ export class Talk {
             this.#store.put({ ...this.#store.get(name), reread: false, renewedText: undefined });
             return 'told';
         }
-        if (!(await this.#type(name, this.rereadLine()).catch(() => false))) return later(RETRY_MS);
+        if (!(await this.#type(name, this.rereadLine()).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return later(RETRY_MS);
         /* Reading the whole thread, it reads what waits too: that line is not typed after it. */
         const waits = this.#parley(name).unread() > 0;
-        this.#store.put({ ...this.#store.get(name), reread: false, ...(waits ? { pending: false, woke: true, why: null, again: false } : {}), typedAt: new Date(this.#now()).toISOString() });
+        this.#store.put({ ...this.#store.get(name), reread: false, ...(waits ? { pending: false, woke: true, why: null, again: false, toldRead: this.#readCount(name), renudged: 0 } : {}), typedAt: new Date(this.#now()).toISOString() });
         return 'typed';
     }
 
     /* ---- the line that wakes the tool ---- */
     /* Somebody typed in its terminal: nothing is typed over them. */
     typed(name) { this.#typedAt.set(name, this.#now()); }
+
+    /* How far the tool has read (Parley's read.json: messages read, archived ones counted). Grows only. */
+    #readCount(name) { try { return Math.max(0, Number(JSON.parse(readFileSync(`${this.#dir(name)}/read.json`, 'utf8')).lines) || 0); } catch { return 0; } }
+    /* TOLD, THEN READ, THEN WRITTEN TO AGAIN before `woke` was put back (the tick's, every second -- or
+       never, while a tick waited on another conversation): the line typed was used, the next is owed. */
+    #readSince(name, r) { return Number.isInteger(r?.toldRead) && this.#readCount(name) > r.toldRead; }
 
     #want(name) {
         const r = this.#store.get(name);
@@ -769,27 +794,28 @@ export class Talk {
        'typed', 'read' (nothing waits), 'told' (typed already, not read yet),
        'asleep', 'typing', 'failed' -- the last three wait, and are tried
        again. `again`: the owner asked to remind it, typed before or not. */
-    #wake(name, again = false, urgent = false) {
+    #wake(name, again = false, urgent = false, renudge = false) {
         const going = this.#trying.get(name);
         if (going) return going;
-        const run = this.#tryWake(name, again, urgent).finally(() => this.#trying.delete(name));
+        const run = this.#tryWake(name, again, urgent, renudge).finally(() => this.#trying.delete(name));
         this.#trying.set(name, run);
         return run;
     }
-    async #tryWake(name, again, urgent = false) {
+    async #tryWake(name, again, urgent = false, renudge = false) {
         const r = this.#store.get(name);
         if (r?.on !== true) return 'read';
-        const waits = (why, ms) => { this.#store.put({ ...this.#store.get(name), pending: true, why, again }); this.#nextTry.set(name, this.#now() + ms); return why; };
-        if (this.#parley(name).unread() === 0) { if (r.pending || r.woke) this.#store.put({ ...r, pending: false, woke: false, why: null, again: false }); return 'read'; }
+        const waits = (why, ms) => { this.#store.put({ ...this.#store.get(name), pending: true, why, again, renudge }); this.#nextTry.set(name, this.#now() + ms); return why; };
+        if (this.#parley(name).unread() === 0) { if (r.pending || r.woke) this.#store.put({ ...r, pending: false, woke: false, why: null, again: false, renudge: false }); return 'read'; }
         /* Its machine has just restarted: the line that will be typed tells it to read everything. */
         if (r.reread === true) { this.#store.put({ ...r, pending: true, why: 'restarting', again }); return 'restarting'; }
-        if (r.woke === true && !again) { if (r.pending) this.#store.put({ ...r, pending: false, why: null }); return 'told'; }
+        if (r.woke === true && !again && !this.#readSince(name, r)) { if (r.pending) this.#store.put({ ...r, pending: false, why: null }); return 'told'; }
         if (!this.#conversations.awake().includes(name)) return waits('asleep', RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return waits('typing', TYPING_QUIET_MS - quiet + 100);
         if (!(await this.#runs(name))) return waits('asleep', RETRY_MS);
-        if (!(await this.#type(name, urgent ? URGENT : WAKE).catch(() => false))) return waits('failed', RETRY_MS);
-        this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, typedAt: new Date(this.#now()).toISOString() });
+        if (renudge) this.#log(`talk: ${name}: still unread ${Math.round((this.#now() - Date.parse(r.typedAt ?? '')) / 1000)} s after its line: typed again (${(r.renudged ?? 0) + 1})`);
+        if (!(await this.#type(name, urgent ? URGENT : WAKE).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return waits('failed', RETRY_MS);
+        this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, renudge: false, typedAt: new Date(this.#now()).toISOString(), toldRead: this.#readCount(name), renudged: renudge ? (r.renudged ?? 0) + 1 : 0 });
         return 'typed';
     }
 
@@ -801,16 +827,36 @@ export class Talk {
         return { ...this.of(name), told };
     }
 
-    async #tick() {
+    /* NO CONVERSATION WAITS ON ANOTHER: each one's work is started, never awaited in turn -- a machine
+       that does not answer (its terminal opening, its state asked) held every conversation after it in
+       the store, ticks piling up behind, and their `woke` never put back: their next line was never
+       typed. One run at a time for each (#wake's own, and this one's for the rest). */
+    #tick() {
         for (const r of this.#store.all()) {
-            if (r.on === true) this.#reapForgets(r);
-            if (r.on === true && r.reread === true) { await this.#tryReread(r.name).catch(() => {}); continue; }
-            if (r.on !== true || (!r.pending && !r.woke)) continue;
-            /* It has read: what waited is done, and the next message wakes it again. */
-            if (r.woke && !r.pending) { try { if (this.#parley(r.name).unread() === 0) this.#store.put({ ...r, woke: false }); } catch { /* its folder went */ } continue; }
-            if (this.#now() < (this.#nextTry.get(r.name) ?? 0)) continue;
-            await this.#wake(r.name, r.again === true).catch(() => {});
+            if (this.#ticking.has(r.name)) continue;
+            const run = this.#tickOne(r).catch(() => {}).finally(() => this.#ticking.delete(r.name));
+            this.#ticking.set(r.name, run);
         }
+    }
+    async #tickOne(r) {
+        if (r.on === true) this.#reapForgets(r);
+        if (r.on === true && r.reread === true) { await this.#tryReread(r.name); return; }
+        if (r.on !== true || (!r.pending && !r.woke)) return;
+        if (r.woke && !r.pending) {
+            let unread;
+            try { unread = this.#parley(r.name).unread(); } catch { return; /* its folder went */ }
+            /* It has read: what waited is done, and the next message wakes it again. */
+            if (unread === 0) { this.#store.put({ ...r, woke: false }); return; }
+            /* It read since, and more was written: the line is owed now. */
+            if (this.#readSince(r.name, r)) { await this.#wake(r.name); return; }
+            /* Still unread long after: typed again, RENUDGE_MS apart, the last of them for ever after. */
+            const after = RENUDGE_MS[Math.min(r.renudged ?? 0, RENUDGE_MS.length - 1)];
+            const at = Date.parse(r.typedAt ?? '');
+            if (Number.isFinite(at) && this.#now() - at >= after && this.#now() >= (this.#nextTry.get(r.name) ?? 0)) await this.#wake(r.name, true, false, true);
+            return;
+        }
+        if (this.#now() < (this.#nextTry.get(r.name) ?? 0)) return;
+        await this.#wake(r.name, r.again === true, false, r.renudge === true);
     }
 
     /* The agent asked to forget short-lived secrets (parley forget -> forget.jsonl beside its thread): the
