@@ -40,7 +40,6 @@ import { appendFileSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSyn
 import { createHash } from 'node:crypto';
 import { Refusal, SESSION } from './conversations.mjs';
 import { SOCKET } from './tmux.mjs';
-import { TerminalType } from './terminaltype.mjs';
 import { isConversationName } from './names.mjs';
 
 export const TICK_MS = 8000;
@@ -180,14 +179,12 @@ const PANE = `=${SESSION}:`;
 const fingerprint = (screen) => createHash('sha256').update(screen).digest('hex');
 
 export class Answerer {
-    #store; #vms; #config; #fetcher; #dir; #conversations; #seen = new Map(); #busy = new Set(); #turn = 0; #now; #onNeeds; #typer;
+    #store; #vms; #config; #fetcher; #dir; #conversations; #seen = new Map(); #busy = new Set(); #turn = 0; #now; #onNeeds;
 
     /* `conversations`: asked which conversations exist and are awake. */
     /* `onNeeds(name, why)`: it stopped and waits for its owner, who must be told. */
-    constructor({ store, vms, config, conversations, dataDir, fetcher = fetch, now = () => new Date(), onNeeds = () => {}, typer = null }) {
+    constructor({ store, vms, config, conversations, dataDir, fetcher = fetch, now = () => new Date(), onNeeds = () => {} }) {
         this.#onNeeds = onNeeds;
-        /* `typer`: the server's one TerminalType (main.mjs), or one of its own. */
-        this.#typer = typer ?? new TerminalType({ vms, log: () => {} });
         this.#store = store; this.#vms = vms; this.#config = config; this.#conversations = conversations; this.#fetcher = fetcher; this.#now = now;
         this.#dir = `${dataDir}/answerer`;
         mkdirSync(this.#dir, { recursive: true, mode: 0o700 });
@@ -252,12 +249,16 @@ export class Answerer {
         return lines.slice(-SCREEN_LINES).join('\n').slice(-SCREEN_MAX);
     }
 
-    /* Typed as every line of this server is (terminaltype.mjs): copy mode left first. Never while
-       somebody types there (`hold` 0): the answer is for the screen read, not one changed meanwhile. */
     async #type(name, answer) {
-        if (answer.action === 'text') return this.#typer.typeLine(name, answer.text, { why: 'answerer', what: 'its answer', hold: 0 });
+        const to = ['-t', PANE];
+        const tmux = ['tmux', '-L', SOCKET];
+        if (answer.action === 'text') {
+            const typed = await this.#vms.exec(name, [...tmux, 'send-keys', ...to, '-l', '--', answer.text], { timeoutMs: 30_000 });
+            if (typed.code !== 0) return false;
+            return (await this.#vms.exec(name, [...tmux, 'send-keys', ...to, 'Enter'], { timeoutMs: 30_000 })).code === 0;
+        }
         for (const key of answer.keys) {
-            if (!(await this.#typer.sendKey(name, KEYS.get(key), { why: 'answerer' }))) return false;
+            if ((await this.#vms.exec(name, [...tmux, 'send-keys', ...to, KEYS.get(key)], { timeoutMs: 30_000 })).code !== 0) return false;
         }
         return true;
     }

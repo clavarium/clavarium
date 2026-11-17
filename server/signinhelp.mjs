@@ -30,7 +30,8 @@
 import { lstatSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { CODE } from '../config/launch/screen-watch.mjs';
-import { Refusal } from './conversations.mjs';
+import { Refusal, SESSION } from './conversations.mjs';
+import { SOCKET } from './tmux.mjs';
 
 export const KIND = 'signin-help';
 export const ASK = 'signin-ask.json';
@@ -56,6 +57,13 @@ export function linkAllowed(link, domains = []) {
     return u.protocol === 'https:' && !u.username && !u.password && inDomain(u.hostname.toLowerCase(), domains);
 }
 const cut = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+
+/* The code typed into the tool, then Enter -- as screen-watch types a code the person pastes. Never logged. */
+export async function typeInto(vms, name, text) {
+    const tmux = ['tmux', '-L', SOCKET, 'send-keys', '-t', `=${SESSION}:`];
+    if ((await vms.exec(name, [...tmux, '-l', '--', text], { timeoutMs: 30_000 })).code !== 0) return false;
+    return (await vms.exec(name, [...tmux, 'Enter'], { timeoutMs: 30_000 })).code === 0;
+}
 
 export class SigninHelp {
     #store; #conversations; #tools; #awake; #chatOn; #work; #browsers; #post; #type; #event; #now;

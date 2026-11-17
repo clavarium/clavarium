@@ -70,6 +70,15 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     await me.until('gone back', async () => (await p.locator('#updates-version').innerText()) === 'Clavarium 0.1.0');
     assert.match(await p.locator('#updates-history').innerText(), /0\.2\.0 → 0\.1\.0 · Went back/);
     assert.equal(await p.locator('#updates-news').isVisible(), false, 'what worked is not news');
+    /* A version that could not even be downloaded (17-11): said as tried again by itself, npm's own words behind "See the log". */
+    const was = JSON.parse(readFileSync(join(at, 'state.json'), 'utf8'));
+    writeFileSync(join(at, 'state.json'), JSON.stringify({ ...was, available: '0.4.0', history: [{ id: 'f1', at: new Date().toISOString(), action: 'update', from: '0.1.0', to: '0.4.0', result: 'failed', fetch: true, why: 'npm could not install clavarium@0.4.0: code E404: 404 Not Found', log: "-- what npm said\nnpm error code E404\n-- the end of npm's debug log\n7 error 404 Not Found - GET https://registry.example.com/clavarium/-/clavarium-0.4.0.tgz" }, ...(was.history ?? [])] }));
+    await p.locator('#settings-close').click();
+    await me.nav('settings');
+    await me.until('the fetch failure is said as such', async () => (await p.locator('#updates-retry-note').innerText().catch(() => '')) === 'It could not be downloaded before; it is tried again by itself.');
+    await p.evaluate(() => { document.getElementById('updates-history-box').open = true; });
+    await p.locator('#updates-history .update-log summary').first().click();
+    assert.match(await p.locator('#updates-history .update-log pre').first().innerText(), /7 error 404 Not Found - GET/);
     /* On a phone, dark: within the screen, no sideways scroll. */
     const phone = await b.person({ phone: true });
     await phone.page.emulateMedia({ colorScheme: 'dark' });

@@ -36,8 +36,8 @@
  */
 import { lstatSync, readdirSync } from 'node:fs';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
-import { Refusal } from './conversations.mjs';
-import { TerminalType, HOLD_MAX_MS } from './terminaltype.mjs';
+import { Refusal, SESSION } from './conversations.mjs';
+import { SOCKET } from './tmux.mjs';
 import { isConversationName } from './names.mjs';
 
 export const TICK_MS = 5000;
@@ -96,6 +96,9 @@ export function cron(line) {
     return (date) => minute.has(date.getMinutes()) && hour.has(date.getHours()) && month.has(date.getMonth() + 1)
         && (anyDay && anyWeekday ? true : anyDay ? weekday.has(date.getDay()) : anyWeekday ? day.has(date.getDate()) : day.has(date.getDate()) || weekday.has(date.getDay()));
 }
+const PANE = `=${SESSION}:`;
+const HOLD_STEP_MS = 1000;
+const HOLD_MAX_MS = 5 * 60_000;
 
 /* WHO IS TYPING IN A TERMINAL, from what screens send (bridge.mjs onTyped).
    Busy: a key in the last seconds, or a line begun and not yet sent
@@ -147,23 +150,22 @@ const FIRED_SHOWN = 120;
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export class Wakeups {
-    #store; #vms; #conversations; #resources; #warm; #now; #fired; #docket; #typing; #typer; #held = new Map(); #busy = false;
+    #store; #vms; #conversations; #resources; #warm; #now; #fired; #docket; #typing; #pause; #held = new Map(); #busy = false;
 
     /* `warm(name)`: opens the terminal of a machine that runs, if it is not open.
        `fired(name, { text, item })`: a wake-up was typed (its chat says so: Talk.event). */
     /* `docket`: { on(name), post(name, {kind, text, data}) } (dockets.mjs), or none: typed always. */
     /* `typing(name)`: someone is typing in its terminal from a screen (see TypingWatch): a line is held until it is free. */
-    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {}, docket = null, typing = () => false, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)), typer = null }) {
+    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {}, docket = null, typing = () => false, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)) }) {
         this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now; this.#fired = fired; this.#docket = docket;
-        this.#typing = typing;
-        /* `typer`: the server's one TerminalType (main.mjs): every line typed the same way, said in the log. */
-        this.#typer = typer ?? new TerminalType({ vms, typing, now: () => this.#now().getTime(), pause, log: () => {} });
+        this.#typing = typing; this.#pause = pause;
     }
     /* Where its chat is on, posted to its docket (told at its next tick); else typed. Resolves with what to say of it, and whether it went. */
     async #deliver(name, item, text) {
         if (this.#docket?.on(name)) {
             try { this.#docket.post(name, { kind: item.kind, text, data: { wakeup: item.id } }); return { ok: true, what: `Posted to its docket: ${text}` }; } catch { /* its folder: typed instead */ }
         }
+        await this.#free(name);
         const typed = await this.#type(name, text).catch(() => false);
         return { ok: typed, what: typed ? `Typed: ${text}` : 'Could not be typed: is its tool running?' };
     }
@@ -319,10 +321,16 @@ export class Wakeups {
         return withFiles(item.message, arrived);
     }
 
-    /* Its terminal opened first (who woke it is said), then typed as every line of this server is (terminaltype.mjs). */
-    async #type(name, text, why = 'wake-up') {
+    /* Typed into a command being typed, both were broken (seen 24-10): wait for the line to be free, a while at most. */
+    async #free(name) {
+        for (const start = this.#now().getTime(); this.#typing(name) && this.#now().getTime() - start < HOLD_MAX_MS;) await this.#pause(HOLD_STEP_MS);
+    }
+
+    async #type(name, text) {
         await this.#warm(name);
-        return this.#typer.typeLine(name, text, { why });
+        const tmux = ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE];
+        if ((await this.#vms.exec(name, [...tmux, '-l', '--', text], { timeoutMs: 30_000 })).code !== 0) return false;
+        return (await this.#vms.exec(name, [...tmux, 'Enter'], { timeoutMs: 30_000 })).code === 0;
     }
 
     /* A line from this server itself (a repository that could not be read,
@@ -332,17 +340,10 @@ export class Wakeups {
     /* One line at a time into a terminal: two said at once were typed into each other, then sent
        as one (two repositories moving together, seen 20-10). */
     #queue = new Map();
-    async say(name, text, { why = 'server line' } = {}) {
-        return this.#inTurn(name, () => this.#type(name, cleanMessage(text), why));
-    }
-    /* A doorbell (terminaltype.mjs, DOORBELLS: the docket's), in the same queue as every line. */
-    async ring(name, source) {
-        return this.#inTurn(name, async () => { await this.#warm(name); return this.#typer.ring(name, source); });
-    }
-    #inTurn(name, type) {
+    async say(name, text) {
         if (!this.#conversations.awake().includes(name)) return false;
         const before = this.#queue.get(name) ?? Promise.resolve();
-        const mine = before.then(type).catch(() => false);
+        const mine = before.then(() => this.#free(name)).then(() => this.#type(name, cleanMessage(text)).catch(() => false));
         this.#queue.set(name, mine);
         void mine.finally(() => { if (this.#queue.get(name) === mine) this.#queue.delete(name); });
         return mine;
