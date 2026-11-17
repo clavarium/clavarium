@@ -196,7 +196,7 @@ export const SETTINGS_WORDS_FR = {
     'set-mcp-need': 'Collez le bloc, ou donnez nom et adresse.', 'set-mcp-tools': 'Outils', 'set-mcp-refresh': 'Actualiser', 'set-mcp-seen': 'Marquer comme vu',
     'set-mcp-none': 'Aucun outil listé pour l\'instant.', 'set-mcp-unreached': 'Injoignable : {why}', 'set-mcp-open': 'atteint l\'extérieur',
     'set-mcp-fresh': 'Nouveau : demandé jusqu\'à ce que vous l\'ayez vu',
-    'set-mcp-oauth': 'Se connecter', 'set-mcp-client': 'Identifiant client', 'set-mcp-client-need': 'Collez son identifiant et son secret, une fois.',
+    'set-mcp-oauth': 'Se connecter', 'set-mcp-link': 'Ou ouvrez ce lien dans un autre navigateur :', 'set-mcp-link-copy': 'Copier', 'set-mcp-link-copied': 'Copié', 'set-mcp-link-open': 'Ouvrir', 'set-mcp-client': 'Identifiant client', 'set-mcp-client-need': 'Collez son identifiant et son secret, une fois.',
     /* Its client pasted once, the permissions asked, signed out (16-11). */
     'set-mcp-reconnect': 'Reconnecter', 'set-mcp-client-box': 'Identifiant et secret client', 'set-mcp-secret': 'Secret client',
     'set-mcp-scopes': 'Autorisations demandées', 'set-mcp-redirect': 'Adresse de retour de son appli', 'set-mcp-client-kept': 'Gardés sur le serveur. Aucune IA ne les voit.',

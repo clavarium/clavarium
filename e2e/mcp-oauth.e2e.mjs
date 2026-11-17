@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { bench, SKIP } from './bench.mjs';
 
@@ -86,6 +88,13 @@ test('an MCP server signed in from a phone: its tab opened in the click, its cli
     const second = page.waitForEvent('popup');
     await signIn.click();
     const tab = await second;
+    /* Its address shown too, to copy or open in another browser. */
+    const link = panel.locator('input[name="mcp-sign-link"]');
+    await me.until('the sign-in link shown', async () => (await link.inputValue().catch(() => '')).startsWith(`${p.origin}/`), 5_000);
+    assert.ok((await link.inputValue()).includes('client_id=app-1'));
+    assert.equal(await panel.locator('.mcp-sign-link a').getAttribute('href'), await link.inputValue());
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'the link fits a phone');
+    if (process.env.CLAVARIUM_SHOTS) { mkdirSync(process.env.CLAVARIUM_SHOTS, { recursive: true }); await page.screenshot({ path: join(process.env.CLAVARIUM_SHOTS, 'mcp-sign-link-phone.png') }); }
     await me.until('back from the provider', async () => /Connected to Chat/.test(await tab.content().catch(() => '')), 20_000);
     assert.equal(p.seen.authorize.at(-1).client_id, 'app-1');
     assert.equal(p.seen.authorize.at(-1).scope, 'chat:read chat:write', 'only the permissions kept');
