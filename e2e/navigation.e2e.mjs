@@ -266,7 +266,7 @@ async function walk(t, { phone }) {
     for (const [kind, title, word, opened] of [
         ['device', 'Devices', 'New device', () => shown('#share-compose')],
         ['conversation', 'Conversations', 'New conversation', () => shown('#newconv')],
-        ['asset', 'Assets', 'New asset', async () => (await shown('#assets')) && (await page.locator('#assets-detail .as-kinds button').count()) === 11],
+        ['asset', 'Assets', 'New asset', async () => (await shown('#assets')) && (await page.locator('#assets-detail .as-kinds button').count()) === 12],
     ]) {
         if (phone) await page.locator('#links-phone .lk-kinds button', { hasText: title }).click();
         const plus = page.locator(`#links [data-add="${kind}"] >> visible=true`);

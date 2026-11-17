@@ -1278,6 +1278,8 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .ag-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-event[data-show="tentative"] .ag-title { font-style: italic; }
 .ag-event[data-show="free"] .ag-title { font-weight: 400; color: var(--ink2); }
+.ag-event[data-cancelled] .ag-title, .ag-event[data-cancelled] .ag-where { text-decoration: line-through; text-decoration-thickness: 1.5px; color: var(--ink2); }
+.ag-cancelled { align-self: flex-start; font-size: .6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--danger); }
 .ag-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; padding: 4px 6px 8px calc(4.5em + 14px); font-size: .8125rem; }
 .ag-facts dt { color: var(--ink2); }
 .ag-facts dd { margin: 0; overflow-wrap: anywhere; }
@@ -3400,6 +3402,8 @@ span.tile-spark { display: block; height: 22px; }
 .sc-chat-pick { flex: 1; min-width: 0; font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
 .sc-chat-thread { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .sc-chat-thread > .hint { padding: 12px; }
+/* Out of full screen, the chat under the console (its button): a fixed height, the thread scrolls inside. */
+.sc.sc-below:not(.sc-full) .sc-chat { height: min(440px, 60vh); margin-top: 10px; }
 :root[data-sc-full] body { overflow: hidden; }
 @media (max-width: 760px), (pointer: coarse) {
   .sc-keys { display: flex; }
@@ -3411,3 +3415,5 @@ span.tile-spark { display: block; height: 22px; }
   .sc.sc-full { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 58fr) minmax(0, 42fr); padding: 6px; gap: 6px; }
 }
 @media (prefers-reduced-motion: reduce) { .sc-main { transition: none; } }
+.mc-port { max-width: 6em; flex: 0 0 6em; }
+.kit-na-made .hint { overflow-wrap: anywhere; }

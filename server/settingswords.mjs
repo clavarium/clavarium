@@ -212,6 +212,11 @@ export const SETTINGS_WORDS_FR = {
     'set-rt-mcp-hint-frame': 'Votre choix pour chaque sorte d\'outil',
     /* A browser paired through the Tether extension (browsers.mjs): the form, its panel, Frame's sites. */
     'set-na-k-browser': 'Navigateur', 'set-br-head': 'Associer un navigateur',
+    'set-ag-cancelled': 'Annulé', 'set-na-k-machine': 'Machine (SSH)', 'set-mc-head': 'Ajouter une machine (SSH)', 'set-mc-hint': 'Sa console, ses fichiers ; la clé reste ici.',
+    'set-mc-title': 'Nom', 'set-mc-host': 'Adresse', 'set-mc-user': 'Utilisateur', 'set-mc-key': 'Clé', 'set-mc-no-key': 'Pas encore de clé : en faire une', 'set-mc-key-name': 'Nom de la nouvelle clé',
+    'set-mc-key-line': 'À ajouter dans ~/.ssh/authorized_keys', 'set-mc-more': 'Empreinte du serveur (facultatif)',
+    'set-mc-pin-hint': 'Lue et retenue au premier contact.',
+    'set-mc-add': 'Ajouter', 'set-mc-pinned': 'Empreinte du serveur retenue : {pin}',
     'set-br-step-install': 'Installez l\'extension Tether.', 'set-br-step-make': 'Créez la configuration, puis copiez-la.',
     'set-br-step-paste': 'Collez-la dans la fenêtre de l\'extension.', 'set-br-make': 'Créer la configuration',
     'set-br-config': 'Configuration (une fois, 10 minutes)', 'set-br-wait': 'En attente de l\'extension…',

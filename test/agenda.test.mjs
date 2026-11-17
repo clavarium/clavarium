@@ -59,7 +59,7 @@ test('Tether\'s text lines, read back: id, start, title, place; the whole series
 
 test('an event given as data: kept to what the page shows, its invitation as text; a link only when it is https', () => {
     const e = eventOf({ id: 'x', title: 'Call\nnow', start: '2026-11-16T10:00:00', end: '2026-11-16T10:30', location: 'Online', organizer: 'boss@example.com', online: 'https://meet.example.com/a', attendees: 4, show: 'tentative', notes: 'never sent' });
-    assert.deepEqual(e, { id: 'x', title: 'Call now', start: '2026-11-16T10:00', end: '2026-11-16T10:30', allDay: false, location: 'Online', organizer: 'boss@example.com', online: 'https://meet.example.com/a', attendees: 4, show: 'tentative', notes: 'never sent' });
+    assert.deepEqual(e, { id: 'x', title: 'Call now', start: '2026-11-16T10:00', end: '2026-11-16T10:30', allDay: false, location: 'Online', organizer: 'boss@example.com', online: 'https://meet.example.com/a', attendees: 4, show: 'tentative', notes: 'never sent', cancelled: false });
     assert.equal(eventOf({ start: '2026-11-16T10:00', notes: 'line\u0007 one\n\n\n\nline two' }).notes, 'line one\n\nline two', 'its invitation text: lines kept, control characters dropped');
     assert.equal(eventOf({ start: '2026-11-16T10:00', online: 'javascript:alert(1)' }).online, null);
     assert.equal(eventOf({ start: '2026-11-16T10:00', show: 'oof' }).show, 'away');
@@ -147,4 +147,14 @@ test('16-11: events as the real Tether connector hands them ({ data: { events } 
     assert.equal(got.events[0].notes, ev.notes);
     assert.equal(got.events[0].organizer, 'Ann');
     assert.equal(got.more, false);
+});
+
+test('a cancelled meeting is marked: Tether says so, or its title does as calendar servers write it on an invitee\'s copy (17-11)', () => {
+    const at = { start: '2026-11-17T09:00:00', end: '2026-11-17T10:00:00' };
+    assert.equal(eventOf({ ...at, title: 'Annulé: DESIGN Grooming Affinage', show: 'free' }).cancelled, true);
+    assert.equal(eventOf({ ...at, title: 'Canceled: Review' }).cancelled, true);
+    assert.equal(eventOf({ ...at, title: 'Cancelled : Review' }).cancelled, true);
+    assert.equal(eventOf({ ...at, title: 'Grooming', cancelled: true }).cancelled, true);
+    assert.equal(eventOf({ ...at, title: 'Point de syncro', show: 'free' }).cancelled, false, 'free is not cancelled');
+    assert.equal(eventOf({ ...at, title: 'Pourquoi un rendez-vous est annulé: retour' }).cancelled, false, 'only a leading word');
 });

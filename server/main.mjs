@@ -54,6 +54,7 @@ import { Mailboxes, recentMessages } from './mailbox.mjs';
 import { Grants } from './grants.mjs';
 import { Groups } from './groups.mjs';
 import { GitReview } from './gitpush.mjs';
+import { machinesUsing } from './sshmachine.mjs';
 import { GitAccess } from './gitaccess.mjs';
 import { GitChecks } from './gitchecks.mjs';
 import { GitKeeper } from './gitkeeper.mjs';
@@ -312,7 +313,7 @@ const PARLEY_WAIT_MS = 20_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS, tetherConnectors }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS, tetherConnectors, sshProbe }) {
     /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
     const migrated = migrateData(dataDir);
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
@@ -509,6 +510,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let tethers = null;
     const browsers = new Browsers({ dataDir, store: () => tethers?.store(), log: (line) => console.log(line) });
     tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, browsers, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) }, ...(tetherConnectors ?? {}) } });
+    /* The SSH keys made here open machines too (sshmachine.mjs): Tether asks the private half by name; "used by" names them. */
+    tethers.sshKeys = gitAccess;
+    gitAccess.machinesUsing(machinesUsing(tethers));
+    /* A test reads a machine's host key from a stand-in (no network). */
+    if (sshProbe) tethers.sshProbe = sshProbe;
     /* External MCP servers signed in with OAuth: their tokens held here, refreshed here (mcpoauth.mjs). */
     tethers.oauth = new McpOAuth({ secrets });
     const stopTethers = tethers.start();

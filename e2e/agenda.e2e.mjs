@@ -23,6 +23,7 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
         return { text: 'listed', size: 6, events: [
             { id: 'e1', title: 'Early call', start: at(0, '00:05'), end: at(0, '00:35'), location: 'Room 2', show: 'busy' },
             { id: 'e2', title: 'Team review', start: at(0, '23:30'), end: at(0, '23:55'), organizer: 'lead@example.com', online: 'https://meet.example.com/abc', attendees: 5, show: 'tentative', notes: 'Ordre du jour <img src=x onerror="window.pwned=1"> <script>window.pwned=2</script>\nRejoindre : https://teams.example.com/l/meetup-join/abc' },
+            { id: 'e4', title: 'Annulé: Grooming', start: at(0, '09:00'), end: at(0, '10:00'), location: 'Teams', show: 'free', cancelled: true },
             { id: 'e3', title: 'Conference', start: addDays(today, 2), end: addDays(today, 4), allDay: true },
         ] };
     } };
@@ -35,9 +36,14 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
     await me.until('the Assets place', async () => page.locator('#assets').isVisible());
     await page.locator('#assets-rows .as-row[data-asset="connexion:work-calendar"]').click();
     const agenda = page.locator('#assets-detail .as-agenda');
-    await me.until('its week', async () => (await agenda.locator('.ag-event').count()) === 4, 20_000);
+    await me.until('its week', async () => (await agenda.locator('.ag-event').count()) === 5, 20_000);
     assert.equal(await agenda.locator('.ag-day[data-today] .ag-now').count(), 1, 'now, once, on today');
-    assert.deepEqual(await agenda.locator('.ag-day[data-today] .ag-title').allInnerTexts(), ['Early call', 'Team review']);
+    assert.deepEqual(await agenda.locator('.ag-day[data-today] .ag-title').allInnerTexts(), ['Early call', 'Annulé: Grooming', 'Team review']);
+    /* A cancelled meeting stays shown, struck out, and said in words (17-11). */
+    const gone = agenda.locator('.ag-event[data-cancelled]');
+    assert.equal(await gone.count(), 1);
+    assert.match(await gone.locator('.ag-title').evaluate((n) => getComputedStyle(n).textDecorationLine), /line-through/);
+    assert.match(await gone.locator('.ag-cancelled').innerText(), /cancelled/i);
     assert.equal(await agenda.locator('.ag-day').count(), 3, 'today, and the two days of the conference');
     assert.equal(reads.filter((r) => r.verb === 'calendar.list').length, 1, 'one read');
     assert.match(String(reads[0].by), /^person:/, 'a person\'s own read, never an agent\'s');
@@ -71,7 +77,7 @@ test('a calendar asset shows its agenda: its week, an event opened, next week an
     await me.until('the Assets place', async () => page.locator('#assets').isVisible());
     const row = page.locator('#assets-rows .as-row[data-asset="connexion:work-calendar"]');
     if (await row.isVisible()) await row.click();
-    await me.until('its week on a phone', async () => (await page.locator('#assets-detail .as-agenda .ag-event').count()) === 4, 20_000);
+    await me.until('its week on a phone', async () => (await page.locator('#assets-detail .as-agenda .ag-event').count()) === 5, 20_000);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scroll');
     await shot(page, 'phone-agenda-light');
 });

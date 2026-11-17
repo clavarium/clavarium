@@ -252,6 +252,12 @@ export class Tethers {
            at once when Tether says the server refused the one it had (opts.fresh, 16-11). */
         const fresh = await this.oauth?.access?.(name, { fresh: opts?.fresh === true });
         if (fresh !== undefined) return fresh;
+        /* A machine's SSH key made here (sshmachine.mjs): its private half, from the keys of git access. */
+        if (String(name).startsWith('sshkey:')) {
+            const key = this.sshKeys?.privateKeyOf?.(String(name).slice('sshkey:'.length));
+            if (!key) throw new Error(`no SSH key named "${String(name).slice('sshkey:'.length)}" on this server`);
+            return key;
+        }
         const value = this.#secrets?.reveal?.(name);
         if (value === undefined || value === null) throw new Error(`no secret named "${name}" on this server`);
         return value;

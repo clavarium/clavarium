@@ -168,7 +168,7 @@ test('one Give… in a conversation\'s tab: what it has not yet, its right, then
     assert.equal(await give.locator('.kit-aspick-row[data-name="seeds"]').count(), 0, 'no longer offered');
     /* Or a new one, of every kind, below the list. */
     const box = give.locator('.kit-newasset');
-    assert.equal(await box.locator('.as-kinds button').count(), 11, 'every kind, a voice box, a device, an MCP server, a browser too');
+    assert.equal(await box.locator('.as-kinds button').count(), 12, 'every kind, a voice box, a device, an MCP server, a machine, a browser too');
     assert.equal(await box.locator('[aria-current="step"]').innerText().then((x) => x.replace(/\s+/g, ' ').trim()), '1 Kind');
     /* A folder, to read: made, then given by itself. */
     await box.locator('.as-kinds button[data-kind="folder"]').click();

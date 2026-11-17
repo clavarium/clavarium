@@ -146,7 +146,7 @@ const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const originOf = (address) => `https://${address.host}${address.port ? `:${address.port}` : ''}`;
 
 export class GitAccess {
-    #keys; #credentials; #vault; #dir; #ssh;
+    #keys; #credentials; #vault; #dir; #ssh; #machines = () => [];
 
     /* `ssh`: the ssh program. A test gives a stand-in that plays a remote. */
     constructor({ vault, dataDir, keys = new Store(`${dataDir}/git-keys.json`), credentials = new Store(`${dataDir}/git-access.json`), ssh = 'ssh' }) {
@@ -160,7 +160,16 @@ export class GitAccess {
     /* Where a key lives for the length of one git command. */
     get runDir() { return `${this.#dir}/run`; }
 
-    #usersOf(key) { return this.#credentials.all().filter((c) => c.method === 'ssh-key' && c.key === key).map((c) => c.name); }
+    #usersOf(key) { return [...this.#credentials.all().filter((c) => c.method === 'ssh-key' && c.key === key).map((c) => c.name), ...this.#machines(key)]; }
+
+    /* THE SAME KEYS OPEN MACHINES (Tether's SSH accesses, sshmachine.mjs, 17-11): `using(key)` names the machines a key
+       opens, so that "used by" says them and a key in use is not removed. */
+    machinesUsing(using) { this.#machines = typeof using === 'function' ? using : () => []; }
+    /* The private half, for Tether's SSH connector alone (tethers.mjs reveal): never sent to the page. */
+    privateKeyOf(name) {
+        const key = this.#keys.get(String(name ?? ''));
+        return key ? this.#vault.open(key.sealed) : undefined;
+    }
 
     /* What the page may know of the keys: the public half, never the private one. */
     keys() {
@@ -183,7 +192,7 @@ export class GitAccess {
     removeKey(name) {
         if (!this.#keys.get(String(name))) throw new Refusal(404, 'No such key.');
         const used = this.#usersOf(String(name));
-        if (used.length > 0) throw new Refusal(409, `This key is how ${used.join(', ')} ${used.length > 1 ? 'are' : 'is'} reached: removing it would cut ${used.length > 1 ? 'them' : 'it'} off. Remove ${used.length > 1 ? 'those repositories' : 'that repository'} first.`);
+        if (used.length > 0) throw new Refusal(409, `This key is how ${used.join(', ')} ${used.length > 1 ? 'are' : 'is'} reached: removing it would cut ${used.length > 1 ? 'them' : 'it'} off. Remove ${used.length > 1 ? 'them' : 'it'} first.`);
         this.#keys.remove(String(name));
     }
 

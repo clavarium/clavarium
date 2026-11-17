@@ -934,6 +934,29 @@
             </details>
           </form>
           </div>
+          <div id="machine-box" class="as-form" data-kind="machine"><h3 data-said="set-mc-head">Add a machine (SSH)</h3>
+          <p class="hint" data-said="set-mc-hint">Its console, its files; the key stays here.</p>
+          <form id="machine-new" autocomplete="off" novalidate>
+            <label for="machine-title" data-said="set-mc-title">Name</label>
+            <input id="machine-title" maxlength="80" spellcheck="false" placeholder="Home server">
+            <label for="machine-host" data-said="set-mc-host">Address</label>
+            <div class="row"><input id="machine-host" maxlength="253" spellcheck="false" autocapitalize="off" inputmode="url" placeholder="server.example.com"><input id="machine-port" class="mc-port" inputmode="numeric" maxlength="5" placeholder="22" aria-label="Port"></div>
+            <label for="machine-user" data-said="set-mc-user">User</label>
+            <input id="machine-user" maxlength="64" spellcheck="false" autocapitalize="off" placeholder="admin">
+            <label for="machine-key" data-said="set-mc-key">Key</label>
+            <div id="machine-key-pick"></div>
+            <div id="machine-key-shown" hidden>
+              <label for="machine-key-line" data-said="set-mc-key-line">Add to ~/.ssh/authorized_keys</label>
+              <div class="row"><textarea id="machine-key-line" class="public-key" readonly rows="3" spellcheck="false"></textarea><button type="button" id="machine-key-copy">Copy</button></div>
+            </div>
+            <details class="more"><summary data-said="set-mc-more">Server fingerprint (optional)</summary>
+              <p class="hint" data-said="set-mc-pin-hint">Read and kept on first contact.</p>
+              <input id="machine-pin" maxlength="200" spellcheck="false" autocapitalize="off" placeholder="SHA256:…" aria-label="Fingerprint">
+            </details>
+            <p id="machine-error" class="error" role="alert" hidden></p>
+            <div class="row"><button type="submit" id="machine-add" class="primary" data-said="set-mc-add">Add</button></div>
+          </form>
+          </div>
           <div id="browser-box" class="as-form" data-kind="browser"><h3 data-said="set-br-head">Pair a browser</h3>
           <ol class="hint br-steps"><li data-said="set-br-step-install">Install the Tether extension.</li><li data-said="set-br-step-make">Make the configuration below, then copy it.</li><li data-said="set-br-step-paste">Paste it in the extension's popup.</li></ol>
           <form id="browser-new" autocomplete="off">
