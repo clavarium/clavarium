@@ -518,6 +518,11 @@ test('sudo is told not to log the host program\'s probes: with what its version 
     const after = readFileSync(file, 'utf8');
     assert.ok(after.endsWith('Defaults:clavarium !pam_session\n') && !after.includes('!syslog'), after);
     assert.equal((after.match(/Defaults:/g) ?? []).length, 1);
+    /* sudo-rs (18-11, the owner's server): pam_session is refused (exit 1), !syslog alone taken. */
+    fresh();
+    const sudoRs = async (argv) => (/pam_session/.test(readFileSync(argv[2], 'utf8')) ? { code: 1, stdout: '', stderr: 'visudo: invalid sudoers file' } : { code: 0, stdout: '', stderr: '' });
+    assert.equal(await ensureQuietSudo({ file, run: sudoRs }), true);
+    assert.ok(readFileSync(file, 'utf8').endsWith('Defaults:clavarium !syslog\n'), readFileSync(file, 'utf8'));
     /* Nothing taken: the rule left alone, never a broken file. */
     fresh();
     assert.equal(await ensureQuietSudo({ file, run: async () => ({ code: 1, stdout: '', stderr: 'parse error' }) }), false);

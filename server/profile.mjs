@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 export const PROFILE_MIN_S = 2;
 export const PROFILE_MAX_S = 30;
 export const PROFILE_TOP = 15;
+export const SAMPLE_US = 10_000;
 const APP = fileURLToPath(new URL('..', import.meta.url));
 
 /* Where a function is, short: within the application from its folder, a package by its name, else the file's name. */
@@ -70,7 +71,8 @@ export class Profiler {
             session.connect();
             try {
                 await session.post('Profiler.enable');
-                await session.post('Profiler.setSamplingInterval', { interval: 1000 });
+                /* 100 samples a second: light on a busy server (18-11: at 1000 a second, the owner's busy server stopped answering). */
+                await session.post('Profiler.setSamplingInterval', { interval: SAMPLE_US });
                 await session.post('Profiler.start');
                 const began = process.cpuUsage();
                 await this.#wait(s * 1000);
@@ -95,11 +97,14 @@ export const SLOW_P50_MS = 200;
 export const AUTO_EVERY_MS = 30 * 60_000;
 export const AUTO_KEPT = 5;
 export const AUTO_SECONDS = 10;
+/* Never in its first minutes (18-11: 0.2.232 measured itself during the updater's health watch on the owner's slow
+   server, and did not answer in time: put back). */
+export const AUTO_AFTER_START_MS = 15 * 60_000;
 export class AutoProfile {
-    #profiler; #file; #now; #delay; #log; #last = 0; #timer = null;
+    #profiler; #file; #now; #delay; #log; #last = 0; #timer = null; #started;
     /* `delay()`: the loop's delay of the last minute, { p50, p99 } in ms, then started again (a histogram of its own). */
     constructor({ profiler, file, now = () => Date.now(), delay, log = (line) => console.log(line) }) {
-        this.#profiler = profiler; this.#file = file; this.#now = now; this.#delay = delay; this.#log = log;
+        this.#profiler = profiler; this.#file = file; this.#now = now; this.#delay = delay; this.#log = log; this.#started = now();
         const kept = this.kept(); this.#last = kept[0] ? Date.parse(kept[0].at) || 0 : 0;
     }
     kept() { const v = this.#file?.get(); return Array.isArray(v?.profiles) ? v.profiles : []; }
@@ -107,6 +112,7 @@ export class AutoProfile {
     stop() { clearInterval(this.#timer); }
     async check() {
         const d = this.#delay();
+        if (this.#now() - this.#started < AUTO_AFTER_START_MS) return null;
         if (!d || !(d.p50 > SLOW_P50_MS)) return null;
         if (this.#now() - this.#last < AUTO_EVERY_MS) return null;
         this.#last = this.#now();
