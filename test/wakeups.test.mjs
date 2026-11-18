@@ -17,7 +17,7 @@ function bench(t) {
     const resources = { of: () => world.attached.map((name) => ({ name, access: 'write' })), folder: (name) => join(dir, name), get: (name) => ({ name, type: name === 'site' ? 'git' : name === 'mail' ? 'mailbox' : 'folder' }) };
     const warmed = [];
     const fired = [];
-    const wakeups = new Wakeups({ store: new Store(join(dir, 'wakeups.json')), vms, conversations, resources, warm: async (name) => { warmed.push(name); }, now: () => new Date(world.now), fired: (name, what) => fired.push([name, what.text]) });
+    const wakeups = new Wakeups({ store: new Store(join(dir, 'wakeups.json')), vms, conversations, resources, warm: async (name) => { warmed.push(name); }, now: () => new Date(world.now), fired: (name, what) => fired.push([name, what.text]), arrivalEveryMs: 0 });
     const later = (minutes) => { world.now = new Date(world.now.getTime() + minutes * 60_000); };
     return { dir, typed, world, wakeups, later, warmed, fired };
 }
@@ -327,4 +327,9 @@ test('a whole export carries what its wake-ups are, never a call from outside; i
     const got = wakeups.of('there');
     assert.equal(got.perHour, 7);
     assert.deepEqual(got.items.map((i) => [i.kind, i.on]), [['cron', false], ['every', true]]);
+});
+
+test('a folder is looked through at most every ARRIVAL_EVERY_MS per arrival (18-11), not at every tick', async () => {
+    const { ARRIVAL_EVERY_MS, TICK_MS } = await import('../server/wakeups.mjs');
+    assert.ok(ARRIVAL_EVERY_MS >= 6 * TICK_MS);
 });

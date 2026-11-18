@@ -202,7 +202,7 @@ export const SETTINGS_WORDS_FR = {
     'set-mcp-notjson': 'Pas du JSON : collez tout le bloc.',
     'set-mcp-noserver': 'Pas de serveur dans ce bloc.', 'set-mcp-program': '« {name} » : programme à lancer, refusé ici.',
     'set-mcp-heads': '« {name} » : un seul en-tête pour sa clé.', 'set-mcp-basic': '« {name} » : clé non « Bearer », à la main.',
-    'set-mcp-need': 'Collez le bloc, ou donnez nom et adresse.', 'set-mcp-tools': 'Outils', 'set-mcp-refresh': 'Actualiser', 'set-mcp-seen': 'Marquer comme vu',
+    'set-mcp-need': 'Collez le bloc, ou donnez nom et adresse.', 'set-mcp-tools': 'Outils', 'set-mcp-new': 'Nouveaux outils', 'set-mcp-new-ask': 'Demander une fois', 'set-mcp-new-read': 'Lecture : acceptés', 'set-mcp-new-all': 'Tous acceptés', 'set-mcp-refresh': 'Actualiser', 'set-mcp-seen': 'Marquer comme vu',
     'set-mcp-none': 'Aucun outil listé pour l\'instant.', 'set-mcp-unreached': 'Injoignable : {why}', 'set-mcp-open': 'atteint l\'extérieur',
     'set-mcp-fresh': 'Nouveau : demandé jusqu\'à ce que vous l\'ayez vu',
     'set-mcp-oauth': 'Se connecter', 'set-mcp-link': 'Ou ouvrez ce lien dans un autre navigateur :', 'set-mcp-link-copy': 'Copier', 'set-mcp-link-copied': 'Copié', 'set-mcp-link-open': 'Ouvrir', 'set-mcp-client': 'Identifiant client', 'set-mcp-client-need': 'Collez son identifiant et son secret, une fois.',

@@ -39,6 +39,25 @@
         return { pos, rows, occ, cols };
     }
 
+    /* HOW IT IS SHOWN on a screen (18-11, the owner chose option A of the panel, bureau-centrage): the same picture
+       everywhere, arranged once (on a tablet, say). Out of edit mode: as many columns as the desk uses -- its
+       rightmost thing -- each cell between 75 % and 125 % of its size, the whole centred, kept at the top; a screen
+       too narrow even at 75 % (a phone) shows them in their reading order, packed. In edit mode: every column that
+       fits, from the left, to move things to. Nothing kept changes. `room`: the width there is (px), `cell`/`gap`: the
+       style sheet's. -> { cols, cell (px, or 0: the style's), order: 'own' | 'reading' }. */
+    const GROW = 1.25; const SHRINK = 0.75;
+    function fit(items, { room, cell, gap, editing = false }) {
+        const fill = Math.max(1, Math.floor((room + gap) / (cell + gap)));
+        /* Some never put anywhere (a first desk, one just added): every column, as before -- nothing to centre on. */
+        if (editing || !items.length || items.some((it) => !(it.c && it.r))) return { cols: fill, cell: 0, order: 'own' };
+        const used = Math.max(1, ...items.map((it) => it.c + W(it, 48) - 1));
+        const each = (room - gap * (used - 1)) / used;
+        if (each < cell * SHRINK) return { cols: fill, cell: 0, order: 'reading' };
+        return { cols: used, cell: Math.floor(Math.min(each, cell * GROW)), order: 'own' };
+    }
+    /* In their reading order, packed from the top left, for the screen only: rows first, then columns. */
+    const reading = (items) => [...items].sort((a, b) => ((a.r || 1e9) - (b.r || 1e9)) || ((a.c || 0) - (b.c || 0))).map(({ c, r, t, ...it }) => it);
+
     /* PUT ONE ON A CELL: those it covers go to the first free cells; the others not placed yet keep the cell
        they are seen in (nothing else moves). `pos`: layout(items, n).pos as seen now. Changes `items`. */
     function moveTo(items, id, c, r, n, pos, now = Date.now()) {
@@ -202,12 +221,21 @@
 
         function render() {
             if (!ready || drag) return;
-            const n = measure(); if (!n) return;
-            cols = n;
-            grid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
-            grid.classList.toggle('desk-editing', editing);
+            const m = measure(); if (!m) return;
             const list = shown();
-            const lay = layout(list, n); pos = lay.pos;
+            const cs = getComputedStyle(grid);
+            const gap = parseFloat(cs.columnGap) || 12; const cell = parseFloat(cs.getPropertyValue('--desk-cell')) || 104;
+            const row = parseFloat(cs.getPropertyValue('--desk-row')) || cell;
+            const room = grid.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+            const view = fit(list, { room, cell, gap, editing });
+            const n = view.cols;
+            cols = n;
+            /* Its cells a little bigger or smaller, the rows as much, the whole centred; or every column, from the left. */
+            grid.style.gridTemplateColumns = view.cell ? `repeat(${n}, ${view.cell}px)` : `repeat(${n}, minmax(0, 1fr))`;
+            grid.style.justifyContent = view.cell ? 'center' : '';
+            grid.style.gridAutoRows = view.cell ? `${Math.round((row * view.cell) / cell)}px` : '';
+            grid.classList.toggle('desk-editing', editing);
+            const lay = layout(view.order === 'reading' ? reading(list) : list, n); pos = lay.pos;
             const nodes = [];
             if (editing) {
                 for (let r = 1; r <= lay.rows + 2; r++) for (let c = 1; c <= n; c++) if (!lay.occ.has(`${c},${r}`)) {
@@ -475,7 +503,8 @@
         tidyB.addEventListener('click', () => { items = tidy(items, pos); changed(); });
         add.addEventListener('click', openAdd);
         /* The screen narrower or wider: as many columns as it holds now (the places kept are not touched). */
-        const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (ready && measure() !== cols) render(); }) : null;
+        let seenWidth = 0;
+        const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (ready && grid.clientWidth !== seenWidth) { seenWidth = grid.clientWidth; render(); } }) : null;
         watch?.observe(grid);
 
         /* READ: the desk kept; none yet, the home cards as they are today (nothing disappears); the
@@ -498,5 +527,5 @@
         };
     }
 
-    window.clavariumDesk = { layout, moveTo, moveBy, tidy, merge, unfold, takeOut, remove, addNew, idsOf, dropEmpty, Desk };
+    window.clavariumDesk = { layout, fit, reading, moveTo, moveBy, tidy, merge, unfold, takeOut, remove, addNew, idsOf, dropEmpty, Desk };
 })();
