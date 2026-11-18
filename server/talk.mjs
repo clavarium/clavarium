@@ -255,8 +255,11 @@ export class Talk {
         this.#timer.unref?.();
     }
 
+    /* One conversation's record, as kept (18-11: the whole list was made again -- sorted, each with its tool -- for each
+       path a message showed: half a second for one page of a long thread on the owner's server). */
+    #one(name) { return typeof this.#conversations.get === 'function' ? this.#conversations.get(name) : this.#conversations.list().find((x) => x.name === name); }
     #known(name) {
-        const c = isConversationName(name) ? this.#conversations.list().find((x) => x.name === name) : undefined;
+        const c = isConversationName(name) ? this.#one(name) : undefined;
         if (!c) throw new Refusal(404, 'No such conversation.');
         return c;
     }
@@ -325,7 +328,7 @@ export class Talk {
             const inner = p.slice('/work/'.length);
             /* The bridge folder is not the tool's to show -- but for the files the person attached there. */
             if (!inner || inner === FOLDER || (inner.startsWith(`${FOLDER}/`) && !ATTACHED.test(p))) return null;
-            return this.#conversations.list().find((x) => x.name === name)?.work === 'kept' ? `work:${inner}` : null;
+            return this.#one(name)?.work === 'kept' ? `work:${inner}` : null;
         }
         const m = /^\/resources\/([a-z][a-z0-9-]{0,31})\/(.+)$/.exec(p);
         return m && this.#resources.of(name).some((x) => x.name === m[1]) ? `${m[1]}:${m[2]}` : null;
