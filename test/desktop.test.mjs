@@ -174,3 +174,27 @@ test('day one: today\'s home cards; then the new ones come by themselves, never 
     assert.equal(D.addNew(items, ['c:b'], [{ id: 'r:1' }, { id: 'c:a' }, { id: 'c:b' }, { id: 'c:new' }]), 2);
     assert.deepEqual(D.idsOf(items), ['f:1', 'c:a', 'r:1', 'c:new']);
 });
+
+/* 18-11, option A of the panel (bureau-centrage): the same picture on every screen, centred, a little bigger or smaller. */
+test('how the desk is shown: the columns it uses, cells 75-125 %, centred; a phone in reading order; edit mode every column', () => {
+    const { fit, reading } = window.clavariumDesk;
+    const items = [{ id: 'a', c: 1, r: 1, size: 'm' }, { id: 'b', c: 10, r: 1, size: 'm' }, { id: 'c', c: 3, r: 2 }];
+    const g = 12; const cell = 104;
+    const wide = fit(items, { room: 2000, cell, gap: g });
+    assert.equal(wide.cols, 11, 'its rightmost thing: column 10, two wide');
+    assert.equal(wide.cell, 130, 'at most 125 %');
+    assert.equal(wide.order, 'own');
+    const tablet = fit(items, { room: 11 * 104 + 10 * g, cell, gap: g });
+    assert.deepEqual([tablet.cols, tablet.cell], [11, 104], 'where it was arranged: as it was');
+    const smaller = fit(items, { room: 1000, cell, gap: g });
+    assert.equal(smaller.cols, 11); assert.ok(smaller.cell >= 78 && smaller.cell < 104, String(smaller.cell));
+    const phone = fit(items, { room: 360, cell: 72, gap: 10 });
+    assert.equal(phone.order, 'reading'); assert.equal(phone.cell, 0);
+    assert.deepEqual(reading(items).map((x) => x.id), ['a', 'b', 'c'], 'rows first, then columns');
+    assert.ok(reading(items).every((x) => x.c === undefined && x.r === undefined), 'packed: their cells left out, for the screen only');
+    assert.equal(items[1].c, 10, 'nothing kept changes');
+    const edit = fit(items, { room: 2000, cell, gap: g, editing: true });
+    assert.deepEqual([edit.cols, edit.cell, edit.order], [17, 0, 'own'], 'edit mode: every column, from the left');
+    assert.equal(fit([], { room: 2000, cell, gap: g }).cell, 0, 'an empty desk: as before');
+    assert.deepEqual(fit([...items, { id: 'new' }], { room: 2000, cell, gap: g }), { cols: 17, cell: 0, order: 'own' }, 'one never put anywhere: every column, as before');
+});

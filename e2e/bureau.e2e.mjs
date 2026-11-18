@@ -184,5 +184,28 @@ test('the desk: the page of arrival, placed anywhere, moved, folded, sized, tidi
     await wait(500);
     assert.equal(await touch.page.locator('.desk-sheet .desk-in-folder > .desk-tile').count(), 2, 'still open');
     await touch.page.context().close();
+
+    /* 18-11, option A (bureau-centrage): a desk arranged on a tablet, every thing on its cell, seen on a wide screen:
+       the columns it uses, its cells a little bigger, the whole centred, at the top; nothing kept changes. */
+    const desk = await kept();
+    let col = 1;
+    desk.items = desk.items.map((it, i) => ({ ...it, c: col, r: 1 + Math.floor(i / 2) * 2, ...(void (col = col === 1 ? 4 : 1)) }));
+    const put = await me.page.evaluate(async (body) => { const r = await fetch('/api/desktop', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return r.status; }, desk);
+    assert.equal(put, 200);
+    await me.page.setViewportSize({ width: 2000, height: 1100 });
+    await me.page.reload();
+    await me.until('the desk again', async () => (await me.page.locator('#desk > .desk-tile').count()) > 0);
+    await wait(300);
+    const spread = await me.page.evaluate(() => {
+        const g = document.querySelector('#desk').getBoundingClientRect();
+        const t = [...document.querySelectorAll('#desk > .desk-tile')].map((x) => x.getBoundingClientRect());
+        return { left: Math.min(...t.map((r) => r.left)) - g.left, right: g.right - Math.max(...t.map((r) => r.right)), top: Math.min(...t.map((r) => r.top)) - g.top, cols: getComputedStyle(document.querySelector('#desk')).gridTemplateColumns.split(' ').length };
+    });
+    assert.ok(Math.abs(spread.left - spread.right) < 24, `centred: ${JSON.stringify(spread)}`);
+    assert.ok(spread.left > 400, `the empty room shared on both sides: ${JSON.stringify(spread)}`);
+    assert.ok(spread.top < 40, 'kept at the top');
+    assert.ok(spread.cols <= 6, `only the columns it uses: ${spread.cols}`);
+    await shot(me.page, 'bureau-ordi-centre');
+    assert.deepEqual((await kept()).items.map((x) => [x.c, x.r]), desk.items.map((x) => [x.c, x.r]), 'nothing kept changes');
     assert.deepEqual(errors, []);
 });
