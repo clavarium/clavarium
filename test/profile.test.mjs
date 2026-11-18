@@ -59,7 +59,7 @@ test('the real profiler answers in-process (a short measure)', async () => {
 });
 
 test('measured by itself: only when the loop is slow, at most once in 30 min, the last 5 kept with why', async () => {
-    const { AutoProfile, AUTO_EVERY_MS, AUTO_KEPT } = await import('../server/profile.mjs');
+    const { AutoProfile, AUTO_EVERY_MS, AUTO_KEPT, AUTO_AFTER_START_MS } = await import('../server/profile.mjs');
     let now = Date.parse('2026-11-18T05:00:00Z'); let delay = { p50: 20, p99: 30 }; let measured = 0;
     let stored = {};
     const file = { get: () => structuredClone(stored), set: (v) => { stored = structuredClone(v); } };
@@ -67,15 +67,19 @@ test('measured by itself: only when the loop is slow, at most once in 30 min, th
     const auto = new AutoProfile({ profiler, file, now: () => now, delay: () => delay, log: () => {} });
     assert.equal(await auto.check(), null, 'a quick loop: nothing');
     delay = { p50: 950, p99: 1100 };
+    assert.equal(await auto.check(), null, 'never in its first minutes (the updater watches it then)');
+    assert.equal(measured, 0);
+    now += AUTO_AFTER_START_MS;
     const first = await auto.check();
     assert.equal(first.why, 'loop p50 950 ms, p99 1100 ms over the last minute');
-    assert.equal(first.at, '2026-11-18T05:00:00.000Z');
+    assert.equal(first.at, new Date(Date.parse('2026-11-18T05:00:00Z') + AUTO_AFTER_START_MS).toISOString());
     now += 60_000;
     assert.equal(await auto.check(), null, 'not again before 30 min');
     for (let i = 0; i < AUTO_KEPT + 2; i++) { now += AUTO_EVERY_MS; await auto.check(); }
     assert.equal(measured, AUTO_KEPT + 3);
     assert.equal(auto.kept().length, AUTO_KEPT, 'the last 5 only');
     assert.ok(auto.kept()[0].at > auto.kept()[1].at, 'the newest first');
-    const again = new AutoProfile({ profiler, file, now: () => now + 60_000, delay: () => delay, log: () => {} });
+    const later = now + AUTO_AFTER_START_MS;
+    const again = new AutoProfile({ profiler, file, now: () => later, delay: () => delay, log: () => {} });
     assert.equal(await again.check(), null, 'after a restart, the last measure still counts');
 });
