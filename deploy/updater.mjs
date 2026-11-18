@@ -152,7 +152,7 @@ export const SUDOERS = '/etc/sudoers.d/clavarium';
 /* What sudo is told, tried in this order: the first its version takes without a word wins. Some sudo builds do
    not know « syslog » (found 01-11 on a real server: « unknown setting: 'syslog' » on every call); they keep
    the session lines quiet at least. A line of ours their sudo does not take is replaced. */
-export const QUIET_SETTINGS = ['!syslog, !pam_session', '!pam_session'];
+export const QUIET_SETTINGS = ['!syslog, !pam_session', '!pam_session', '!syslog'];  /* sudo-rs (Ubuntu 25.10+) refuses pam_session: !syslog alone tried after */
 export const quietLine = (account, setting = QUIET_SETTINGS[0]) => `Defaults:${account} ${setting}`;
 const QUIET_COMMENT = '# Added by the Clavarium updater: its probes every few seconds are not written to the system log.';
 /* `told(outcome)`: what is in place after this turn, for Settings (sudo-quiet.json beside the state, server/updates.mjs):
