@@ -1377,7 +1377,12 @@
           <div class="chapter-body">
           <div id="load-list" class="load-list" aria-live="polite"></div>
           <p class="hint" id="load-said" role="status"></p>
-          <div class="row"><button type="button" id="load-copy" data-said="set-load-copy" hidden>Copy</button></div>
+          <div class="row"><button type="button" id="load-copy" data-said="set-load-copy" hidden>Copy</button>
+            <button type="button" id="load-profile" data-said="set-load-profile">Measure 10 s</button></div>
+          <!-- What holds this server, from its own profiler (server/profile.mjs; POST /api/server/profile). -->
+          <pre id="load-profile-out" class="load-profile" hidden></pre>
+          <!-- The measures it took by itself when its loop was slow (server/profile.mjs AutoProfile). -->
+          <div id="load-auto" class="load-list" hidden></div>
           </div>
         </details>
         <!-- WHAT THE SERVER'S PROGRAMS SAID, to read, copy whole or keep (server/serverlogs.mjs);

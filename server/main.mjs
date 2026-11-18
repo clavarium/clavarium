@@ -80,6 +80,8 @@ import { McpOAuth } from './mcpoauth.mjs';
 import { Browsers } from './browsers.mjs';
 import { Accounts } from './accounts.mjs';
 import { ServerLogs } from './serverlogs.mjs';
+import { Profiler, AutoProfile } from './profile.mjs';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { History, STEP_MS as HISTORY_STEP_MS } from './history.mjs';
 import { Events } from './events.mjs';
 import { Bundles } from './bundle.mjs';
@@ -253,7 +255,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
            /api/ext/ through without sign-on, and strips the identity headers there. */
         if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
-            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, reminders: apikeys.reminders, binder: apikeys.binder, jobs: apikeys.jobs, events, headers: HEADERS, originOk, version: platform?.version ?? null });
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, reminders: apikeys.reminders, binder: apikeys.binder, jobs: apikeys.jobs, diagnostics: apikeys.diagnostics, events, headers: HEADERS, originOk, version: platform?.version ?? null });
             return;
         }
         if (door && pathname.startsWith('/c/')) {
@@ -838,7 +840,12 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* All the machines to another disk, from Settings (machinesmove.mjs). */
     const machinesMove = new MachinesMove({ host: asHost, usedMb: () => capacity.machinesUsedMb() });
     /* What the server's programs said, and this server started again, from Settings (serverlogs.mjs). */
-    const serverLogs = new ServerLogs({ host: asHost, load: () => hostTally.windows() });
+    /* What holds this server: measured on demand (Settings, Load, Measure; MCP), and by itself when its loop is slow (profile.mjs). */
+    const profiler = new Profiler();
+    const loopWatch = monitorEventLoopDelay({ resolution: 20 }); loopWatch.enable();
+    const autoProfile = new AutoProfile({ profiler, file: new JsonFile(`${dataDir}/profiles.json`, {}),
+        delay: () => { if (!loopWatch.count) return null; const d = { p50: Math.round(loopWatch.percentile(50) / 1e6), p99: Math.round(loopWatch.percentile(99) / 1e6) }; loopWatch.reset(); return d; } }).start();
+    const serverLogs = new ServerLogs({ host: asHost, load: () => ({ ...hostTally.windows(), profiles: autoProfile.kept() }), profiler });
     /* This server's Wi-Fi, from Settings (wifi.mjs): how a switch ended, said in What happened. */
     const wifi = new Wifi({ host: asHost, said: (text) => events.add({ kind: 'server', text }) });
     /* The remote screen (MeshCentral), from Settings (meshcentral.mjs): how a turn-on ended, said in What happened. */
@@ -916,6 +923,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }),
         /* What Clavarium does (jobs.mjs), as Settings shows it: the list without logs, one job with its log. */
         jobs: { list: () => withUpdates(all.jobs, all.list(), updates?.about().history ?? []), log: (id) => all.jobs.log(id) },
+        /* Diagnostics (scope "diagnostics"): what Settings > Diagnostics > Load and Logs show. */
+        diagnostics: { load: () => serverLogs.load(), profile: (seconds) => serverLogs.profile(seconds), logs: (source, span) => serverLogs.start(source, span) },
         /* A key's conversations (their chat, through talk.mjs): read as the page reads it; a message posted as the page
            posts one (its secrets lifted the same way), signed with the key's name. */
         chats: {

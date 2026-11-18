@@ -13,6 +13,9 @@
  *             moved, restarted, its own updates of the day -- and each
  *             job's log, as Settings shows them (jobs.mjs; secrets
  *             masked)                                         server:jobs r
+ *   diagnostics  the server's load (host commands by 5 min, its event loop),
+ *             10 s of its own profiler (what holds it), its logs (as
+ *             Settings reads them, secrets masked)            server:diagnostics r
  *
  *   a conversation, given ONE BY ONE (never "all, and those to come"):
  *     read    read its chat                                   conversation:<name> r
@@ -89,6 +92,7 @@
  *   POST /api/apikeys                   {label, scopes, conversations: {name: 'read'|'talk'}, days|null}
  *                                       -> {key, secret}: the secret this once
  *   POST /api/apikeys/<id>/conversations {conversation, level: 'read'|'talk'|null}: one given, changed, taken back
+ *   POST /api/apikeys/<id>/scopes       {scope, on: true|false}: one scope given or taken back afterwards (18-11)
  *   POST /api/apikeys/<id>/rooms        {room, level: 'read'|'talk'|null}
  *   POST /api/apikeys/<id>/boxes        {box, level: 'state'|'speak'|null}
  *   POST /api/apikeys/<id>/binders      {binder, level: 'read'|'write'|null}
@@ -164,6 +168,7 @@ export const EXT_PREFIX = '/api/ext/';
 /* The scopes a key may be given: [asset, rights] in the table. */
 export const SCOPES = Object.freeze({ status: { asset: 'server:status', rights: 'r', label: 'Its state (memory, disk, versions)' },
     jobs: { asset: 'server:jobs', rights: 'r', label: 'Jobs: read what Clavarium does and its logs' },
+    diagnostics: { asset: 'server:diagnostics', rights: 'r', label: 'Diagnostics: load, measure, logs' },
     'create-rooms': { asset: 'server:rooms', rights: 'w', label: 'Create rooms' } });
 /* What a key may do in one conversation: [rights in the table]. */
 export const LEVELS = Object.freeze({ read: 'r', talk: 'rw', act: 'rwm' });
@@ -297,6 +302,16 @@ export class ApiKeys {
         this.#conversationAsked(name, level);
         if (level === null) this.#grants.take(apiKeySubject(id), `conversation:${name}`);
         else this.#grants.give(apiKeySubject(id), `conversation:${name}`, LEVELS[level]);
+        return this.get(id);
+    }
+
+    /* One scope of the server given to a key afterwards, or taken back (18-11: the owner, rather than a new key). */
+    setScope(id, scope, on) {
+        if (typeof id !== 'string' || !this.#store.get(id)) throw new Refusal(404, 'No such key.');
+        if (!Object.hasOwn(SCOPES, scope)) throw new Refusal(400, `Scopes are among: ${Object.keys(SCOPES).join(', ')}.`);
+        if (on === true) this.#grants.give(apiKeySubject(id), SCOPES[scope].asset, SCOPES[scope].rights);
+        else if (on === false) this.#grants.take(apiKeySubject(id), SCOPES[scope].asset);
+        else throw new Refusal(400, 'on: true or false.');
         return this.get(id);
     }
 
@@ -566,6 +581,28 @@ export const JOB_LOG_TOOL = {
     inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'The job\'s id, as clavarium_jobs gives it.' } }, required: ['id'], additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
+/* Diagnostics (18-11: to see the owner's server from here when it is slow, without the owner copying). */
+export const LOAD_TOOL = {
+    name: 'clavarium_load',
+    title: 'Load of this Clavarium',
+    description: 'Read-only: what this server asked of the host, by 5-minute window (each kind of command, how many, the time), its own event loop delay (p50/p99/max ms) and processor time. The newest window first.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
+export const PROFILE_TOOL = {
+    name: 'clavarium_profile',
+    title: 'What holds this Clavarium',
+    description: 'Read-only: this server sampled by its own profiler for a few seconds (2 to 30, 10 by default): the functions that took the most time themselves (self) and with what they called (total), idle, garbage collection, processor time. Waits that long.',
+    inputSchema: { type: 'object', properties: { seconds: { type: 'integer', minimum: 2, maximum: 30 } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+};
+export const LOGS_TOOL = {
+    name: 'clavarium_logs',
+    title: 'Logs of this Clavarium',
+    description: 'Read-only: what one of the server\'s programs said over a span, as Settings reads it (secrets masked). source: clavarium (default), machines, updates, web, signin, tunnel, system. span: 10m (default), 1, 6, 24, 168 (hours) or boot. A big journal takes a while: {pending: true} means ask again in a moment.',
+    inputSchema: { type: 'object', properties: { source: { type: 'string' }, span: { type: 'string' } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
 export const CONVERSATIONS_TOOL = {
     name: 'clavarium_conversations',
     title: 'Conversations of this key',
@@ -696,10 +733,10 @@ export const BINDER_ARCHIVE_TOOL = tool('clavarium_binder_archive', 'Archive a r
     'Archive a record (or restore it: "restore": true). Never deleted: only a person deletes. The list must have been given to this key to write.',
     { binder: BINDER_ARG, record: RECORD_ARG, restore: { type: 'boolean' } }, ['binder', 'record'], true);
 const BINDER_TOOLS = [BINDERS_TOOL, BINDER_RECORDS_TOOL, BINDER_RECORD_TOOL, BINDER_ADD_TOOL, BINDER_EDIT_TOOL, BINDER_MOVE_TOOL, BINDER_NOTE_TOOL, BINDER_ARCHIVE_TOOL];
-export const TOOLS = [STATUS_TOOL, JOBS_TOOL, JOB_LOG_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE_TOOL, SLEEP_TOOL, STOP_TOOL, REMINDERS_TOOL, REMIND_TOOL, REMINDER_CANCEL_TOOL,
+export const TOOLS = [STATUS_TOOL, JOBS_TOOL, JOB_LOG_TOOL, LOAD_TOOL, PROFILE_TOOL, LOGS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE_TOOL, SLEEP_TOOL, STOP_TOOL, REMINDERS_TOOL, REMIND_TOOL, REMINDER_CANCEL_TOOL,
     ROOMS_TOOL, ROOM_READ_TOOL, ROOM_SAY_TOOL, ROOM_CREATE_TOOL, ROOM_CHANGE_TOOL, ROOM_REMOVE_TOOL, BOXES_TOOL, BOX_SAY_TOOL, ...BINDER_TOOLS];
 /* The tools that need a scope of the server: listed only to a key given it. */
-const TOOL_SCOPES = Object.freeze({ [STATUS_TOOL.name]: 'status', [JOBS_TOOL.name]: 'jobs', [JOB_LOG_TOOL.name]: 'jobs', [ROOM_CREATE_TOOL.name]: 'create-rooms' });
+const TOOL_SCOPES = Object.freeze({ [STATUS_TOOL.name]: 'status', [JOBS_TOOL.name]: 'jobs', [JOB_LOG_TOOL.name]: 'jobs', [LOAD_TOOL.name]: 'diagnostics', [PROFILE_TOOL.name]: 'diagnostics', [LOGS_TOOL.name]: 'diagnostics', [ROOM_CREATE_TOOL.name]: 'create-rooms' });
 
 /* Returns true when the request was under /api/ext/ (answered here). `status()`: the state, as statusOf
    makes it. `chats`: { list() -> [{ id, name }], read(name, part) -> talk.of's answer, chatOn(name),
@@ -714,8 +751,9 @@ const TOOL_SCOPES = Object.freeze({ [STATUS_TOOL.name]: 'status', [JOBS_TOOL.nam
    07-11: `reminders`: { of(name) -> { on, plans: [{ id, text, cron, next }] }, set(name, { at, cron, text }, by) -> plan,
    cancel(name, plan) -> bool } -- a conversation's Docket (dockets.mjs). `binder`: { act(op, args, who) -> { ok, text, data } }
    -- Binder's keeper, asked as the key (an agent): its rules are Binder's.
-   14-11: `jobs`: { list() -> { running, done }, log(id) -> the job with its log | undefined } (jobs.mjs, withUpdates). */
-export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, reminders = null, binder = null, jobs = null, events = null, headers = {}, originOk = () => false, version = null }) {
+   14-11: `jobs`: { list() -> { running, done }, log(id) -> the job with its log | undefined } (jobs.mjs, withUpdates).
+   18-11: `diagnostics`: { load() -> HostTally windows, profile(seconds) -> profile.mjs's, logs(source, span) -> serverlogs.mjs start's }. */
+export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, reminders = null, binder = null, jobs = null, diagnostics = null, events = null, headers = {}, originOk = () => false, version = null }) {
     const url = new URL(request.url ?? '/', 'http://local');
     const { pathname } = url;
     if (!pathname.startsWith(EXT_PREFIX) && pathname !== EXT_PREFIX.slice(0, -1)) return false;
@@ -1190,6 +1228,14 @@ export async function handleExternal(request, response, { keys, status, chats = 
                         return result(await status());
                     }
                     if (name === JOBS_TOOL.name) return result(jobsListed(id));
+                    if (name === LOAD_TOOL.name || name === PROFILE_TOOL.name || name === LOGS_TOOL.name) {
+                        if (!keys.may(id, 'diagnostics')) throw new Refusal(403, `This key was not given the scope "${SCOPES.diagnostics.label}".`);
+                        if (!diagnostics) throw new Refusal(404, 'Not available on this server.');
+                        if (name === LOAD_TOOL.name) return result(diagnostics.load());
+                        if (name === PROFILE_TOOL.name) return result(await diagnostics.profile(args.seconds ?? 10));
+                        const r = await diagnostics.logs(typeof args.source === 'string' ? args.source : 'clavarium', typeof args.span === 'string' ? args.span : '10m');
+                        return result(r.pending ? r : { ...r, text: masked(r.text ?? '') });
+                    }
                     if (name === JOB_LOG_TOOL.name) {
                         if (typeof args.id !== 'string') return fail(-32602, 'id: the id of a job, as clavarium_jobs gives it.');
                         return result(jobRead(id, args.id));
@@ -1281,6 +1327,12 @@ export async function handleApiKeys(request, response, keys, originOk, headers =
             const what = [...made.key.scopes, ...made.key.conversations.map((c) => `${c.name} ${c.level}`), ...made.key.rooms.map((r) => `room ${r.id.slice(0, 8)} ${r.level}`), ...made.key.boxes.map((b) => `voice box ${b.id.slice(0, 8)} ${b.level}`), ...made.key.binders.map((l) => `binder ${l.id.slice(0, 40)} ${l.level}`)];
             events?.add({ kind: 'access', text: `API key "${made.key.label}" made${what.length ? ` (${what.join(', ')})` : ' (no scope)'}`, who: who || null });
             return send(201, made);
+        }
+        const scoping = /^\/api\/apikeys\/([0-9a-f-]{36})\/scopes$/.exec(pathname);
+        if (scoping) {
+            const key = keys.setScope(scoping[1], body.scope, body.on);
+            events?.add({ kind: 'access', text: `API key "${key.label}": ${String(body.scope).slice(0, 40)} ${body.on ? 'given' : 'taken back'}`, who: who || null });
+            return send(200, { key });
         }
         const giving = /^\/api\/apikeys\/([0-9a-f-]{36})\/conversations$/.exec(pathname);
         if (giving) {

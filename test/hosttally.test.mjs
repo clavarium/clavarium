@@ -42,6 +42,7 @@ test('an idle server still closes its window when asked; event-loop delay is mea
     await new Promise((ok) => setTimeout(ok, 120));
     const l = looped.windows().windows[0].loop;
     assert.ok(l && Number.isInteger(l.p50) && Number.isInteger(l.p99) && l.p99 >= l.p50, JSON.stringify(l));
+    assert.ok(Number.isInteger(l.cpuMs) && l.cpuMs >= 0, 'its own processor time with it');
 });
 
 test('one tally for every command to the host: the wrapped runner and the machines\' commands, never counted twice', async () => {
