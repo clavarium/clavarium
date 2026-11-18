@@ -210,6 +210,9 @@ export class McpOAuth {
         return { url: url.href };
     }
 
+    /* What the page shows of a kept client (18-11: the owner saw the fields empty again and thought it lost): its id
+       (not a secret: it travels in every sign-in address), whether a secret is kept, the permissions asked. Never the secret. */
+    shown(id) { const c = this.#client(id); return c ? { clientId: c.clientId, secret: Boolean(c.clientSecret), scope: typeof c.scope === 'string' ? c.scope : '' } : null; }
     /* The client the owner pasted for a server, from the vault: { clientId, clientSecret, scope? } or null. */
     #client(id) {
         let raw;

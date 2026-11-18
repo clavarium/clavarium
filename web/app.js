@@ -5893,6 +5893,9 @@
         const said = el('p', 'hint mcp-client-said', uiSaid('set-mcp-client-kept', 'Kept on the server. No AI sees them.'));
         const asked = mcpClientNeed.get(t.id);
         if (asked) { redirect.value = asked.redirect ?? ''; scopes.value = (asked.scopes ?? []).join(' '); clientId.value = asked.id ?? ''; }
+        /* The client kept for it (18-11): its id and permissions shown again; the secret never, said kept. */
+        else if (t.client) { clientId.value = t.client.clientId ?? ''; scopes.value = t.client.scope ?? ''; }
+        if (t.client?.secret) clientSecret.placeholder = uiSaid('set-mcp-secret-kept', 'Kept — leave empty to keep it');
         redirect.hidden = !redirect.value;
         clientBox.append(field('set-mcp-client', 'Client ID', clientId), field('set-mcp-secret', 'Client secret', clientSecret),
             field('set-mcp-scopes', 'Permissions asked', scopes), ...(redirect.value ? [field('set-mcp-redirect', 'Its app\'s redirect address', redirect)] : []), said);
