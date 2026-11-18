@@ -419,7 +419,9 @@ export async function handleApi(request, response, conversations, headers, resou
                 const approvals = Array.isArray(data.approvals) ? data.approvals.map((q) => { try { return { ...q, view: demandeView(q) }; } catch { return q; } }) : data.approvals;
                 /* Each paired browser: connected or not, and the tabs its person granted (browsers.mjs). Never a token. */
                 const browsersNow = tethers.browsers ? { browsers: tethers.browsers.all(), browsersWaiting: tethers.browsers.waiting() } : {};
-                return send(200, { given: tethers.given(), changes: tethers.changes(), ...data, ...(approvals ? { approvals } : {}), ...browsersNow }), true;
+                /* Each MCP server's kept sign-in client, as the page shows it: its id, a secret kept or not -- never the secret. */
+                const targets = Array.isArray(data.targets) && tethers.oauth?.shown ? data.targets.map((x) => { if (x.kind !== 'mcp') return x; const client = tethers.oauth.shown(x.id); return client ? { ...x, client } : x; }) : data.targets;
+                return send(200, { given: tethers.given(), changes: tethers.changes(), ...data, ...(targets ? { targets } : {}), ...(approvals ? { approvals } : {}), ...browsersNow }), true;
             }
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
