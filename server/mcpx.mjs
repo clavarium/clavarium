@@ -147,6 +147,18 @@ export async function mcpSeen({ tethers }, body = {}) {
     return { seen: Array.isArray(r.data?.seen) ? r.data.seen : [] };
 }
 
+/* WHAT ITS NEW TOOLS DO (#392, Tether 0.1.0-next.78), the owner's choice per server: { target, mode: 'ask' | 'read' | 'all' }
+   -> { newTools, seen: [names taken now] }. A Tether without the op says so. */
+export async function mcpNewTools({ tethers }, body = {}) {
+    const target = String(body.target ?? '');
+    const t = tethers.store().target(target);
+    if (!t || t.kind !== 'mcp') throw new Refusal(404, 'No such MCP server.');
+    if (!['ask', 'read', 'all'].includes(body.mode)) throw new Refusal(400, 'mode: ask, read or all.');
+    const r = await tethers.act('mcp-new-tools', { target, mode: body.mode }, '');
+    if (!r.ok) throw new Refusal(/there is no mcp-new-tools/.test(r.text ?? '') ? 501 : 400, /there is no mcp-new-tools/.test(r.text ?? '') ? 'This Tether cannot set this yet: update it.' : r.text);
+    return { newTools: r.data?.newTools ?? body.mode, seen: Array.isArray(r.data?.seen) ? r.data.seen : [] };
+}
+
 /* The vault's name for a server's OAuth tokens (mcpoauth.mjs): as long as its key's name. */
 export const oauthName = (id) => `${keyName(id).slice(0, -KEY_SUFFIX.length)}_TOK`;
 /* The vault's name for the client the owner pasted for it (an id and a secret, 16-11): host-only too. */

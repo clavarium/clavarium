@@ -5972,6 +5972,16 @@
         else if (t.catalog?.error) body.push(el('p', 'error', uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: t.catalog.error })));
         body.push(tools.length ? list : el('p', 'hint', uiSaid('set-mcp-none', 'No tools listed yet.')));
         body.push(linkBox, clientBox);
+        /* What its new tools do (#392): asked once, those that only read at once, or all at once -- the owner's choice. */
+        const newTools = el('div', 'mcp-new-tools');
+        newTools.append(el('span', '', uiSaid('set-mcp-new', 'New tools')), KIT.Segmented({
+            options: [['ask', uiSaid('set-mcp-new-ask', 'Ask once')], ['read', uiSaid('set-mcp-new-read', 'Read-only: accepted')], ['all', uiSaid('set-mcp-new-all', 'All accepted')]].map(([value, label]) => ({ value, label })),
+            value: t.newTools ?? 'ask', label: uiSaid('set-mcp-new', 'New tools'), onChange: async (mode) => {
+                $(asErrId()).hidden = true;
+                try { await post(`${API}/tether/mcp-new-tools`, { target: t.id, mode }); } catch (error) { sayAsErr(error); }
+                await repaintAsset();
+            } }));
+        body.push(newTools);
         out.push({ title: uiSaid('set-mcp-tools', 'Tools'), extra: [seen, oauth, refresh], body, cls: 'as-mcp-tools' });
         /* Custom: each kind of tool Yes / Ask / No, for each conversation set to it. */
         const custom = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');

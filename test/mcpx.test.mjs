@@ -14,7 +14,7 @@ import { Store } from '../server/store.mjs';
 import { Grants } from '../server/grants.mjs';
 import { Vms } from '../server/vm.mjs';
 import { Tethers } from '../server/tethers.mjs';
-import { serverId, keyName, mcpSeen } from '../server/mcpx.mjs';
+import { serverId, keyName, mcpSeen, mcpNewTools } from '../server/mcpx.mjs';
 
 const KEY = 'sk-test-0123456789abcdef-never-shown';
 const TOOLS = [
@@ -172,4 +172,15 @@ test('a server\'s id and key name, from its name', () => {
     assert.equal(serverId('  Équipe CRM / Ventes '), 'equipe-crm-ventes');
     assert.equal(keyName(serverId('Équipe CRM')), 'MCP_EQUIPE_CRM_KEY');
     assert.ok(keyName(serverId('x'.repeat(200))).length <= 40);
+});
+
+test('#392 what an MCP server\'s new tools do: ask, read or all passed on; anything else refused; an older Tether said plainly', async () => {
+    const asked = [];
+    const target = { id: 'crm', kind: 'mcp' };
+    const tethers = (answer) => ({ store: () => ({ target: (id) => (id === 'crm' ? target : null) }), act: async (op, args) => { asked.push([op, args]); return answer; } });
+    assert.deepEqual(await mcpNewTools({ tethers: tethers({ ok: true, data: { newTools: 'read', seen: ['peek'] } }) }, { target: 'crm', mode: 'read' }), { newTools: 'read', seen: ['peek'] });
+    assert.deepEqual(asked, [['mcp-new-tools', { target: 'crm', mode: 'read' }]]);
+    await assert.rejects(mcpNewTools({ tethers: tethers({ ok: true }) }, { target: 'crm', mode: 'often' }), (e) => e.status === 400);
+    await assert.rejects(mcpNewTools({ tethers: tethers({ ok: true }) }, { target: 'nope', mode: 'all' }), (e) => e.status === 404);
+    await assert.rejects(mcpNewTools({ tethers: tethers({ ok: false, text: 'there is no mcp-new-tools' }) }, { target: 'crm', mode: 'all' }), (e) => e.status === 501);
 });

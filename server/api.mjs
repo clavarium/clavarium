@@ -206,7 +206,7 @@ import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
 import { demandeView } from './demandes.mjs';
-import { mcpAdd, mcpImport, mcpRefresh, mcpRights, mcpSeen, forgetKey } from './mcpx.mjs';
+import { mcpAdd, mcpImport, mcpRefresh, mcpRights, mcpSeen, mcpNewTools, forgetKey } from './mcpx.mjs';
 import { BACK_PATH, backPage } from './mcpoauth.mjs';
 
 const BODY_MAX = 16 * 1024;
@@ -718,10 +718,10 @@ export async function handleApi(request, response, conversations, headers, resou
         /* Signing in to one with OAuth: the link the owner opens ({ url }), or { need: 'client' } for a client id to paste. */
         if (pathname === '/api/tether/ssh-add' && tethers && gitAccess) return send(201, await addMachine({ tethers, keys: gitAccess, ...(tethers.sshProbe ? { probe: tethers.sshProbe } : {}) }, body ?? {})), true;
         if (pathname === '/api/tether/mcp-oauth' && tethers?.oauth) return send(200, await tethers.oauth.start({ tethers }, body ?? {}, sharing?.origin?.(request.headers) ?? `http://${request.headers.host}`)), true;
-        const mcpOp = /^\/api\/tether\/mcp-(add|import|refresh|rights|seen)$/.exec(pathname);
+        const mcpOp = /^\/api\/tether\/mcp-(add|import|refresh|rights|seen|new-tools)$/.exec(pathname);
         if (mcpOp && tethers) {
             const ctx = { tethers, secrets };
-            const done = await { add: mcpAdd, import: mcpImport, refresh: mcpRefresh, rights: mcpRights, seen: mcpSeen }[mcpOp[1]](ctx, body ?? {});
+            const done = await { add: mcpAdd, import: mcpImport, refresh: mcpRefresh, rights: mcpRights, seen: mcpSeen, 'new-tools': mcpNewTools }[mcpOp[1]](ctx, body ?? {});
             return send(mcpOp[1] === 'add' || mcpOp[1] === 'import' ? 201 : 200, done), true;
         }
         /* A browser paired through the Tether extension (browsers.mjs): the code its popup shows, and its name; or paired

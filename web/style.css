@@ -3443,3 +3443,6 @@ span.tile-spark { display: block; height: 22px; }
 @media (prefers-reduced-motion: reduce) { .sc-main { transition: none; } }
 .mc-port { max-width: 6em; flex: 0 0 6em; }
 .kit-na-made .hint { overflow-wrap: anywhere; }
+
+/* An MCP server's new tools (#392): its label and the three choices, wrapping on a phone. */
+.mcp-new-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
