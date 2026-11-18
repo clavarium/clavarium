@@ -8384,11 +8384,25 @@
             const more = el('div', 'apikey-more'); more.hidden = true;
             const open = async (kind) => {
                 apiKeyOpen = apiKeyOpen?.id === k.id && apiKeyOpen.what === kind ? null : { id: k.id, what: kind };
-                for (const b of acts.querySelectorAll('button[data-act="convs"], button[data-act="rooms"], button[data-act="boxes"], button[data-act="binders"], button[data-act="journal"]')) b.setAttribute('aria-expanded', String(apiKeyOpen?.id === k.id && apiKeyOpen.what === b.dataset.act));
+                for (const b of acts.querySelectorAll('button[data-act="scopes"], button[data-act="convs"], button[data-act="rooms"], button[data-act="boxes"], button[data-act="binders"], button[data-act="journal"]')) b.setAttribute('aria-expanded', String(apiKeyOpen?.id === k.id && apiKeyOpen.what === b.dataset.act));
                 more.hidden = apiKeyOpen?.id !== k.id;
                 more.replaceChildren();
                 if (!apiKeyOpen || apiKeyOpen.id !== k.id) return;
                 if (kind === 'journal') { more.dataset.what = 'journal'; await paintApiKeyJournal(more, k.id); return; }
+                /* Its scopes of the server, ticked or not, changed afterwards (18-11). */
+                if (kind === 'scopes') {
+                    more.dataset.what = 'scopes';
+                    for (const sc of got.scopes) {
+                        const l = el('label', 'check'); const box = document.createElement('input'); box.type = 'checkbox'; box.value = sc.id; box.checked = k.scopes.includes(sc.id);
+                        box.addEventListener('change', async () => {
+                            $('apikeys-error').hidden = true;
+                            try { await post(`${API}/apikeys/${k.id}/scopes`, { scope: sc.id, on: box.checked }); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; }
+                            await paintApiKeys();
+                        });
+                        l.append(box, ' ', el('span', '', scopeWord(sc.id))); more.append(l);
+                    }
+                    return;
+                }
                 more.dataset.what = kind;
                 if (kind === 'rooms' || kind === 'boxes' || kind === 'binders') {
                     more.append(apiKeyOnePicker(kind, new Map((k[kind] ?? []).map((x) => [x.id, x.level])), async (ref, level) => {
@@ -8406,9 +8420,11 @@
             };
             const convs = el('button', '', uiSaid('set-apikeys-convs', 'Conversations')); convs.type = 'button'; convs.dataset.act = 'convs';
             const journal = el('button', '', uiSaid('set-apikeys-journal', 'Journal')); journal.type = 'button'; journal.dataset.act = 'journal';
+            const perms = el('button', '', uiSaid('set-apikeys-perms', 'Permissions')); perms.type = 'button'; perms.dataset.act = 'scopes';
+            perms.addEventListener('click', () => void open('scopes'));
             convs.addEventListener('click', () => void open('convs'));
             journal.addEventListener('click', () => void open('journal'));
-            acts.append(convs);
+            acts.append(perms, convs);
             /* Rooms, voice boxes, binders: offered when there are some (or the key has some still). */
             for (const [kind, word] of [['rooms', uiSaid('set-apikeys-rooms', 'Rooms')], ['boxes', uiSaid('set-apikeys-boxes', 'Voice boxes')], ['binders', uiSaid('set-apikeys-binders', 'Binders')]]) {
                 if (!apiKeyItems(kind).length && !(k[kind] ?? []).length) continue;
@@ -9659,7 +9675,8 @@
     const loadKind = (k) => `${k.kind} ${k.count}× ${loadSec(k.ms)} s (max ${loadSec(k.maxMs)} s)`;
     const loadHead = (w) => [`${loadClock(w.from)}–${w.open ? uiSaid('set-load-open', 'now') : loadClock(w.to)}`,
         uiSaid('set-load-line', '{n} commands · {s} s', { n: w.commands, s: loadSec(w.ms) }),
-        w.loop ? uiSaid('set-load-loop', 'loop {p50}/{p99} ms', { p50: w.loop.p50, p99: w.loop.p99 }) : ''].filter(Boolean).join(' · ');
+        w.loop ? uiSaid('set-load-loop', 'loop {p50}/{p99} ms', { p50: w.loop.p50, p99: w.loop.p99 }) : '',
+        w.loop?.cpuMs !== undefined && w.to > w.from ? uiSaid('set-load-cpu', 'CPU {p} %', { p: Math.round((100 * w.loop.cpuMs) / (w.to - w.from)) }) : ''].filter(Boolean).join(' · ');
     async function paintLoad() {
         clearTimeout(loadTimer);
         if (!$('settings-load-top').open) return;
@@ -9673,6 +9690,14 @@
             return row;
         });
         $('load-list').replaceChildren(...rows);
+        /* The measures it took by itself, the newest first: when, why, the functions that held it most. */
+        const auto = (got.profiles ?? []).map((p) => {
+            const row = el('div', 'load-row');
+            row.append(el('span', '', `${uiSaid('set-load-auto', 'Measured by itself at {at}', { at: `${new Date(p.at).toLocaleDateString([], { day: 'numeric', month: 'short' })} ${loadClock(p.at)}` })} · ${p.why}`));
+            row.append(el('span', 'load-kinds', (p.self ?? []).slice(0, 3).map((f) => `${f.fn} ${f.ms} ms`).join(' · ')));
+            return row;
+        });
+        $('load-auto').replaceChildren(...auto); $('load-auto').hidden = !auto.length;
         const any = (got.windows ?? []).some((w) => w.commands);
         $('load-said').textContent = any ? '' : uiSaid('set-load-none', 'Nothing counted yet');
         $('load-copy').hidden = !rows.length;
@@ -9682,10 +9707,27 @@
     $('load-copy').addEventListener('click', async () => {
         if (!loadShown) return;
         /* All of it, as text: each window, then every kind it counted. */
-        const text = (loadShown.windows ?? []).map((w) => [loadHead(w), ...(w.kinds ?? []).map((k) => `  ${loadKind(k)}`),
+        const line = (f) => `  ${f.ms} ms  ${f.fn}  ${f.at}`;
+        const autoText = (loadShown.profiles ?? []).map((p) => [`auto ${p.at} · ${p.why} · cpu ${p.cpuMs} ms · idle ${p.idleMs} · gc ${p.gcMs}`, 'self:', ...(p.self ?? []).map(line), 'with what they call:', ...(p.total ?? []).map(line), ''].join('\n'));
+        const text = [...($('load-profile-out').hidden ? [] : [$('load-profile-out').textContent, '']), ...autoText, ...(loadShown.windows ?? []).map((w) => [loadHead(w), ...(w.kinds ?? []).map((k) => `  ${loadKind(k)}`),
             ...(w.beats && (w.beats.read || w.beats.fallback) ? [`  beat read ${w.beats.read}×, fallback ${w.beats.fallback}×`] : []),
-            ...(w.loop ? [`  loop max ${w.loop.max} ms`] : [])].join('\n')).join('\n');
+            ...(w.loop ? [`  loop max ${w.loop.max} ms`] : [])].join('\n'))].join('\n');
         try { await navigator.clipboard.writeText(text); $('load-said').textContent = uiSaid('set-load-copied', 'Copied'); } catch { $('load-said').textContent = 'The clipboard is not available here.'; }
+    });
+    /* WHAT HOLDS THE SERVER: 10 s of its own profiler, the functions that took the most time, as text
+       (server/profile.mjs) -- copied with the windows. */
+    $('load-profile').addEventListener('click', async () => {
+        const out = $('load-profile-out'); $('load-profile').disabled = true;
+        $('load-said').textContent = uiSaid('set-load-profiling', 'Measuring…');
+        try {
+            const r = await fetch(`${API}/server/profile`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seconds: 10 }) });
+            const p = await r.json().catch(() => null);
+            if (!r.ok || !p) { $('load-said').textContent = p?.error ?? `Not measured (${r.status}).`; return; }
+            const line = (f) => `  ${f.ms} ms  ${f.fn}  ${f.at}`;
+            out.textContent = [`profile ${p.seconds} s · cpu ${p.cpuMs} ms · sampled ${p.sampledMs} ms · idle ${p.idleMs} · gc ${p.gcMs} · program ${p.programMs}`,
+                'self:', ...p.self.map(line), 'with what they call:', ...p.total.map(line)].join('\n');
+            out.hidden = false; $('load-copy').hidden = false; $('load-said').textContent = '';
+        } catch { $('load-said').textContent = 'Not measured.'; } finally { $('load-profile').disabled = false; }
     });
     /* WHAT THE SERVER'S PROGRAMS SAID: one source over a span, to read, copy whole or keep as a file. */
     let logsShown = null;

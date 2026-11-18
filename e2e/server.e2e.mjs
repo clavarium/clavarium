@@ -99,6 +99,10 @@ test('Settings, Logs, and a restart from Advanced: a source over a span, secrets
     await me.chapter('s-load');
     await me.until('the load is shown', async () => /\d+ commands · /.test(await me.page.locator('#load-list').innerText().catch(() => '')));
     assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+    /* Measure: 10 s of the server's own profiler, what holds it, as text. */
+    await me.page.locator('#load-profile').click();
+    await me.until('the measure is shown', async () => /^profile 10 s · cpu \d+ ms[\s\S]*self:/.test(await me.page.locator('#load-profile-out').innerText().catch(() => '')), 30_000);
+    assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll, measured');
     /* Restart: the first click asks, the second does. */
     /* Restarting is decided in Advanced (a log is read, a restart decided). */
     await me.chapter('s-advanced');

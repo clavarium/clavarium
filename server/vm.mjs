@@ -115,10 +115,10 @@ export class VmUnknown extends Error {
    a server stalled by itself, not by the host). */
 export const LOAD_KEPT = 12;
 export class HostTally {
-    #now; #log; #kinds = new Map(); #from = 0; #beats = [0, 0]; #kept = []; #loop = null;
+    #now; #log; #kinds = new Map(); #from = 0; #beats = [0, 0]; #kept = []; #loop = null; #cpu = null;
     constructor({ now = () => Date.now(), log = (line) => console.log(line), loop = false } = {}) {
         this.#now = now; this.#log = log;
-        if (loop) { this.#loop = monitorEventLoopDelay({ resolution: 20 }); this.#loop.enable(); }
+        if (loop) { this.#loop = monitorEventLoopDelay({ resolution: 20 }); this.#loop.enable(); this.#cpu = process.cpuUsage(); }
     }
     /* A look of health answered by its heartbeat (`read`: no command; beat.mjs), or by a command after all. */
     noteBeat(read) { this.#beats[read ? 0 : 1] += 1; }
@@ -137,15 +137,17 @@ export class HostTally {
         const kinds = [...this.#kinds].sort((a, b) => b[1][1] - a[1][1]).map(([kind, [count, ms, maxMs]]) => ({ kind, count, ms, maxMs }));
         const ms = (n) => Math.round(n / 1e6);
         const loop = this.#loop && this.#loop.count ? { p50: ms(this.#loop.percentile(50)), p99: ms(this.#loop.percentile(99)), max: ms(this.#loop.max) } : null;
+        /* Its own processor time over the window (user + system, ms), with the loop: a stalled loop with it high is this server's own work. */
+        if (loop && this.#cpu) { const c = process.cpuUsage(this.#cpu); loop.cpuMs = Math.round((c.user + c.system) / 1000); }
         return { from: this.#from || now, to: now, commands: kinds.reduce((n, k) => n + k.count, 0), ms: kinds.reduce((n, k) => n + k.ms, 0), kinds, beats: { read: this.#beats[0], fallback: this.#beats[1] }, loop };
     }
     #close(now) {
         const w = this.#window(now);
         const beats = w.beats.read + w.beats.fallback ? `; beat read ${w.beats.read}x, fallback ${w.beats.fallback}x` : '';
-        const loop = w.loop ? `; loop p50 ${w.loop.p50}ms p99 ${w.loop.p99}ms` : '';
+        const loop = w.loop ? `; loop p50 ${w.loop.p50}ms p99 ${w.loop.p99}ms${w.loop.cpuMs !== undefined ? ` cpu ${Math.round(w.loop.cpuMs / 1000)}s` : ''}` : '';
         this.#log(`host: ${w.commands} commands in ${Math.round((now - w.from) / 60_000)} min, ${Math.round(w.ms / 1000)} s spent; ${w.kinds.slice(0, 8).map((k) => `${k.kind} ${k.count}x ${Math.round(k.ms / 1000)}s max ${Math.round(k.maxMs / 1000)}s`).join('; ')}${beats}${loop}`);
         this.#kept = [{ ...w, kinds: w.kinds.slice(0, 20) }, ...this.#kept].slice(0, LOAD_KEPT);
-        this.#kinds = new Map(); this.#from = now; this.#beats = [0, 0]; this.#loop?.reset();
+        this.#kinds = new Map(); this.#from = now; this.#beats = [0, 0]; this.#loop?.reset(); if (this.#cpu) this.#cpu = process.cpuUsage();
     }
     /* The windows, the newest first: the one under way (`open`), then the closed ones. A window past its
        time with no command since is closed here: an idle server still says so. */

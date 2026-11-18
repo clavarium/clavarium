@@ -60,6 +60,7 @@ export const SETTINGS_WORDS_FR = {
     /* Diagnostics › Charge (vm.mjs HostTally): les commandes à l'hôte, par fenêtre de 5 minutes. */
     'set-ch-s-load': 'Charge', 'set-load-about': 'Commandes à l\'hôte, par 5 minutes', 'set-load-copy': 'Copier',
     'set-load-open': 'maintenant', 'set-load-line': '{n} commandes · {s} s', 'set-load-loop': 'boucle {p50}/{p99} ms',
+    'set-load-profile': 'Mesurer 10 s', 'set-load-profiling': 'Mesure en cours…', 'set-load-cpu': 'processeur {p} %', 'set-load-auto': 'Mesuré seul à {at}',
     'set-load-none': 'Rien de compté pour le moment', 'set-load-unread': 'Illisible pour le moment', 'set-load-copied': 'Copié',
     /* Mises à jour: sudo discret (deploy/updater.mjs ensureQuietSudo). */
     'set-sudo-on': 'Sudo discret : oui ({setting})', 'set-sudo-off': 'Sudo discret : non appliqué : {why}',
@@ -102,11 +103,12 @@ export const SETTINGS_WORDS_FR = {
     'set-apikeys-never': 'Jamais', 'set-apikeys-cancel': 'Annuler', 'set-apikeys-create': 'Créer', 'set-apikeys-new': 'Nouvelle clé',
     'set-apikeys-never-by-key': 'Jamais : secrets, clés, comptes, droits', 'set-apikeys-scope-status': 'Son état (mémoire, disque, versions)',
     'set-apikeys-scope-jobs': 'Tâches : ce que fait Clavarium, ses journaux',
+    'set-apikeys-scope-diagnostics': 'Diagnostics : charge, mesure, journaux',
     'set-apikeys-scope-create-rooms': 'Créer des salons', 'set-apikeys-act': 'Agir', 'set-apikeys-manage': 'Gérer',
     'set-apikeys-no-scope': 'Aucune portée', 'set-apikeys-by-you': 'par vous', 'set-apikeys-used': 'Utilisée {when}', 'set-apikeys-unused': 'Jamais utilisée',
     'set-apikeys-expired': 'Expirée', 'set-apikeys-expires-on': 'Expire le {date}', 'set-apikeys-no-expiry': 'N\'expire pas',
     'set-apikeys-created': 'Créée le {date}', 'set-apikeys-revoke': 'Révoquer', 'set-apikeys-revoke-q': 'Révoquer maintenant ?',
-    'set-apikeys-convs': 'Conversations', 'set-apikeys-convs-hint': 'Une par une : lire, parler ou agir', 'set-apikeys-off': 'Non',
+    'set-apikeys-perms': 'Permissions', 'set-apikeys-convs': 'Conversations', 'set-apikeys-convs-hint': 'Une par une : lire, parler ou agir', 'set-apikeys-off': 'Non',
     'set-apikeys-read': 'Lire', 'set-apikeys-talk': 'Parler', 'set-apikeys-no-convs': 'Aucune conversation pour l\'instant',
     'set-apikeys-journal': 'Journal', 'set-apikeys-no-use': 'Aucun appel pour l\'instant',
     'set-apikeys-rooms': 'Salons', 'set-apikeys-rooms-hint': 'Un par un : lire, parler ou gérer', 'set-apikeys-no-rooms': 'Aucun salon pour l\'instant',

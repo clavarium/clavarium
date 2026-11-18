@@ -143,6 +143,7 @@
  *   POST /api/server/vm-manager             {mode: night|always|ask}: when it hangs, restarted by itself at night (default), always, or never
  *   POST /api/server/vm-manager/restart     {confirm: true}: restarted now; every machine is suspended and resumed
  *   GET  /api/server/load                    host commands by 5-minute window, event-loop delay
+ *   POST /api/server/profile                 {seconds}: this server sampled by its own profiler (2-30 s), what holds it
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart   POST /api/server/reboot (the whole server)
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
@@ -770,6 +771,7 @@ export async function handleApi(request, response, conversations, headers, resou
         const reactSet = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
         if (reactSet && reacting) { const n = decodeURIComponent(reactSet[1]); if (!conversations.list().some((c) => c.name === n)) throw new Refusal(404, 'No such conversation.'); return send(200, reacting.set(n, body)), true; }
         if (pathname === '/api/machines/move' && machinesMove) return send(202, await machinesMove.move(String(body.to ?? ''))), true;
+        if (pathname === '/api/server/profile' && serverLogs) return send(200, await serverLogs.profile(body?.seconds ?? 10)), true;
         if (pathname === '/api/server/restart' && serverLogs) return send(202, await serverLogs.restart()), true;
         if (pathname === '/api/server/reboot' && serverLogs) return send(202, await serverLogs.reboot()), true;
         if (pathname === '/api/machines/grow' && machinesMove) return send(200, await machinesMove.grow(String(body.mount ?? ''))), true;

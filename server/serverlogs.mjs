@@ -8,6 +8,7 @@
  *                       any run of 32 letters and digits or more (a key, a token)
  *                       `note`: why it may be short (the journal too slow, journalctl's last word)
  *   load()              the host commands of the last windows (vm.mjs HostTally): Settings, Load
+ *   profile(seconds)    this server sampled by its own profiler (profile.mjs): what holds it
  *   restart()           this server starts again in two seconds (its machines go on)
  */
 import { Refusal } from './conversations.mjs';
@@ -36,9 +37,13 @@ export const NOISE = / (sudo|pkexec)\[\d+\]: | pam_unix\((sudo|sudo-i|pkexec):se
 const lastWord = (text) => String(text ?? '').trim().split('\n').pop()?.replace(/^(REFUSED|NOTE): /, '').slice(0, 200) ?? '';
 
 export class ServerLogs {
-    #host; #reads = new Map(); #now; #load;
-    constructor({ host, now = () => Date.now(), load = () => ({ everyMs: 0, windows: [] }) }) { this.#host = host; this.#now = now; this.#load = load; }
+    #host; #reads = new Map(); #now; #load; #profiler;
+    constructor({ host, now = () => Date.now(), load = () => ({ everyMs: 0, windows: [] }), profiler = null }) { this.#host = host; this.#now = now; this.#load = load; this.#profiler = profiler; }
     load() { return this.#load(); }
+    profile(seconds) {
+        if (!this.#profiler) throw new Refusal(404, 'The profiler is not available on this server.');
+        return this.#profiler.profile(seconds);
+    }
 
     /* The same read asked again while it runs is the same read; once done, kept a moment for
        the page that comes back for it. Resolves { pending: true } past `wait`. */

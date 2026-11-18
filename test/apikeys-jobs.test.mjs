@@ -142,3 +142,51 @@ test('MCP at /api/ext/v1/mcp: initialize, tools listed by scope, status, jobs an
     assert.match(journal, /"route":"\/v1\/mcp tools\/call clavarium_job_log [^"]*","status":200/);
     assert.equal(journal.includes(both.secret.slice(4, 16)), false);
 });
+
+/* The scope "diagnostics" (18-11): the server's load, what holds it, its logs, read by MCP when it is slow. */
+test('MCP diagnostics: clavarium_load, clavarium_profile, clavarium_logs listed and answered only with the scope; masked', async (t) => {
+    const { keys, opts, grants } = home(t);
+    const asked = [];
+    opts.diagnostics = {
+        load: () => ({ everyMs: 300_000, windows: [{ open: true, commands: 3, loop: { p50: 950, p99: 1100, max: 1200, cpuMs: 4000 } }] }),
+        profile: async (s) => { asked.push(['profile', s]); return { seconds: s, self: [{ fn: 'tick', at: 'server/talk.mjs:10', ms: 900 }], total: [] }; },
+        logs: async (source, span) => { asked.push(['logs', source, span]); return { source, span, text: `a line\ntoken ${SECRET_LIKE}\n`, lines: 2 }; },
+    };
+    const diag = keys.create({ label: 'Dev', scopes: ['status', 'diagnostics'] });
+    const plain = keys.create({ label: 'Status only', scopes: ['status'] });
+    assert.ok(grants.of(apiKeySubject(diag.key.id)).some((g) => g.asset === 'server:diagnostics' && g.rights === 'r'));
+    const mcp = (secret, body) => call(opts, { method: 'POST', path: '/api/ext/v1/mcp', secret, body: { jsonrpc: '2.0', ...body }, headers: { accept: 'application/json, text/event-stream' } });
+    const tool = (secret, name, args = {}) => mcp(secret, { id: 9, method: 'tools/call', params: { name, arguments: args } });
+    const names = async (secret) => (await mcp(secret, { id: 3, method: 'tools/list' })).body.result.tools.map((x) => x.name);
+    for (const n of ['clavarium_load', 'clavarium_profile', 'clavarium_logs']) {
+        assert.ok((await names(diag.secret)).includes(n), `${n} listed with the scope`);
+        assert.ok(!(await names(plain.secret)).includes(n), `${n} not listed without`);
+    }
+    const load = await tool(diag.secret, 'clavarium_load');
+    assert.equal(load.body.result.structuredContent.windows[0].loop.p50, 950);
+    const prof = await tool(diag.secret, 'clavarium_profile', { seconds: 5 });
+    assert.equal(prof.body.result.structuredContent.self[0].fn, 'tick');
+    const logs = await tool(diag.secret, 'clavarium_logs', { source: 'updates', span: '1' });
+    assert.match(logs.body.result.structuredContent.text, /^a line/);
+    assert.equal(JSON.stringify(logs.body).includes(SECRET_LIKE), false, 'a secret in the logs masked');
+    assert.deepEqual(asked, [['profile', 5], ['logs', 'updates', '1']]);
+    const refused = await tool(plain.secret, 'clavarium_load');
+    assert.ok(refused.body.error || refused.body.result?.isError || refused.status === 403, JSON.stringify(refused.body));
+    assert.equal(asked.length, 2, 'nothing asked without the scope');
+});
+
+test('a scope given to a key afterwards, or taken back: its line in the table, its tools listed then not', async (t) => {
+    const { keys, grants, opts } = home(t);
+    opts.diagnostics = { load: () => ({ windows: [] }), profile: async () => ({}), logs: async () => ({}) };
+    const made = keys.create({ label: 'Later', scopes: ['status'] });
+    const listed = async () => (await call(opts, { method: 'POST', path: '/api/ext/v1/mcp', secret: made.secret, body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).body.result.tools.map((x) => x.name);
+    assert.ok(!(await listed()).includes('clavarium_load'));
+    assert.deepEqual(keys.setScope(made.key.id, 'diagnostics', true).scopes.sort(), ['diagnostics', 'status']);
+    assert.ok(grants.of(apiKeySubject(made.key.id)).some((g) => g.asset === 'server:diagnostics'));
+    assert.ok((await listed()).includes('clavarium_load'), 'its tools now');
+    assert.deepEqual(keys.setScope(made.key.id, 'diagnostics', false).scopes, ['status']);
+    assert.ok(!(await listed()).includes('clavarium_load'), 'taken back at once');
+    assert.throws(() => keys.setScope(made.key.id, 'everything', true), /Scopes are among/);
+    assert.throws(() => keys.setScope(made.key.id, 'status', 'yes'), /on: true or false/);
+    assert.throws(() => keys.setScope('00000000-0000-0000-0000-000000000000', 'status', true), /No such key/);
+});
