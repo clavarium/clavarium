@@ -773,8 +773,8 @@ export class Talk {
         }
         if (!(await this.#type(name, this.rereadLine()).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return later(RETRY_MS);
         /* Reading the whole thread, it reads what waits too: that line is not typed after it. */
-        const waits = this.#parley(name).unread() > 0;
-        this.#store.put({ ...this.#store.get(name), reread: false, ...(waits ? { pending: false, woke: true, why: null, again: false, toldRead: this.#readCount(name), renudged: 0 } : {}), typedAt: new Date(this.#now()).toISOString() });
+        const unread = this.#parley(name).unread(); const waits = unread > 0;
+        this.#store.put({ ...this.#store.get(name), reread: false, ...(waits ? { pending: false, woke: true, why: null, again: false, toldRead: this.#readCount(name), toldUnread: unread, renudged: 0 } : {}), typedAt: new Date(this.#now()).toISOString() });
         return 'typed';
     }
 
@@ -787,6 +787,13 @@ export class Talk {
     /* TOLD, THEN READ, THEN WRITTEN TO AGAIN before `woke` was put back (the tick's, every second -- or
        never, while a tick waited on another conversation): the line typed was used, the next is owed. */
     #readSince(name, r) { return Number.isInteger(r?.toldRead) && this.#readCount(name) > r.toldRead; }
+    /* More waits than when its line was typed: a message came since (its reminders, used up, do not hold it back). */
+    /* One told before this was counted, its reminders used up (stuck since 17-11): told once more, then counted. */
+    /* Messages come together (a burst): one line for them, a minute at least after the last. */
+    #newSince(r, unread) {
+        if (!(this.#now() - Date.parse(r?.typedAt ?? '') >= RENUDGE_MS[0])) return false;
+        return Number.isInteger(r?.toldUnread) ? unread > r.toldUnread : (r?.renudged ?? 0) >= RENUDGE_MS.length;
+    }
 
     #want(name) {
         const r = this.#store.get(name);
@@ -808,17 +815,20 @@ export class Talk {
         const r = this.#store.get(name);
         if (r?.on !== true) return 'read';
         const waits = (why, ms) => { this.#store.put({ ...this.#store.get(name), pending: true, why, again, renudge }); this.#nextTry.set(name, this.#now() + ms); return why; };
-        if (this.#parley(name).unread() === 0) { if (r.pending || r.woke) this.#store.put({ ...r, pending: false, woke: false, why: null, again: false, renudge: false }); return 'read'; }
+        const unread = this.#parley(name).unread();
+        if (unread === 0) { if (r.pending || r.woke) this.#store.put({ ...r, pending: false, woke: false, why: null, again: false, renudge: false }); return 'read'; }
         /* Its machine has just restarted: the line that will be typed tells it to read everything. */
         if (r.reread === true) { this.#store.put({ ...r, pending: true, why: 'restarting', again }); return 'restarting'; }
-        if (r.woke === true && !again && !this.#readSince(name, r)) { if (r.pending) this.#store.put({ ...r, pending: false, why: null }); return 'told'; }
+        /* Told already, nothing read since -- and nothing new either: one line is enough. A message come since is
+           owed its own line (19-11: an AI that missed its reminders was never told again, a room's questions with it). */
+        if (r.woke === true && !again && !this.#readSince(name, r) && !this.#newSince(r, unread)) { if (r.pending) this.#store.put({ ...r, pending: false, why: null }); return 'told'; }
         if (!this.#conversations.awake().includes(name)) return waits('asleep', RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return waits('typing', TYPING_QUIET_MS - quiet + 100);
         if (!(await this.#runs(name))) return waits('asleep', RETRY_MS);
         if (renudge) this.#log(`talk: ${name}: still unread ${Math.round((this.#now() - Date.parse(r.typedAt ?? '')) / 1000)} s after its line: typed again (${(r.renudged ?? 0) + 1})`);
         if (!(await this.#type(name, urgent ? URGENT : WAKE).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return waits('failed', RETRY_MS);
-        this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, renudge: false, typedAt: new Date(this.#now()).toISOString(), toldRead: this.#readCount(name), renudged: renudge ? (r.renudged ?? 0) + 1 : 0 });
+        this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, renudge: false, typedAt: new Date(this.#now()).toISOString(), toldRead: this.#readCount(name), toldUnread: unread, renudged: renudge ? (r.renudged ?? 0) + 1 : 0 });
         return 'typed';
     }
 
@@ -850,8 +860,8 @@ export class Talk {
             try { unread = this.#parley(r.name).unread(); } catch { return; /* its folder went */ }
             /* It has read: what waited is done, and the next message wakes it again. */
             if (unread === 0) { this.#store.put({ ...r, woke: false }); return; }
-            /* It read since, and more was written: the line is owed now. */
-            if (this.#readSince(r.name, r)) { await this.#wake(r.name); return; }
+            /* It read since, and more was written: the line is owed now. A message come since its line: the same. */
+            if (this.#readSince(r.name, r) || this.#newSince(r, unread)) { await this.#wake(r.name); return; }
             /* Still unread long after: typed again, RENUDGE_MS apart -- AS MANY TIMES AS THERE ARE, NO MORE (17-11,
                the owner: never a reminder without end). Then it waits: its chat keeps "Remind it" for the owner. */
             if ((r.renudged ?? 0) >= RENUDGE_MS.length) return;
