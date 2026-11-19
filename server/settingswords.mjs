@@ -270,7 +270,7 @@ export const SETTINGS_WORDS_FR = {
     'set-room-find': 'Chercher une conversation', 'set-room-boxes': 'Boîtiers vocaux',
     'set-room-remove': 'Supprimer le salon', 'set-room-remove-what': 'Le fil part · les IA et boîtiers restent',
     'set-room-remove-dots': 'Supprimer…', 'set-room-remove-yes': 'Supprimer {name}', 'set-room-keep': 'Garder',
-    'set-room-create': 'Créer', 'set-room-new': 'Nouveau salon',
+    'set-room-create': 'Créer', 'set-room-new': 'Nouveau salon', 'set-room-limit': 'Échanges entre ses IA, par heure', 'set-room-limit-hint': 'Vide : 60 · 0 : sans limite',
     /* A room's settings as every settings page (07-11): each change saved at once, said a moment in the bar. */
     'set-room-saved': 'Enregistré', 'set-room-settings-of': '{name} · Réglages', 'set-room-of': '{n} sur {t}',
     'set-room-host-how': 'Touchez une autre IA du salon pour la déplacer',

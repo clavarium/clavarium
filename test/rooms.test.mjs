@@ -7,18 +7,18 @@ import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
-import { Rooms, lookOf } from '../server/rooms.mjs';
+import { Rooms, lookOf, HOPS_WINDOW_MS } from '../server/rooms.mjs';
 import { JsonFile } from '../server/store.mjs';
 import { Refusal } from '../server/conversations.mjs';
 import { importFile, IMPORT_MAX, download } from '../server/files.mjs';
 
-const setup = (t) => {
+const setup = (t, { now, note } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'rooms-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const said = []; const told = new Map(); const spoken = [];
     const convs = [{ name: 'hugo', chatName: 'Hugo' }, { name: 'compta', title: 'Compta' }, { name: 'jardin' }];
     const boxes = [{ id: 'box-1', name: 'Cuisine' }, { id: 'box-2', name: 'Jardin' }];
-    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async (name, text, extra) => { said.push({ name, text, extra }); }, rooms: (name, list) => told.set(name, list), conversations: () => convs, boxes: () => boxes, speak: (where, text, ids, how) => spoken.push({ where, text, ids, how }) });
+    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async (name, text, extra) => { said.push({ name, text, extra }); }, rooms: (name, list) => told.set(name, list), conversations: () => convs, boxes: () => boxes, speak: (where, text, ids, how) => spoken.push({ where, text, ids, how }), ...(now ? { now } : {}), ...(note ? { note } : {}) });
     return { rooms, said, told, spoken };
 };
 
@@ -117,14 +117,11 @@ test('#280: an AI sent a message hands it on (forward: as it is, by who said it)
     const shown = rooms.read(r.id).messages.find((m) => m.id === sub);
     assert.equal(shown.text, 'Le budget suit, @Compta ?', 'shown by its name of the moment');
     assert.deepEqual(shown.toNames, ['Compta']);
-    /* Two AIs sending to each other stop after a few. */
+    /* 19-11, the owner: 60 an hour by default -- twenty go. */
     said.length = 0;
     for (let i = 0; i < 20; i++) rooms.answered(i % 2 ? 'hugo' : 'compta', { room: r.id, text: `ping ${i}`, to: [i % 2 ? compta.id : hugo.id] });
     await new Promise((x) => setImmediate(x));
-    assert.ok(said.length <= 8, `a few hand-overs, not ${said.length}`);
-    await rooms.say(r.id, 'Merci.');
-    said.length = 0; rooms.answered('hugo', { room: r.id, text: 'Compta, note-le.', to: [compta.id] }); await new Promise((x) => setImmediate(x));
-    assert.equal(said.length, 1, 'the person spoke: hand-overs again');
+    assert.equal(said.length, 20, 'within the 60 an hour of the default');
 });
 
 test('#281: a box bound to a room is a member by itself, speaks there, and says aloud only what is sent to it (names, never ids)', async (t) => {
@@ -481,4 +478,32 @@ test('a call held for an AI at work for a room: its card in that room, named, ma
     }
     rooms.answered('hugo', { room: a.id, text: 'Fait.' });
     assert.deepEqual(rooms.held('hugo', event), [b.id], 'answered in one: only the other');
+});
+
+test('19-11: hand-overs between AIs, a bucket of 60 an hour by default (0: none): a burst, then one as it fills; said in the room and to the AI that sent it; each AI told what is left', async (t) => {
+    let clock = Date.parse('2026-11-18T20:00:00Z'); const notes = [];
+    const { rooms, said, told } = setup(t, { now: () => new Date(clock), note: (name, text) => notes.push({ name, text }) });
+    const r = rooms.create({ name: 'Équipe', conversations: ['hugo', 'compta'] });
+    const compta = r.members.find((m) => m.ref === 'compta'); const hugo = r.members.find((m) => m.ref === 'hugo');
+    assert.deepEqual([rooms.get(r.id).perHour, rooms.get(r.id).perHourSet], [60, false], '60 by default');
+    assert.deepEqual(told.get('hugo')[0].handovers, { perHour: 60, left: 60 }, 'each AI told the limit and what is left');
+    assert.throws(() => rooms.change(r.id, { perHour: -2 }), /perHour/);
+    assert.equal(rooms.change(r.id, { perHour: 6 }).perHour, 6);
+    said.length = 0;
+    const ping = (i) => rooms.answered(i % 2 ? 'hugo' : 'compta', { room: r.id, text: `ping ${i}`, to: [i % 2 ? compta.id : hugo.id] });
+    for (let i = 0; i < 10; i++) ping(i);
+    await new Promise((x) => setImmediate(x));
+    assert.equal(said.length, 6, 'a burst of six at once');
+    assert.deepEqual(told.get('compta')[0].handovers, { perHour: 6, left: 0 });
+    const stopped = rooms.read(r.id).messages.filter((m) => m.event === 'room-hops');
+    assert.equal(stopped.length, 1, 'said once in the room'); assert.match(stopped[0].text, /used their 6 hand-overs an hour/);
+    assert.equal(notes.length, 4, 'and to the AI that sent each one not passed on'); assert.match(notes[0].text, /was not passed on: this room allows 6 hand-overs between its AIs an hour/);
+    said.length = 0;
+    clock += HOPS_WINDOW_MS / 6 + 1000;
+    ping(1); ping(2); await new Promise((x) => setImmediate(x));
+    assert.equal(said.length, 1, 'ten minutes later: one more, as it fills');
+    assert.equal(rooms.change(r.id, { perHour: 0 }).perHour, 0, 'no limit when the owner says so');
+    said.length = 0; for (let i = 0; i < 80; i++) ping(i); await new Promise((x) => setImmediate(x));
+    assert.equal(said.length, 80); assert.deepEqual(told.get('hugo')[0].handovers, { perHour: 0 });
+    assert.equal(rooms.change(r.id, { perHour: null }).perHour, 60, 'back to the default');
 });

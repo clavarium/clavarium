@@ -885,6 +885,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     rooms = new Rooms({ file: new JsonFile(`${dataDir}/rooms.json`, []), dir: `${dataDir}/rooms`,
         removed: (id) => grants.forgetAsset(`room:${id}`),
         say: (name, text, extra, files) => talk.say(name, text, undefined, files, undefined, extra),
+        /* A line in an AI's own chat, not a message (it wakes nothing): a hand-over of its not passed on. */
+        note: (name, text) => talk.event(name, { kind: 'room-hops', text }),
         attach: (name, fileName, request) => talk.attach(name, fileName, request),
         rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all(),
         speak: (where, text, ids, how) => { void boxes.agentSaid(where, text, ids, how); },

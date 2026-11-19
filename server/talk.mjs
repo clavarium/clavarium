@@ -164,6 +164,7 @@ export const LEVELS = Object.freeze(['needs-you', 'news', 'trace']);
 export const RESTART_ASKED = 'restart-asked';
 export const EVENT_LEVELS = Object.freeze({
     sent: 'news',
+    'room-hops': 'news',
     refused: 'needs-you',
     'sent-by-hand': 'news',
     origin: 'trace',
