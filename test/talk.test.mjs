@@ -188,9 +188,17 @@ test('a message left unread: its line typed again by itself, 1, 3, 10 minutes, t
     for (let n = 0; n < 5; n += 1) { b.world.clock += RENUDGE_MS[2] * 3; await tick(); }
     assert.equal(b.typed.length, 8, 'three times again at most');
     assert.ok(b.typed.every((x) => x === WAKE || x === 'Enter'));
+    /* 19-11: its reminders used up, a NEW message is owed its line (a room's question was never told again). */
+    assert.equal((await again.say('helper', 'a new question')).told, 'typed', 'a message come since: told');
+    await until('typed for the new message', () => b.typed.length === 10);
+    /* Its own reminders, three again at most, then no more without another message. */
+    for (let n = 0; n < 8; n += 1) { b.world.clock += RENUDGE_MS[2] * 3; await tick(); }
+    assert.equal(b.typed.length, 16, 'three reminders for the new message, no more');
+    for (let n = 0; n < 5; n += 1) { b.world.clock += RENUDGE_MS[2] * 3; await tick(); }
+    assert.equal(b.typed.length, 16, 'never a reminder without end');
     /* The owner's "Remind it" still types it. */
     await again.remind('helper');
-    await until('typed when the owner asks', () => b.typed.length === 10);
+    await until('typed when the owner asks', () => b.typed.length === 18);
     /* Read: the next message wakes it as usual. */
     b.parley('read');
     await until('it is known to have read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
