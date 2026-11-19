@@ -25,13 +25,19 @@ import { scan } from './secret-scan.mjs';
 export const ROOM_NAME_MAX = 60;
 export const ROOMS_MAX = 20;
 export const MEMBERS_MAX = 40;
-/* Hand-overs between AIs after the person (or a box) last spoke in a room: a few, never a loop. */
-export const HOPS_MAX = 8;
+/* 19-11, the owner: hand-overs between a room's AIs AN HOUR (`perHour`, PER_HOUR_DEFAULT unless set; 0: none), a
+   bucket: past it, they wait -- said in the room and to the AI that sent it, never silently -- and go on as it fills
+   again. Every AI of the room is told the limit and what is left (its rooms list), to answer why nothing came. */
+export const HOPS_WINDOW_MS = 60 * 60_000;
+export const PER_HOUR_MAX = 1000;
+/* 19-11, the owner: 60 an hour unless the room says otherwise (0: no limit). */
+export const PER_HOUR_DEFAULT = 60;
+const perHourOf = (r) => (Number.isInteger(r?.perHour) ? r.perHour : PER_HOUR_DEFAULT);
 /* How long an AI given a message is said to be thinking, at most (it may never answer). */
 export const THINKING_MS = 10 * 60_000;
 const KINDS = ['person', 'ai', 'box'];
 /* A ROOM'S OWN LINES (a Tether call held for one of its AIs, and what closes it): the kinds, their level, at most kept. */
-const LINE_LEVELS = Object.freeze({ 'tether-demande': 'needs-you', 'tether-done': 'trace' });
+const LINE_LEVELS = Object.freeze({ 'tether-demande': 'needs-you', 'tether-done': 'trace', 'room-hops': 'news' });
 const LEVELS = ['needs-you', 'news', 'trace'];
 const LINE_ACTION = /^[a-z]{1,20}(:[a-z0-9][a-z0-9._-]{0,63})?$/;
 export const ROOM_LINES_MAX = 50;
@@ -70,7 +76,7 @@ const maskedAll = (v, depth = 0) => (typeof v === 'string' ? masked(v) : depth >
 export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
 
 export class Rooms {
-    #file; #dir; #say; #attach; #read; #rooms; #conversations; #boxes; #now; #speak; #reachOf; #shownIn; #removed; #hops = new Map(); #thinking = new Map();
+    #file; #dir; #say; #note; #attach; #read; #rooms; #conversations; #boxes; #now; #speak; #reachOf; #shownIn; #removed; #hops = new Map(); #thinking = new Map();
     /* file: a JsonFile of the rooms; dir: where their threads are; say(name, text, extra): a message written in a
        conversation's own chat (talk.say; its 4th argument the paths of its files there); attach(name, fileName,
        request): a file put in a conversation's chat as the person attaches one (talk.attach); rooms(name, list): what a conversation is told of its rooms (talk.rooms);
@@ -80,9 +86,9 @@ export class Rooms {
        read(name, ref): that file of that conversation ({ name, size, stream }), read with its rights -- what an AI
        shows or cites to another AI of the room is copied from it (#carried).
        removed(id): a room removed (what was given of it, to an API key, goes with it). */
-    constructor({ file, dir, say, removed = () => {}, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date(), reach = () => null, shown = () => false, read = async () => { throw new Refusal(404, 'No such file.'); } }) {
+    constructor({ file, dir, say, note = () => {}, removed = () => {}, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date(), reach = () => null, shown = () => false, read = async () => { throw new Refusal(404, 'No such file.'); } }) {
         this.#removed = removed; this.#speak = speak; this.#attach = attach; this.#read = read; this.#reachOf = reach; this.#shownIn = shown;
-        this.#file = file; this.#dir = dir; this.#say = say; this.#rooms = rooms; this.#conversations = conversations; this.#boxes = boxes; this.#now = now;
+        this.#file = file; this.#dir = dir; this.#say = say; this.#note = note; this.#rooms = rooms; this.#conversations = conversations; this.#boxes = boxes; this.#now = now;
     }
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
     #save(list) { this.#file.set(list); this.#tellConversations(list); }
@@ -115,7 +121,7 @@ export class Rooms {
     /* ITS AIs, as conversations (06-11): the names of the conversations of its AI members that are there now --
        never a box, never the person, never one taken out of the room. What « give to all its AIs » gives to. */
     ais(id) { return this.#shown(this.#find(id)).filter((m) => m.kind === 'ai').map((m) => m.ref); }
-    get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at }; }
+    get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at, perHour: perHourOf(r), perHourSet: Number.isInteger(r.perHour) }; }
 
     /* A new room: its name, its AIs (conversation names), its boxes (ids), and which AI is the host (the first by default). */
     create({ name, conversations = [], boxes = [], host } = {}) {
@@ -151,10 +157,16 @@ export class Rooms {
         if (room.members.length > MEMBERS_MAX) throw new Refusal(409, `${MEMBERS_MAX} members at most.`);
     }
     /* Its name, its host, members added or taken away; `quiet` (07-11, the tidy-up): muted in the list, or not. */
-    change(id, { name, host, add = {}, remove = [], quiet } = {}) {
+    change(id, { name, host, add = {}, remove = [], quiet, perHour } = {}) {
         const list = this.#all(); const room = list.find((r) => r.id === id);
         if (!room) throw new Refusal(404, 'No such room.');
         if (quiet !== undefined) { if (quiet === true) room.quiet = true; else delete room.quiet; }
+        /* Hand-overs between its AIs an hour (19-11): a whole number (0: no limit), or null: the default. */
+        if (perHour !== undefined) {
+            if (perHour === null) delete room.perHour;
+            else if (Number.isInteger(perHour) && perHour >= 0 && perHour <= PER_HOUR_MAX) room.perHour = perHour;
+            else throw new Refusal(400, `perHour: a whole number from 0 (no limit) to ${PER_HOUR_MAX}, or null (the default, ${PER_HOUR_DEFAULT}).`);
+        }
         if (name !== undefined) {
             const n = nameOf(name); if (!n) throw new Refusal(400, 'Give the room a name.');
             if (list.some((r) => r.id !== id && r.name.toLowerCase() === n.toLowerCase())) throw new Refusal(409, 'A room has that name already.');
@@ -279,7 +291,6 @@ export class Rooms {
         if (!who) throw new Refusal(400, 'Not a member of this room.');
         const attached = this.#filesSaid(room.id, files);
         const t = this.#thread(room.id);
-        this.#hops.set(room.id, 0);
         /* The owner is the room's own side (no name over their words, as in any chat); anyone else is named. */
         let now;
         try { now = t.say(masked(text), undefined, attached.map(({ path, name, size }) => ({ path, name, size })), who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind, look: who.look } }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
@@ -335,9 +346,25 @@ export class Rooms {
         const ais = to.map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
         /* `paths`: the files it shows or cites in it -- each AI it goes to gets its own copy, as when the person attaches one. */
         const handOver = (ai, text, from, message, paths = []) => {
-            const n = (this.#hops.get(room.id) ?? 0) + 1;
-            if (n > HOPS_MAX) return false;
-            this.#hops.set(room.id, n);
+            const limit = perHourOf(room);
+            if (limit) {
+                /* A BUCKET (19-11, the owner): `limit` tokens, filled again continuously at `limit` an hour; a hand-over
+                   takes one. A burst goes at once, then they come back a little at a time. */
+                const nowMs = this.#now().getTime();
+                const kept = this.#hops.get(room.id) ?? { tokens: limit, at: nowMs, said: 0 };
+                kept.tokens = Math.min(limit, kept.tokens + ((nowMs - kept.at) * limit) / HOPS_WINDOW_MS); kept.at = nowMs;
+                this.#hops.set(room.id, kept);
+                const every = Math.max(1, Math.round(60 / limit));
+                if (kept.tokens < 1) {
+                    /* Said in the room, once an hour at most, and to the AI that sent it, each time (never a hand-over lost without a word). */
+                    if (nowMs - kept.said >= HOPS_WINDOW_MS) { kept.said = nowMs; const list = this.#all(); const r = list.find((x) => x.id === room.id); if (r && this.#line(r, { kind: 'room-hops', text: `${me.name} → ${ai.name}: not passed on. The AIs of this room used their ${limit} hand-overs an hour, the limit set for it: they go on as it fills again (one every ${every} min; Settings of the room).`, tone: 'warn' })) this.#file.set(list); }
+                    try { this.#note(me.ref, `In the room ${room.name}, your message to ${ai.name} was not passed on: this room allows ${limit} hand-overs between its AIs an hour, all used. One more every ${every} min; the person can change it in the room's settings.`); } catch { /* its chat may be off */ }
+                    this.#tellConversations(this.#all());
+                    return false;
+                }
+                kept.tokens -= 1;
+                this.#tellConversations(this.#all());
+            }
             this.#think(room.id, ai.id, true);
             void (async () => {
                 const copies = paths.length ? await this.#carried(me, ai, paths) : [];
@@ -441,11 +468,18 @@ export class Rooms {
         const shown = list.map((r) => ({ ...r, members: this.#shown(r) }));
         for (const c of this.#conversations()) {
             const mine = shown.filter((r) => r.members.some((m) => m.kind === 'ai' && m.ref === c.name))
-                .map((r) => ({ id: r.id, name: r.name, members: r.members.map((m) => ({ id: m.id, name: m.name, kind: m.kind, look: m.look })) }));
+                .map((r) => ({ id: r.id, name: r.name, members: r.members.map((m) => ({ id: m.id, name: m.name, kind: m.kind, look: m.look })), handovers: this.#handovers(r) }));
             try { this.#rooms(c.name, mine); } catch { /* its folder is not there yet */ }
         }
     }
     refresh() { this.#tellConversations(this.#all()); }
+    /* Where a room is with hand-overs between its AIs: { perHour, left } (perHour 0: no limit). */
+    #handovers(r) {
+        const limit = perHourOf(r); if (!limit) return { perHour: 0 };
+        const kept = this.#hops.get(r.id); if (!kept) return { perHour: limit, left: limit };
+        const now = this.#now().getTime();
+        return { perHour: limit, left: Math.floor(Math.min(limit, kept.tokens + ((now - kept.at) * limit) / HOPS_WINDOW_MS)) };
+    }
     /* The boxes bound to a room (their conversation 'room:<id>') are members of it, by themselves (#281). */
     boxesBound(boxes) {
         const list = this.#all(); let changed = false;

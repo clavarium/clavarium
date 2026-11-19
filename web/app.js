@@ -3724,8 +3724,8 @@
         threadOf = name;
         /* The short-lived secrets live in this conversation now (secret-scan.mjs): the chat shows each as
            stars with its time left and a way to forget it. Kept current on each reload, read on each repaint. */
-        const chatSecrets = {};
-        const refreshSecrets = () => { for (const k of Object.keys(chatSecrets)) delete chatSecrets[k]; for (const s of conversations.find((x) => x.name === name)?.ephemeralSecrets ?? []) chatSecrets[s.name] = { expiresInMs: s.expiresInMs }; };
+        const chatSecrets = {}; const goneSecrets = new Set();
+        const refreshSecrets = () => { for (const k of Object.keys(chatSecrets)) delete chatSecrets[k]; for (const s of conversations.find((x) => x.name === name)?.ephemeralSecrets ?? []) chatSecrets[s.name] = { expiresInMs: s.expiresInMs }; for (const k of goneSecrets) chatSecrets[k] = { gone: true }; };
         refreshSecrets();
         /* The lines of its machine seen so far: what changed comes alone, and their buttons are worked out on all of them. */
         const lines = new Map();
@@ -3805,7 +3805,8 @@
             diagram: drawDiagram, highlight: colourCode,
             /* Short-lived secrets of this conversation: the stars say their time left and offer to forget them. */
             secrets: chatSecrets,
-            forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { delete chatSecrets[secretName]; if (thread && threadOf === name) void thread.refresh(); }).catch(() => {}),
+            /* Its chip says « deleted » (kept marked gone), or why not -- the error goes back to it (19-11: it said nothing). */
+            forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { goneSecrets.add(secretName); chatSecrets[secretName] = { gone: true }; if (thread && threadOf === name) void thread.refresh(); }),
             remind: (o) => post(talkPath(name, '/remind'), o?.urgent ? { urgent: true } : {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
             voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs,
@@ -7334,6 +7335,19 @@
     }
     $('salon-new-search').addEventListener('input', paintSalonMembers);
     /* Its name: saved at Enter, or on leaving the field (a room's settings); Escape gives it back. */
+    $('salon-limit').addEventListener('change', async () => {
+        const r = salonEditing; if (!r) return;
+        const raw = $('salon-limit').value.trim(); const perHour = raw === '' ? null : Math.round(Number(raw));
+        $('salon-new-error').hidden = true;
+        try {
+            const now = await post(`${API}/rooms/${r.id}`, { perHour });
+            if (salonEditing !== r) return;
+            salonEditing = { ...r, ...now };
+            $('salon-limit').value = salonEditing.perHourSet ? String(salonEditing.perHour) : '';
+            const said = $('salon-new-status'); said.textContent = `✓ ${uiSaid('set-room-saved', 'Saved')}`;
+            clearTimeout(salonSavedTimer); salonSavedTimer = setTimeout(() => { said.textContent = ''; }, 2500);
+        } catch (error) { if (salonEditing !== r) return; $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; $('salon-limit').value = r.perHourSet ? String(r.perHour) : ''; }
+    });
     $('salon-new-name').addEventListener('keydown', (e) => {
         if (!salonEditing) return;
         if (e.key === 'Enter') { e.preventDefault(); $('salon-new-name').blur(); }
@@ -7444,6 +7458,8 @@
         $('salon-new-status').textContent = ''; clearTimeout(salonSavedTimer);
         $('salon-new-remove-card').hidden = !editing; salonRemoveAsk?.close(); salonRemoveAsk = null;
         $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? ''; $('salon-new-search').value = '';
+        /* Its limit of hand-overs between AIs an hour (19-11): a room that is there; empty, the default (60); 0, none. */
+        $('salon-limit-row').hidden = !editing; $('salon-limit').value = editing?.perHourSet ? String(editing.perHour) : '';
         salonTake(editing);
         /* A new room: its name and its AIs open, the rest as the person left it. */
         if (!editing) for (const id of ['salon-ch-general', 'salon-ch-ais']) $(id).open = true;

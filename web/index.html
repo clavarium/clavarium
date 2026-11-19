@@ -757,6 +757,8 @@
             <summary><span class="chapter-title" data-said="set-tab-general">General</span><span class="chapter-about" id="salon-sum-general"></span></summary>
             <div class="chapter-body">
               <div class="set-row"><div class="set-what"><label for="salon-new-name" data-said="set-room-name">Name</label></div><div class="set-control"><input id="salon-new-name" maxlength="60" placeholder="Home" spellcheck="false" autocomplete="off" enterkeyhint="done"></div></div>
+              <!-- Hand-overs between its AIs an hour (rooms.mjs perHour, a bucket): empty, the default (60); 0, no limit. -->
+              <div class="set-row" id="salon-limit-row" hidden><div class="set-what"><label for="salon-limit" data-said="set-room-limit">Hand-overs between its AIs, an hour</label><small class="hint" data-said="set-room-limit-hint">Empty: 60 · 0: no limit</small></div><div class="set-control"><input id="salon-limit" type="number" min="0" max="1000" step="1" inputmode="numeric" placeholder="60"></div></div>
             </div>
           </details>
           <details class="chapter" id="salon-ch-ais" data-chapter="room-ais">

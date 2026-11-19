@@ -110,7 +110,7 @@
  *   POST /api/asset-groups/<id>/remove
  *   GET  /api/rooms                         the rooms (#268): [{id, name, host, members: [{id, kind, name, ref, host?}], unread, last, thinking: [names]}]
  *   POST /api/rooms                         {name, conversations: [names], boxes: [ids], host?}: a new room
- *   POST /api/rooms/<id>                    {name?, host?, add?: {conversations, boxes}, remove?: [member ids]}
+ *   POST /api/rooms/<id>                    {name?, host?, add?: {conversations, boxes}, remove?: [member ids], perHour?: N (0: no limit) or null (the default, 60): hand-overs between its AIs an hour}
  *                                           quiet?: true/false (muted in the list: no dot, at the bottom)
  *   POST /api/rooms/<id>/remove             the room and its thread
  *   POST /api/rooms/<id>/give               {asset, rights, shared?}: the same right given to each AI of it, its own
