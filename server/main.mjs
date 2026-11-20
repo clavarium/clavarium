@@ -592,6 +592,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
            the chat shows as stars; the value reaches the machine as
            /run/secrets/<name>, and is swept after a few minutes. */
         screen: async (conversation, text) => {
+            /* A sign-in code its tool waits for (#394): left whole, screen-watch types it in. */
+            if (signinHelp?.awaitsCode(conversation, text)) return text;
             const hits = scan(text);
             if (!hits.length) return text;
             let out = ''; let last = 0; let any = false;

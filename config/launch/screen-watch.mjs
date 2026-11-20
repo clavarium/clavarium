@@ -31,7 +31,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -138,6 +138,8 @@ if (main) {
             if (CODE.test(code)) {
                 spawnSync('tmux', [...tmux, 'send-keys', '-t', pane, '-l', '--', code], { timeout: 5000 });
                 spawnSync('tmux', [...tmux, 'send-keys', '-t', pane, 'Enter'], { timeout: 5000 });
+                /* Typed: the ask is over, so the next message that looks like a code is a secret again (#394). */
+                try { rmSync(`${chat}/signin-ask.json`, { force: true }); } catch { /* left: it runs out on the server's side */ }
                 awaiting = null; return;
             }
         }
