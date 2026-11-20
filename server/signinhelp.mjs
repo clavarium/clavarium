@@ -40,6 +40,8 @@ export const ROUTE = 'signin-route.json';
 export const CHAT = '.parley';
 export const DOCKET = '.docket';
 export const WAIT_MS = 10 * 60_000;
+/* How long after its tool asked a code pasted by the person is taken as that code (and not as a secret). */
+export const CODE_WAIT_MS = 30 * 60_000;
 export const TICK_MS = 3000;
 export const NONE = 'none';
 const ASK_BYTES = 16_384;
@@ -142,6 +144,18 @@ export class SigninHelp {
         const dir = this.#chat(name);
         if (!this.#own(dir)) return;
         try { writeFileSync(join(dir, `.${ROUTE}.new`), JSON.stringify(route)); renameSync(join(dir, `.${ROUTE}.new`), join(dir, ROUTE)); } catch { /* its chat folder cannot be written: screen-watch tells the person itself */ }
+    }
+    /* A CODE AWAITED FROM THE PERSON (20-11, #394): its tool asked to sign in, the link was told to the person (not
+       handed to a companion), a short while ago. Then a message that is nothing but a code is that code: typed into
+       the tool by screen-watch, never lifted out as a secret (19-11: « code#state » kept as two secrets, the tool
+       never got it). */
+    awaitsCode(name, text) {
+        if (!CODE.test(String(text ?? '').trim())) return false;
+        const ask = this.#readAsk(name); if (!ask) return false;
+        const at = Date.parse(ask.at); if (!Number.isFinite(at) || this.#now() - at > CODE_WAIT_MS || at > this.#now() + 60_000) return false;
+        if (ask.told === true) return true;
+        const route = this.#readRoute(name);
+        return route?.id === ask.id && route.route === 'person';
     }
     #readRoute(name) { try { return JSON.parse(readFileSync(join(this.#chat(name), ROUTE), 'utf8')); } catch { return null; } }
     #line(name, line) { try { this.#event(name, line); } catch { /* its chat may be off */ } }

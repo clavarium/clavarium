@@ -217,3 +217,21 @@ test('the companion clicks Authorize itself only when its owner allowed it', asy
     assert.doesNotMatch(e.text, /Click Authorize in your browser/);
     assert.equal(b.help.view().clicks, true);
 });
+
+test("a code the person pastes while their tool waits for it is that code, not a secret; else, a secret as before (20-11, #394)", async (t) => {
+    const b = bench(t);
+    assert.equal(b.help.awaitsCode('alpha', CODE), false, 'no ask: nothing awaited');
+    b.ask('alpha', { told: true });
+    assert.equal(b.help.awaitsCode('alpha', CODE), true, 'told to the person: the code awaited');
+    assert.equal(b.help.awaitsCode('alpha', `${CODE} and more words`), false, 'a message with more than a code');
+    assert.equal(b.help.awaitsCode('beta', CODE), false, 'another conversation');
+    b.world.now += 31 * 60_000;
+    assert.equal(b.help.awaitsCode('alpha', CODE), false, 'asked too long ago');
+    /* Routed to the person by the server (no companion): awaited too; handed to a companion: not the person's. */
+    b.ask('alpha'); await b.help.tick();
+    assert.equal(b.route('alpha').route, 'person');
+    assert.equal(b.help.awaitsCode('alpha', CODE), true);
+    b.help.setGeneral('beta'); b.ask('alpha'); await b.help.tick();
+    assert.equal(b.route('alpha').route, 'companion');
+    assert.equal(b.help.awaitsCode('alpha', CODE), false);
+});
