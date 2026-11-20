@@ -143,6 +143,14 @@ export class Mailboxes {
         return { host: m.host, port: m.port ?? 993, user: m.user, password: this.#vault.open(m.sealed) };
     }
 
+    /* WHAT A SIGN-IN MAILBOX READS when it is one of these (20-11, #395): server side only, never to the page;
+       a classic one or one signed in with Google or Microsoft alike. */
+    readSettings(name) {
+        const m = this.#store.get(name);
+        if (!m) throw new Refusal(404, 'No such mailbox.');
+        return { host: m.host, port: m.port ?? 993, user: m.user, ...(m.provider ? { provider: m.provider } : {}), password: this.#vault.open(m.sealed) };
+    }
+
     /* Adds a mailbox after proving it can be read, as a folder of that name. */
     async add(body) {
         const name = String(body?.name ?? '');

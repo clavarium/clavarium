@@ -425,7 +425,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     secrets.expired = (name, users) => { events.add({ kind: 'asset', text: `Secret ${name} expired: no longer given${users.length ? ` to ${users.join(', ')}` : ''}` }); };
     secrets.check();
     const expiryTimer = setInterval(() => secrets.check(), 10 * 60_000); expiryTimer.unref();
-    const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
+    const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name), mailboxes: () => { try { return mailboxes; } catch { return null; } } });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
     const network = new Network({ host: asHost, offline: () => all.offline() });

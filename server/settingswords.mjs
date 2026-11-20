@@ -197,6 +197,7 @@ export const SETTINGS_WORDS_FR = {
     'set-carry-replace': 'Son travail a des fichiers. Tout remplacer ?', 'set-carry-replace-go': 'Remplacer son travail',
     'set-carry-tolink': 'À relier à la main :', 'set-carry-import': 'Importer…', 'set-carry-reminders': 'Importer aussi ses rappels et réveils', 'set-carry-go': 'Importer',
     'set-carry-ask': '« {file} » dans « {name} » ? Mémoire remplacée.', 'set-carry-done': 'Importé depuis « {from} ».',
+    'signin-typed': 'Une autre, saisie ici',
     'set-mcp-drop': 'Collez ici la configuration du service', 'set-mcp-drop-hint': 'le bloc { "mcpServers": … } de sa page d\'aide',
     'set-mcp-hand': 'Remplir à la main', 'set-mcp-add-n': 'Ajouter les {n}', 'set-mcp-nokey': 'aucune',
     'set-mcp-notjson': 'Pas du JSON : collez tout le bloc.',
