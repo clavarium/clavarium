@@ -276,6 +276,7 @@
             <p class="hint">Its sign-in links, beside the terminal</p><p class="hint tip" hidden>A mailbox for this tool's account, read only; its password never enters the machine.</p>
             <p id="signin-state" class="hint"></p>
             <form id="signin-form" autocomplete="off">
+              <div class="row" id="signin-box-row"><select id="signin-box" aria-label="Which mailbox"></select></div>
               <div class="row"><input id="signin-host" placeholder="imap.example.com" aria-label="Mail server" spellcheck="false" autocapitalize="none">
                 <input id="signin-user" placeholder="user" aria-label="Mailbox user" spellcheck="false" autocapitalize="none">
                 <input id="signin-password" type="password" placeholder="password" aria-label="Mailbox password" autocomplete="new-password">

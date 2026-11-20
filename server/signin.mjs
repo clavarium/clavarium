@@ -181,23 +181,40 @@ export async function recentSignIns(settings, rules, { connect = tlsConnect, now
 const CACHE_MS = 5_000;
 
 export class SignInMailboxes {
-    #store; #vault; #rules; #cache = new Map(); #reader;
+    #store; #vault; #rules; #cache = new Map(); #reader; #mailboxes;
 
-    /* `rules(conversation)` gives the tool's sign-in rules, or undefined. */
-    constructor({ store, vault, rules, reader = recentSignIns }) { this.#store = store; this.#vault = vault; this.#rules = rules; this.#reader = reader; }
+    /* `rules(conversation)` gives the tool's sign-in rules, or undefined. `mailboxes()`: the mailboxes of Assets
+       (mailbox.mjs), one of which may be chosen instead of a mailbox typed in here (20-11, #395). */
+    constructor({ store, vault, rules, reader = recentSignIns, mailboxes = () => null }) { this.#store = store; this.#vault = vault; this.#rules = rules; this.#reader = reader; this.#mailboxes = mailboxes; }
 
-    /* What the page may know: that a mailbox is set, and where. Never the password. */
-    settings(conversation) {
-        const s = this.#store.get(conversation);
-        return { available: this.#rules(conversation) !== undefined, configured: s !== undefined, host: s?.host ?? null, port: s?.port ?? null, user: s?.user ?? null };
+    /* Where it reads, whichever way it was set: an asset's own settings, or its own. */
+    #where(s) {
+        if (s?.mailbox) { const boxes = this.#mailboxes(); if (!boxes) throw new Refusal(404, 'No such mailbox.'); return boxes.readSettings(s.mailbox); }
+        return { host: s.host, port: s.port, user: s.user, password: this.#vault.open(s.sealed) };
     }
 
-    /* Saves a mailbox after proving it can be read; an empty host removes it. */
+    /* What the page may know: that a mailbox is set, and where (an asset by its name). Never the password. */
+    settings(conversation) {
+        const s = this.#store.get(conversation);
+        let host = s?.host ?? null; let port = s?.port ?? null; let user = s?.user ?? null;
+        if (s?.mailbox) { const m = (this.#mailboxes()?.list() ?? []).find((x) => x.name === s.mailbox); host = m?.host ?? null; port = m?.port ?? null; user = m?.user ?? null; }
+        const offered = (this.#mailboxes()?.list() ?? []).map((m) => ({ name: m.name, user: m.user }));
+        return { available: this.#rules(conversation) !== undefined, configured: s !== undefined, mailbox: s?.mailbox ?? null, host, port, user, mailboxes: offered };
+    }
+
+    /* Saves a mailbox after proving it can be read: one of Assets by its name, or one typed in; an empty host
+       (and no mailbox) removes it. */
     async set(conversation, body) {
         this.#cache.delete(conversation);
-        if (String(body?.host ?? '').trim() === '') { this.#store.remove(conversation); return this.settings(conversation); }
+        const chosen = String(body?.mailbox ?? '').trim();
+        if (!chosen && String(body?.host ?? '').trim() === '') { this.#store.remove(conversation); return this.settings(conversation); }
         const rules = this.#rules(conversation);
         if (!rules) throw new Refusal(400, 'The tool of this conversation has no sign-in by mail.');
+        if (chosen) {
+            await this.#reader(this.#where({ mailbox: chosen }), rules);
+            this.#store.put({ name: conversation, mailbox: chosen });
+            return this.settings(conversation);
+        }
         const settings = readSettings(body);
         await this.#reader(settings, rules);
         this.#store.put({ name: conversation, host: settings.host, port: settings.port, user: settings.user, sealed: this.#vault.seal(settings.password) });
@@ -212,7 +229,7 @@ export class SignInMailboxes {
         if (!s || !rules) return [];
         const cached = this.#cache.get(conversation);
         if (cached && Date.now() - cached.at < CACHE_MS) return cached.items;
-        const items = await this.#reader({ host: s.host, port: s.port, user: s.user, password: this.#vault.open(s.sealed) }, rules);
+        const items = await this.#reader(this.#where(s), rules);
         this.#cache.set(conversation, { at: Date.now(), items });
         return items;
     }

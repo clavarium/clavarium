@@ -12816,14 +12816,23 @@
     async function paintSignIn() {
         const j = await (await fetch(`${API}/conversations/${encodeURIComponent(current)}/signin`)).json();
         $('signin-setup').hidden = !j.available;
-        $('signin-state').textContent = j.configured ? `Watching ${j.user} on ${j.host}.${j.failure ? ` Not readable just now: ${j.failure}` : ''}` : 'No mailbox is set for this conversation.';
+        $('signin-state').textContent = j.configured ? `Watching ${j.mailbox ? `« ${j.mailbox} » (${j.user ?? '?'})` : `${j.user} on ${j.host}`}.${j.failure ? ` Not readable just now: ${j.failure}` : ''}` : 'No mailbox is set for this conversation.';
         $('signin-remove').hidden = !j.configured;
+        /* One of Assets' mailboxes, or one typed in (20-11, #395). */
+        const box = $('signin-box'); const offered = j.mailboxes ?? [];
+        box.replaceChildren(...offered.map((m) => { const o = document.createElement('option'); o.value = m.name; o.textContent = `${m.name} · ${m.user}`; return o; }));
+        const typed = document.createElement('option'); typed.value = ''; typed.textContent = uiSaid('signin-typed', 'Another, typed in'); box.append(typed);
+        box.value = j.mailbox ?? (j.configured ? '' : (offered[0]?.name ?? ''));
+        $('signin-box-row').hidden = !offered.length;
+        signinTyped();
     }
+    const signinTyped = () => { const typed = !$('signin-box').value; for (const id of ['signin-host', 'signin-user', 'signin-password']) $(id).hidden = !typed; };
+    $('signin-box').addEventListener('change', signinTyped);
     $('signin-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;
         $('signin-state').textContent = 'Reading the mailbox once, to check...';
-        try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, { host: $('signin-host').value, user: $('signin-user').value, password: $('signin-password').value }); $('signin-password').value = ''; }
+        try { const box = $('signin-box').value; await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, box ? { mailbox: box } : { host: $('signin-host').value, user: $('signin-user').value, password: $('signin-password').value }); $('signin-password').value = ''; }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         await paintSignIn(); void watchSignIn();
     });
