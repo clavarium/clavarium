@@ -184,3 +184,15 @@ test('#392 what an MCP server\'s new tools do: ask, read or all passed on; anyth
     await assert.rejects(mcpNewTools({ tethers: tethers({ ok: true }) }, { target: 'nope', mode: 'all' }), (e) => e.status === 404);
     await assert.rejects(mcpNewTools({ tethers: tethers({ ok: false, text: 'there is no mcp-new-tools' }) }, { target: 'crm', mode: 'all' }), (e) => e.status === 501);
 });
+
+test('a pasted block, whatever its tool calls its servers: mcpServers, servers, mcp.servers, mcp (OpenCode), context_servers (Zed), or one by itself (20-11)', async () => {
+    const { serversOf } = await import('../server/mcpx.mjs');
+    const s = { url: 'https://mcp.example.com/mcp' };
+    for (const block of [{ mcpServers: { a: s } }, { servers: { a: s } }, { mcp: { servers: { a: s } } }, { mcp: { a: { type: 'remote', ...s } } }, { context_servers: { a: s } }]) {
+        assert.deepEqual(Object.keys(serversOf(block)), ['a'], JSON.stringify(block));
+    }
+    assert.deepEqual(serversOf({ name: 'one', url: s.url }), { one: { name: 'one', url: s.url } });
+    assert.ok(serversOf({ httpUrl: s.url }).mcp);
+    assert.equal(serversOf({ nothing: 1 }), null);
+    assert.equal(serversOf([s]), null);
+});

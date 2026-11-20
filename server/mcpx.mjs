@@ -68,6 +68,17 @@ export async function mcpAdd({ tethers, secrets }, body = {}) {
     return scrub(shown(r.data), key);
 }
 
+/* Where a pasted block keeps its servers (20-11, the owner: not all say "mcpServers"): "mcpServers" (Claude, Cursor,
+   Windsurf), "servers" (VS Code's mcp.json), "mcp": { "servers" } (VS Code's settings), "mcp" (OpenCode),
+   "context_servers" (Zed), or one server by itself ({ "url": ... }). */
+const OBJ = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
+export function serversOf(j) {
+    if (!OBJ(j)) return null;
+    const one = j.url || j.serverUrl || j.httpUrl;
+    return OBJ(j.mcpServers) ?? OBJ(j.servers) ?? OBJ(OBJ(j.mcp)?.servers) ?? (OBJ(j.mcp) && !OBJ(j.mcp).servers ? j.mcp : null) ?? OBJ(j.context_servers) ?? (one ? { [j.name || 'mcp']: j } : null);
+}
+/* A program to start, whatever its tool calls it (OpenCode: "type": "local", its command a list). */
+const isProgram = (s) => s.command !== undefined || s.args !== undefined || s.type === 'stdio' || s.type === 'local';
 /* IMPORT a pasted { "mcpServers": { name: { url, headers: { Authorization: "Bearer ${NAME}" } } } }: each key a
    reference to a secret of the vault (none written in it), no program to start. -> the targets made. */
 export async function mcpImport({ tethers, secrets }, body = {}) {
@@ -75,13 +86,13 @@ export async function mcpImport({ tethers, secrets }, body = {}) {
     if (typeof config === 'string') {
         try { config = JSON.parse(config); } catch { throw new Refusal(400, 'That is not JSON: paste the whole { "mcpServers": ... } block.'); }
     }
-    const all = config && typeof config === 'object' ? (config.mcpServers ?? config.servers) : null;
+    const all = serversOf(config);
     if (!all || typeof all !== 'object' || Array.isArray(all) || !Object.keys(all).length) throw new Refusal(400, 'Paste a block like { "mcpServers": { "name": { "url": "https://...", "headers": { "Authorization": "Bearer ${SECRET}" } } } }.');
     const servers = {};
     for (const [name, s] of Object.entries(all)) {
         const label = String(name).slice(0, 60);
         if (!s || typeof s !== 'object' || Array.isArray(s)) throw new Refusal(400, `${label}: not a server.`);
-        if (s.command !== undefined || s.args !== undefined || s.type === 'stdio') throw new Refusal(400, `${label}: a program to start (stdio) is not run here. Only a server reached by its address.`);
+        if (isProgram(s)) throw new Refusal(400, `${label}: a program to start (stdio) is not run here. Only a server reached by its address.`);
         const heads = s.headers && typeof s.headers === 'object' && !Array.isArray(s.headers) ? Object.entries(s.headers) : [];
         if (heads.length > 1) throw new Refusal(400, `${label}: one header for the key at most.`);
         for (const [h, v] of heads) {
@@ -91,7 +102,7 @@ export async function mcpImport({ tethers, secrets }, body = {}) {
             if (!REF.test(m[2]) || !known(secrets, m[2])) throw new Refusal(400, `${label}: no secret named ${m[2].slice(0, 60)} here. Add it in Secrets first.`);
         }
         if (s.env && typeof s.env === 'object' && Object.keys(s.env).length) throw new Refusal(400, `${label}: "env" is for a program to start. Only a server reached by its address.`);
-        servers[name] = { url: s.url ?? s.serverUrl, ...(heads.length ? { headers: Object.fromEntries(heads) } : {}), ...(s.allowHttp === true ? { allowHttp: true } : {}) };
+        servers[name] = { url: s.url ?? s.serverUrl ?? s.httpUrl, ...(heads.length ? { headers: Object.fromEntries(heads) } : {}), ...(s.allowHttp === true ? { allowHttp: true } : {}) };
     }
     const r = await tethers.act('mcp-import', { config: { mcpServers: servers } }, '');
     if (!r.ok) throw new Refusal(400, r.text);

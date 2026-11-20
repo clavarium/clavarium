@@ -10905,15 +10905,27 @@
        naming its keys as secrets (${NAME}) is imported as it is; a program to start (stdio) is not run here. */
     const mcpWord = (k, en, v) => uiSaid(k, en, v);
     const mcpMask = (k) => (k.length <= 8 ? '••••' : `${k.slice(0, 4)}••••${k.slice(-3)}`);
+    /* Where a pasted block keeps its servers (20-11, the owner: not all say "mcpServers"): "mcpServers" (Claude, Cursor,
+       Windsurf), "servers" (VS Code's mcp.json), "mcp": { "servers" } (VS Code's settings), "mcp" (OpenCode),
+       "context_servers" (Zed), or one server by itself ({ "url": ... }). */
+    const OBJ = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
+    function serversOf(j) {
+        if (!OBJ(j)) return null;
+        const one = j.url || j.serverUrl || j.httpUrl;
+        return OBJ(j.mcpServers) ?? OBJ(j.servers) ?? OBJ(OBJ(j.mcp)?.servers) ?? (OBJ(j.mcp) && !OBJ(j.mcp).servers ? j.mcp : null) ?? OBJ(j.context_servers) ?? (one ? { [j.name || 'mcp']: j } : null);
+    }
+    /* A program to start, whatever its tool calls it (OpenCode: "type": "local", its command a list). */
+    const isProgram = (s) => s.command !== undefined || s.args !== undefined || s.type === 'stdio' || s.type === 'local';
+
     function mcpRead(text) {
         let j;
         try { j = JSON.parse(text); } catch { return { error: mcpWord('set-mcp-notjson', 'Not JSON: paste the whole block.') }; }
-        const all = j && typeof j === 'object' ? (j.mcpServers ?? j.servers ?? (j.url || j.serverUrl ? { [j.name || 'mcp']: j } : null)) : null;
+        const all = serversOf(j);
         if (!all || typeof all !== 'object' || Array.isArray(all) || !Object.keys(all).length) return { error: mcpWord('set-mcp-noserver', 'No server in this block.') };
         const servers = []; let refs = false;
         for (const [name, s] of Object.entries(all)) {
             if (!s || typeof s !== 'object') return { error: mcpWord('set-mcp-noserver', 'No server in this block.') };
-            if (s.command !== undefined || s.args !== undefined || s.type === 'stdio') return { error: mcpWord('set-mcp-program', '« {name} »: a program to start, refused here.', { name }) };
+            if (isProgram(s)) return { error: mcpWord('set-mcp-program', '« {name} »: a program to start, refused here.', { name }) };
             const heads = s.headers && typeof s.headers === 'object' ? Object.entries(s.headers) : [];
             if (heads.length > 1) return { error: mcpWord('set-mcp-heads', '« {name} »: one header for its key at most.', { name }) };
             let key = '', header = '';
@@ -10924,7 +10936,7 @@
                 if (h.toLowerCase() === 'authorization') { if (!bearer) return { error: mcpWord('set-mcp-basic', '« {name} »: not a « Bearer » key, fill in by hand.', { name }) }; key = bearer[1].trim(); }
                 else { key = value; header = h; }
             }
-            servers.push({ name: String(name).slice(0, 120), url: String(s.url ?? s.serverUrl ?? ''), key, header });
+            servers.push({ name: String(name).slice(0, 120), url: String(s.url ?? s.serverUrl ?? s.httpUrl ?? ''), key, header });
         }
         return { servers, refs };
     }
