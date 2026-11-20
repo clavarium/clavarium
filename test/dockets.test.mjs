@@ -162,3 +162,22 @@ test('a copy takes the reminders still to come: repeating or due later; not one 
     assert.equal(readFileSync(join(to, '.docket', 'zone'), 'utf8'), 'Europe/Paris');
     assert.equal(copyPlans(join(dir, 'none'), to, now), 0, 'none: nothing');
 });
+
+test('a frozen tool: one « not handled » line, the next ones counted; once handled, one line says how many (20-11)', async (t) => {
+    const b = bench(t);
+    const first = b.dockets.post('worker', { kind: 'arrival', text: 'First', data: { wakeup: 'w1' } });
+    for (let i = 0; i <= TOLD_MAX; i++) { await b.dockets.tick(); b.later(AGAIN_MS); }
+    await b.dockets.tick();
+    for (const text of ['Second', 'Third']) {
+        b.dockets.post('worker', { kind: 'arrival', text, data: { wakeup: text } });
+        for (let i = 0; i <= TOLD_MAX; i++) { await b.dockets.tick(); b.later(AGAIN_MS); }
+        await b.dockets.tick();
+    }
+    const unhandled = () => b.lines.filter((l) => l[1] === 'docket-unhandled').map((l) => l[2]);
+    assert.deepEqual(unhandled(), [`Not handled, told ${TOLD_MAX} times: First`], 'the others only counted');
+    b.tool('done', first.id.slice(0, 8));
+    await b.dockets.tick();
+    assert.deepEqual(unhandled().slice(1), ['And 2 more not handled meanwhile.']);
+    await b.dockets.tick();
+    assert.equal(unhandled().length, 2, 'said once');
+});

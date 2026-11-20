@@ -175,14 +175,22 @@ export class Dockets {
                 if (due.length && (fresh.length || this.#idle(name))) {
                     if (await this.#say(name, WAKE).catch(() => false)) for (const e of due) told[e.id] = { count: (told[e.id]?.count ?? 0) + 1, at: now };
                 }
+                /* One line per stall (20-11, the owner: a night frozen, 58 lines, one an hour): while one said
+                   is still unhandled, the next ones are only counted; once none is left, one line says how many. */
+                let grouped = record.grouped ?? 0;
                 for (const e of waiting) {
                     const t = told[e.id];
                     if (t && t.count >= TOLD_MAX && !t.said && now - t.at >= AGAIN_MS) {
+                        if (waiting.some((o) => told[o.id]?.said === true)) { t.said = 'grouped'; grouped += 1; continue; }
                         this.#line(name, { kind: 'docket-unhandled', text: `Not handled, told ${t.count} times: ${e.text}`, tone: 'warn', topic: 'Not handled' });
                         t.said = true;
                     }
                 }
-                if (JSON.stringify(told) !== JSON.stringify(record.told ?? {})) this.#store.put({ ...record, told });
+                if (grouped && !waiting.some((o) => told[o.id]?.said === true)) {
+                    this.#line(name, { kind: 'docket-unhandled', text: `And ${grouped} more not handled meanwhile.`, tone: 'warn', topic: 'Not handled' });
+                    grouped = 0;
+                }
+                if (JSON.stringify(told) !== JSON.stringify(record.told ?? {}) || grouped !== (record.grouped ?? 0)) this.#store.put({ ...record, told, grouped });
             }
         } finally { this.#busy = false; }
     }
