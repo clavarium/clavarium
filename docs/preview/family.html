@@ -8,6 +8,7 @@
 <meta name="description" content="Marcel, 82, talks to a small voice box in his living room. It answers in short spoken sentences. Runs on your own server.">
 <link rel="stylesheet" href="style.css">
 <script src="site.js" defer></script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Does it listen all the time?", "acceptedAnswer": {"@type": "Answer", "text": "It waits for its word or a press. It keeps no sound."}}, {"@type": "Question", "name": "Does Marcel need a phone?", "acceptedAnswer": {"@type": "Answer", "text": "No. He only talks. The family sets it up."}}, {"@type": "Question", "name": "What is the box?", "acceptedAnswer": {"@type": "Answer", "text": "A small audio board (ESP32-S3) with open-source firmware, MIT."}}]}</script>
 </head>
 <body>
 <div class="wrap">
@@ -26,6 +27,7 @@
 
     <section>
       <div class="ph tall"><span>Image to come: the voice box on Marcel's shelf</span></div>
+      <picture><source media="(prefers-color-scheme: dark)" srcset="shots/chat-family-tel-dark.png"><img class="chat tel" src="shots/chat-family-tel-light.png" alt="Marcel asks the box what is on today; the assistant answers and reminds him" loading="lazy"></picture>
       <div class="flow" aria-label="How a question travels">
         <span class="u">Marcel speaks</span><i>→</i>
         <span class="f">Voice box</span><i>→</i>
