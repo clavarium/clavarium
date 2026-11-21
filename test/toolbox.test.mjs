@@ -10,6 +10,7 @@ import { Toolbox, parleySource, toolSources, integrityOf, TOOLS_PATH } from '../
 import { packageFile, locked, MACHINE_TOOLS } from '../server/parley.mjs';
 import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
+import { NODE_STEPS } from '../server/tools.mjs';
 
 function bench(t, { make = 0, mount = { code: 0 }, sources } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-tools-'));
@@ -76,7 +77,9 @@ test('the folder is made by the host program, then filled: each archive, and an 
     await b.box.prepare();
     assert.deepEqual(readdirSync(files).sort(), [...index.tools.map((x) => x.file), 'index.json', 'launch'].sort());
     /* The launchers, as they are in config/launch of this code. */
-    assert.deepEqual(readdirSync(join(files, 'launch')).sort(), readdirSync(new URL('../config/launch', import.meta.url)).sort());
+    /* ...and beside them the tools' sign-in screen rules (15-11, #362): none given here, an empty map. */
+    assert.deepEqual(readdirSync(join(files, 'launch')).sort(), [...readdirSync(new URL('../config/launch', import.meta.url)), 'screen-rules.json'].sort());
+    assert.deepEqual(JSON.parse(readFileSync(join(files, 'launch', 'screen-rules.json'), 'utf8')), {});
     /* The host program refuses: said, and nothing is offered. */
     const refused = bench(t, { make: 78 });
     await assert.rejects(refused.box.prepare(), /could not be made: REFUSED: the tools folder is not what it should be/);
@@ -112,12 +115,18 @@ test('shown in each machine with its other folders, looked at by the health chec
 
 /* A machine, as far as installing its tools goes: what `parley --version` and
    `docket --version` say, whether npm is there, what sha256sum reads in /tools. */
-function machine(b, { versions = {}, npm = true, sum, npmFails = false } = {}) {
+function machine(b, { versions = {}, npm = true, sum, npmFails = false, nodeFails = false } = {}) {
     const m = { versions: { ...versions }, calls: [] };
     const of = (path) => b.box.list().find((x) => path.endsWith(`/${x.file}`));
     b.vms.exec = async (name, argv) => {
         m.calls.push(argv.join(' '));
-        if (['parley', 'docket', 'binder'].includes(argv[0])) return m.versions[argv[0]] ? { code: 0, stdout: `${m.versions[argv[0]]}\n`, stderr: '' } : { code: 127, stdout: '', stderr: `${argv[0]}: not found` };
+        /* The steps that install node (tools.mjs NODE_STEPS): npm is there once it is unpacked. */
+        if (argv[0] === 'sudo' && !argv.includes('npm')) {
+            if (nodeFails && argv.some((a) => a.includes('nodejs.org'))) return { code: 22, stdout: '', stderr: 'curl: (6) Could not resolve host: nodejs.org' };
+            if (argv.includes('tar')) npm = true;
+            return { code: 0, stdout: '', stderr: '' };
+        }
+        if (['parley', 'docket', 'binder', 'tether'].includes(argv[0])) return m.versions[argv[0]] ? { code: 0, stdout: `${m.versions[argv[0]]}\n`, stderr: '' } : { code: 127, stdout: '', stderr: `${argv[0]}: not found` };
         if (argv[0] === 'which') return { code: npm ? 0 : 1, stdout: npm ? '/usr/local/bin/npm\n' : '', stderr: '' };
         if (argv[0] === 'sha256sum') return { code: 0, stdout: `${sum ?? of(argv.at(-1)).sha256}  ${argv.at(-1)}\n`, stderr: '' };
         if (argv.includes('npm')) {
@@ -135,7 +144,7 @@ test('Parley and Docket are installed by the server, in every machine: each sha2
     await b.box.prepare();
     const m = machine(b);
     assert.equal(await b.box.installIn('helper'), '');
-    assert.deepEqual(m.calls, ['parley', 'docket', 'binder'].flatMap((name) => { const tool = b.box.find(name); return [`${name} --version`, 'which npm', `sha256sum -- ${tool.path}`, `sudo -n npm install -g --offline --no-audit --no-fund ${tool.path}`, `${name} --version`]; }));
+    assert.deepEqual(m.calls, ['parley', 'docket', 'binder', 'tether'].flatMap((name) => { const tool = b.box.find(name); return [`${name} --version`, 'which npm', `sha256sum -- ${tool.path}`, `sudo -n npm install -g --offline --no-audit --no-fund ${tool.path}`, `${name} --version`]; }));
     /* Known there: an opening asks nothing of the machine. */
     m.calls.length = 0;
     assert.equal(await b.box.installIn('helper'), '');
@@ -147,22 +156,15 @@ test('Parley and Docket are installed by the server, in every machine: each sha2
     /* Already the version of the index (a machine that kept its disk): looked at, not installed again. */
     b.box.forget('helper'); m.calls.length = 0;
     assert.equal(await b.box.installIn('helper'), '');
-    assert.deepEqual(m.calls, ['parley --version', 'docket --version', 'binder --version']);
+    assert.deepEqual(m.calls, ['parley --version', 'docket --version', 'binder --version', 'tether --version']);
 });
 
-test('a tool is not installed from an archive that is not the one of the index, nor where there is no npm; npm failing is said', async (t) => {
+test('a tool is not installed from an archive that is not the one of the index; npm failing is said', async (t) => {
     const b = bench(t);
     await b.box.prepare();
     const wrong = machine(b, { sum: '0'.repeat(64) });
     assert.match(await b.box.installIn('helper'), /is not the archive of the index \(sha256 differs\): not installed/);
     assert.equal(wrong.calls.some((c) => c.includes('npm install')), false, 'never installed');
-    const none = machine(b, { npm: false });
-    assert.equal(await b.box.installIn('helper'), 'there is no npm in this machine');
-    assert.equal(none.calls.some((c) => c.includes('sha256sum')), false);
-    /* Not asked again at each opening; looked at again once its machine was built again or restarted. */
-    none.calls.length = 0;
-    assert.equal(await b.box.installIn('helper'), 'there is no npm in this machine');
-    assert.deepEqual(none.calls, []);
     b.box.forget('helper');
     machine(b, { npmFails: true });
     assert.equal(await b.box.installIn('helper'), 'npm: npm ERR! code ENOTCACHED');
@@ -220,4 +222,23 @@ test('what its tool was started with: a tool started with older launchers is tol
     box = make();
     await box.prepare();
     assert.deepEqual([box.stale('fresh'), box.stale('old')], [false, false]);
+});
+
+test('a machine without npm (a Shell, a tool whose recipe has no node) is given node first, then its tools; node failing is said and tried again', async (t) => {
+    const b = bench(t);
+    await b.box.prepare();
+    const shell = machine(b, { npm: false });
+    assert.equal(await b.box.installIn('helper'), '');
+    const node = NODE_STEPS.map((s) => s.argv.join(' '));
+    assert.deepEqual(shell.calls.slice(0, 2 + node.length + 1), ['parley --version', 'which npm', ...node, 'which npm'], 'node as the "node" step installs it, its checksum checked before it is unpacked');
+    assert.equal(shell.calls.filter((c) => c.includes('nodejs.org')).length, 1, 'once, not for each tool');
+    assert.equal(shell.calls.filter((c) => c.includes('npm install')).length, 4, 'then Parley, Docket, Binder, Tether');
+    b.box.forget('helper');
+    const offline = machine(b, { npm: false, nodeFails: true });
+    assert.match(await b.box.installIn('helper'), /^node could not be installed \(step 3\): curl: \(6\) Could not resolve host/);
+    assert.equal(offline.calls.some((c) => c.includes('npm install')), false);
+    /* Not known as said: tried again at the next opening. */
+    const later = machine(b, { npm: false });
+    assert.equal(await b.box.installIn('helper'), '');
+    assert.ok(later.calls.some((c) => c.includes('nodejs.org')));
 });

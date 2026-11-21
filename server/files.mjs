@@ -13,7 +13,7 @@
  *     saves it, it never opens it as a page of this site.
  */
 import { lstat, readdir, realpath, open, rename, unlink, mkdir, rm } from 'node:fs/promises';
-import { createReadStream, constants } from 'node:fs';
+import { createReadStream, constants, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, sep } from 'node:path';
 import { Refusal } from './conversations.mjs';
@@ -106,6 +106,48 @@ export async function page(root, relative) {
     return file;
 }
 
+/* A MAIL FILE'S PAGE WITH ITS REMOTE PICTURES (05-11): only when the reader asks for them ("Show them").
+ * The page reads the mail itself (web/mail-view.js) and draws it in a frame whose rules are the page's
+ * own: nothing remote can load there. So this answer, the same mail made harmless by the same code,
+ * carries rules of its own -- pictures from anywhere, and still no script, no form, no same-origin
+ * (sandbox), shown only inside this site's window. Read whole: an .eml up to PREVIEW_MAX. */
+export const MAIL_MAX = 25 * 1024 * 1024;
+let mailCode = null;
+const mailReader = () => {
+    if (!mailCode) { const holder = {}; new Function('window', readFileSync(new URL('../web/mail-view.js', import.meta.url), 'utf8'))(holder); mailCode = holder.clavariumMail; }
+    return mailCode;
+};
+export const MAIL_HEADERS = Object.freeze({
+    'content-type': 'text/html; charset=utf-8',
+    'content-security-policy': "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'",
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'cache-control': 'no-store',
+    'cross-origin-resource-policy': 'same-origin',
+});
+export function mailPage(bytes) {
+    const reader = mailReader();
+    const body = reader.pageOf(reader.parse(bytes), { remote: true }).html;
+    return { body, headers: { ...MAIL_HEADERS, 'content-length': Buffer.byteLength(body) } };
+}
+/* A mail's name as a file: its subject, made a plain file name (a mail opened by its reference, downloaded). */
+export function mailName(bytes) {
+    let subject = '';
+    try { subject = mailReader().parse(bytes).subject; } catch { /* no subject read */ }
+    const plain = String(subject ?? '').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return `${plain || 'mail'}.eml`;
+}
+/* The bytes of a mail file of a folder, for mailPage. */
+export async function mailFile(root, relative) {
+    const file = await download(root, relative);
+    file.stream.on('error', () => {});
+    if (!/\.eml$/i.test(file.name)) { file.stream.destroy(); throw new Refusal(400, 'Only a mail file (.eml) is shown as a mail.'); }
+    if (file.size > MAIL_MAX) { file.stream.destroy(); throw new Refusal(413, 'This mail is too large to be shown here. Download it.'); }
+    const chunks = [];
+    for await (const chunk of file.stream) chunks.push(chunk);
+    return new Uint8Array(Buffer.concat(chunks));
+}
+
 /* Writes an imported file under `relative` (a folder). By default it never
    overwrites: a taken name becomes "name (2).ext". Returns the name it was given.
    `exists`: 'keep' (both kept, the default), 'replace' (a FILE of that name
@@ -162,6 +204,8 @@ export async function importFile(root, relative, name, request, { exists = 'keep
  */
 export const EDIT_MAX = 1024 * 1024;
 export const THUMB_MAX = 8 * 1024 * 1024;
+/* A sound played in the thread: a few minutes of speech or music. */
+export const SOUND_MAX = 40 * 1024 * 1024;
 /* One drop of files or of a folder: as a whole, this many bytes and files at most. */
 export const BATCH_MAX = 2 * 1024 * 1024 * 1024;
 export const BATCH_FILES = 2000;
@@ -391,6 +435,11 @@ const SIGNATURES = [
     ['image/jpeg', (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
     ['image/gif', (b) => b.length >= 6 && /^GIF8[79]a$/.test(b.subarray(0, 6).toString('latin1'))],
     ['image/webp', (b) => b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP'],
+    /* Sounds, played in the thread as the pictures are shown (Parley's player): proved by their bytes too. */
+    ['audio/wav', (b) => b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WAVE'],
+    ['audio/mpeg', (b) => b.length >= 3 && (b.subarray(0, 3).toString('latin1') === 'ID3' || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0))],
+    ['audio/ogg', (b) => b.length >= 4 && b.subarray(0, 4).toString('latin1') === 'OggS'],
+    ['audio/mp4', (b) => b.length >= 12 && b.subarray(4, 8).toString('latin1') === 'ftyp'],
 ];
 export const IMAGE_HEADERS = Object.freeze({
     'content-security-policy': "default-src 'none'; sandbox",
@@ -401,15 +450,17 @@ export const IMAGE_HEADERS = Object.freeze({
 });
 export async function picture(root, relative) {
     const at = await regular(root, relative);
-    if (!/\.(png|jpe?g|gif|webp)$/i.test(at.name)) throw new Refusal(415, 'Only a PNG, JPEG, GIF or WebP picture has a thumbnail.');
-    if (at.info.size > THUMB_MAX) throw new Refusal(413, 'This picture is too large for a thumbnail.');
+    const sound = /\.(wav|mp3|ogg|oga|opus|m4a)$/i.test(at.name);
+    if (!sound && !/\.(png|jpe?g|gif|webp)$/i.test(at.name)) throw new Refusal(415, 'Only a PNG, JPEG, GIF or WebP picture, or a WAV, MP3, Ogg or M4A sound, is shown in the thread.');
+    const most = sound ? SOUND_MAX : THUMB_MAX;
+    if (at.info.size > most) throw new Refusal(413, sound ? 'This sound is too large to play here.' : 'This picture is too large for a thumbnail.');
     const handle = await open(at.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
         const info = await handle.stat();
-        if (!info.isFile() || info.size > THUMB_MAX) throw new Refusal(413, 'This picture is too large for a thumbnail.');
+        if (!info.isFile() || info.size > most) throw new Refusal(413, 'This file is too large to show here.');
         const bytes = await readAll(handle, info.size);
-        const type = SIGNATURES.find(([, is]) => is(bytes))?.[0];
-        if (!type) throw new Refusal(415, 'This file is not the picture its name says.');
+        const type = SIGNATURES.find(([kind, is]) => kind.startsWith(sound ? 'audio/' : 'image/') && is(bytes))?.[0];
+        if (!type) throw new Refusal(415, `This file is not the ${sound ? 'sound' : 'picture'} its name says.`);
         return { type, bytes, version: versionOf(info) };
     } finally { await handle.close(); }
 }

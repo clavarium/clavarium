@@ -34,6 +34,12 @@ function bench(t, answers = {}) {
         if (verb === 'clone') states.set(argv[3], 'Stopped');
         if (verb === 'start') states.set(vm, 'Running');
         if (verb === 'stop') states.set(vm, 'Stopped');
+        /* The way down (the host program's vm halt / vm hardstop), its steps said as it goes. */
+        if (verb === 'halt' || verb === 'hardstop') {
+            for (const line of verb === 'halt' ? ['step polite start', 'step polite ok 2s', 'step force skip 0s gone'] : ['step term start', 'step term ok 1s', 'step kill skip 0s gone']) options?.onLine?.(line);
+            states.set(vm, 'Stopped');
+            for (const line of ['step check start', 'step check ok 0s freed 1.0G']) options?.onLine?.(line);
+        }
         if (verb === 'suspend') states.set(vm, 'Suspended');
         if (verb === 'delete') states.delete(vm);
         if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...states].map(([name, state]) => ({ name, state })) }), stderr: '' };
@@ -60,6 +66,18 @@ test('creating a conversation launches its own VM, makes the work folder, instal
     ]);
     assert.equal(all.list()[0].phase, 'ready');
     assert.equal(all.list()[0].toolLabel, 'Tool');
+});
+
+test('a machine is created with the chosen disk and cores: launched with them, and they are kept', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool', diskGb: 16 });
+    await all.built;
+    assert.ok(b.calls.includes('launch clv-demo 1024 16 1'), `the disk and cores go to the launch: ${b.calls.join(' | ')}`);
+    const c = all.list()[0];
+    assert.equal(c.diskGb, 16); assert.equal(c.cpus, 1);
+    /* Out of bounds is refused before any VM exists (cores are capped at what this host has). */
+    for (const bad of [{ name: 'x', tool: 'tool', diskGb: 4 }, { name: 'x', tool: 'tool', diskGb: 999 }, { name: 'x', tool: 'tool', cpus: 0 }, { name: 'x', tool: 'tool', cpus: 9999 }]) assert.throws(() => all.create(bad), Refusal);
 });
 
 test('a bad name, an unknown tool, too little memory and a name already taken are refused before any VM exists', async (t) => {
@@ -120,6 +138,27 @@ test('the tool has exited: the machine stops after the delay, unless someone cam
     await all.open('demo');
     await new Promise((r) => setTimeout(r, 80));
     assert.equal(b.states.get('clv-demo'), 'Running', 'reopening cancels the stop');
+});
+
+test('the tool ended for lack of memory: why is kept on the conversation and told, before its machine stops', async (t) => {
+    const report = 'oom [Fri Oct 30 06:50:01 2026] Out of memory: Killed process 4242 (opencode) total-vm:9000kB\nmemory 1961\nlogfile ~/.local/share/opencode/log/x.log\nlog ERROR boom\n';
+    const gone = { exec: (argv) => (argv.includes('has-session') ? { code: 1, stdout: '', stderr: 'no session' } : argv.includes('bash') && argv.includes('report') ? { code: 0, stdout: report, stderr: '' } : undefined) };
+    const b = bench(t, gone);
+    const all = b.make({ stopDelayMs: 30 });
+    const told = [];
+    all.onToolExit = (name, r) => told.push([name, r]);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await all.open('demo'); all.left('demo');
+    await all.ended('demo');
+    const kept = all.list().find((c) => c.name === 'demo').lastExit;
+    assert.deepEqual(kept.oom, ['[Fri Oct 30 06:50:01 2026] Out of memory: Killed process 4242 (opencode) total-vm:9000kB']);
+    assert.equal(kept.memoryMb, 1961);
+    assert.deepEqual(kept.log, ['ERROR boom']);
+    assert.equal(told.length, 1);
+    assert.equal(told[0][0], 'demo');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(b.states.get('clv-demo'), 'Stopped', 'and its machine stops as before');
 });
 
 test('a link that merely broke stops nothing: the session is still there, the tool keeps working', async (t) => {
@@ -553,6 +592,25 @@ test('a terminal that does not come is repaired: its channel closed, its tmux ke
     await assert.rejects(all.repairTerminal('nobody'), /No such conversation/);
 });
 
+test('a tool that asks to be restarted: only its tool, its machine never stopped; a machine that does not run is left as it is', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    const dropped = []; const readied = [];
+    all.drop = (name) => dropped.push(name);
+    all.ready = (name) => readied.push(name);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    readied.length = 0; b.calls.length = 0;
+    assert.equal(await all.restartTool('demo'), true);
+    assert.ok(b.calls.includes('exec clv-demo -- tmux -L clavarium kill-server'), 'its tmux ended');
+    assert.equal(b.calls.some((c) => /^(stop|start|kill) /.test(c)), false, 'its machine not stopped nor started');
+    assert.deepEqual(dropped, ['demo']); assert.deepEqual(readied, ['demo'], 'the tool started again');
+    b.states.set(vmName('demo'), 'Stopped'); b.calls.length = 0;
+    assert.equal(await all.restartTool('demo'), false);
+    assert.equal(b.calls.some((c) => c.includes('kill-server') || c.startsWith('start ')), false);
+    await assert.rejects(all.restartTool('nobody'), /No such conversation/);
+});
+
 test('a restart, a new size or a machine built again is told, in words for its chat, with whether the tool runs again', async (t) => {
     const b = bench(t);
     const all = b.make();
@@ -620,7 +678,7 @@ test('the server\'s reserve is asked before a machine is created, started, woken
 function stepping(t) {
     let b;
     const slow = (to, during) => (argv) => { b.states.set(argv[2], during); return new Promise((r) => { setTimeout(() => { b.states.set(argv[2], to); r({ code: 0, stdout: '', stderr: '' }); }, 60); }); };
-    b = bench(t, { stop: slow('Stopped', 'Stopping'), start: slow('Running', 'Starting'),
+    b = bench(t, { halt: slow('Stopped', 'Stopping'), start: slow('Running', 'Starting'),
         exec: (argv) => (argv.includes('has-session') && b.noSession ? { code: 1, stdout: '', stderr: 'no session' } : argv.slice(-3).join(' ') === 'test -d /' && b.silent ? { code: 255, stdout: '', stderr: 'ssh: connect' } : undefined) });
     const all = b.make({ pollMs: 10 });
     /* Each step as the page would see it: its name, and where it is. */
@@ -779,6 +837,23 @@ test('a free name: the identifier drawn from it at creation and fixed; the name 
     assert.throws(() => all.setHidden('demo', 'yes'), /true/);
 });
 
+test('the binder beside its chat: automatic by default, one chosen by id, or none; kept on the conversation for every device (#48)', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'bold' });
+    await all.built;
+    assert.equal(all.list()[0].tasksBinder, undefined, 'nothing chosen: the automatic choice');
+    all.setTasksBinder('demo', 'lots-2');
+    assert.equal(all.list()[0].tasksBinder, 'lots-2', 'a binder, by its id, seen in the list every page reads');
+    all.setTasksBinder('demo', '-');
+    assert.equal(all.get('demo').tasksBinder, '-', 'none');
+    all.setTasksBinder('demo', '');
+    assert.equal(all.get('demo').tasksBinder, undefined, 'back to automatic');
+    assert.throws(() => all.setTasksBinder('demo', 'Lots 2'), /binder's id/);
+    assert.throws(() => all.setTasksBinder('demo', 7), /binder's id/);
+    assert.throws(() => all.setTasksBinder('nobody', ''), /No such conversation/);
+});
+
 test('its name in the chat, and whether what is dictated into its terminal is marked: the neutral word and the mark by default, never a mark for a tool that is no AI', async (t) => {
     const b = bench(t);
     const all = b.make();
@@ -812,4 +887,47 @@ test('a resume that finds no session of its own ("No conversation found") starts
     assert.equal(quit.stdout, 'resumed\n'); assert.equal(quit.status, 0);
     /* No bare ";" for tmux to take as its own. */
     assert.ok(!resumeOrFresh(['a'], ['b']).includes(';'));
+});
+
+test('deleted for good: its machine and its work erased, nothing put aside (01-11)', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'gone', tool: 'tool' });
+    await all.built;
+    b.calls.length = 0;
+    await all.erase('gone');
+    assert.ok(b.calls.includes('delete clv-gone'), b.calls.join(' | '));
+    assert.equal(b.calls.at(-1), 'work erase gone');
+    assert.ok(!b.calls.some((c) => c.startsWith('work aside')));
+    assert.equal(all.list().length, 0);
+    await assert.rejects(all.erase('gone'), { status: 404 });
+});
+
+test('reset: a working machine too is deleted with its work, and built anew; refused without reset (01-11)', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'fresh', tool: 'tool' });
+    await all.built;
+    await assert.rejects(all.rebuild('fresh'), { status: 409 });
+    b.calls.length = 0;
+    await all.rebuild('fresh', { reset: true });
+    await all.built;
+    const erased = b.calls.indexOf('work erase fresh');
+    assert.ok(b.calls.indexOf('delete clv-fresh') >= 0 && erased > b.calls.indexOf('delete clv-fresh'), b.calls.join(' | '));
+    assert.ok(b.calls.indexOf('work make fresh') > erased, 'its work made anew, empty');
+    assert.equal(all.list()[0].phase, 'ready');
+});
+
+test('a machine put to sleep and woken by an opening: who woke it is said once; an opening of one awake says nothing (16-11)', async (t) => {
+    const { all } = stepping(t);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    const woken = []; all.woken = (name, by, was) => woken.push(`${name} ${by} ${was}`);
+    await all.sleep('demo');
+    assert.equal(all.get('demo').asleep, true);
+    await all.open('demo', () => {}, 'a page'); all.attached('demo'); all.left('demo');
+    assert.deepEqual(woken, ['demo a page asleep']);
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    assert.equal(woken.length, 1);
 });

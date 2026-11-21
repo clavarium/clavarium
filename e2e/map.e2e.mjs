@@ -73,7 +73,7 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await me.until('brand is written by client-b', async () => (await brandOf()) === 'write');
     await page.locator('.lk-pop .lk-rm').click();
     /* Asked in words, then two short buttons. */
-    assert.equal(await page.locator('.lk-pop .lk-ask').innerText(), 'Detach brand from client-b?');
+    assert.equal(await page.locator('.lk-pop .lk-ask').innerText(), 'Take brand from client-b? It stays in Assets.');
     await page.locator('.lk-pop button', { hasText: /^Remove$/ }).click();
     await me.until('brand is detached from client-b', async () => (await brandOf()) === undefined);
     /* Zoomed in, a link is still drawn from the dot of a box to another. */
@@ -94,8 +94,8 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     assert.equal(await page.locator('#flows-of').inputValue(), 'conversation:client-a');
     assert.match(await page.locator('#flows-trace .lk-steps').evaluate((e) => e.textContent), /client-a writes in site-a/);
     /* Exported, from Settings: the configuration, never a value. */
-    await page.locator('#nav-settings').click();
-    await page.locator('#settings-ch-backup > summary').click();
+    await me.nav('settings');
+    await me.chapter('s-backup');
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#flows-export').click()]);
     const text = readFileSync(await download.path(), 'utf8');
     assert.ok(text.includes('"id": "secret:DEPLOY_A"') && !text.includes('not-a-real-value'));

@@ -15,37 +15,65 @@
  * events here (tick), and told the same way. Its owner sees them in the
  * conversation's settings, and may take one back.
  *
+ * AN API KEY (apikeys.mjs) given the conversation to talk may set it one too,
+ * as the tool does (remind): its chat says which key set it.
+ *
  * ITS CHAT SAYS what was handled, what failed (and why: the owner is alerted)
  * and what was never handled; a reminder the tool set is a trace.
  *
  * The folder is the work folder's .docket, beside .parley: the tool writes
  * there, so nothing in it is trusted (the library bounds and cleans it).
  */
-import { mkdirSync, lstatSync } from 'node:fs';
+import { mkdirSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Docket, WAKE } from 'clavarium-docket/host';
+import { verbs } from 'clavarium-docket/server';
 
 export { WAKE };
 export const FOLDER = '.docket';
+
+/* A COPY'S REMINDERS (15-11, asked when it is copied): the reminders its original's tool set (plans.jsonl in its
+   docket folder), those still to come -- a repeating one, or one due later -- written in the copy's; one taken
+   back, or past, is not. Its events and their answers stay the original's. -> how many. */
+export function copyPlans(fromWork, toWork, now = Date.now()) {
+    const lines = (file) => { try { return readFileSync(join(fromWork, FOLDER, file), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
+    const off = new Set(lines('plans-off.jsonl').map((o) => o.plan));
+    const kept = lines('plans.jsonl').filter((p) => p.kind === 'plan' && !off.has(p.id) && (p.cron || (p.due && Date.parse(p.due) > now)));
+    if (!kept.length) return 0;
+    mkdirSync(join(toWork, FOLDER), { recursive: true });
+    let zone = null; try { zone = readFileSync(join(fromWork, FOLDER, 'zone'), 'utf8'); } catch { /* none */ }
+    if (zone !== null) writeFileSync(join(toWork, FOLDER, 'zone'), zone);
+    writeFileSync(join(toWork, FOLDER, 'plans.jsonl'), kept.map((p) => JSON.stringify(p)).join('\n') + '\n', { flag: 'a' });
+    return kept.length;
+}
 export const TICK_MS = 5000;
 /* An event not acknowledged is told again after this long, the tool idle... */
 export const AGAIN_MS = 30 * 60_000;
 /* ...this many times at most (the first included); then its chat says so. */
 export const TOLD_MAX = 3;
 
+/* AN ANSWER NEVER SHOWN (15-11, #362): the note of a sign-in a companion did for another conversation is
+   the code it read (signinhelp.mjs) -- typed into that tool, never said in a chat nor shown to the owner. */
+const SECRET_KINDS = new Set(['signin-help']);
+const hidden = (event) => SECRET_KINDS.has(event?.kind);
+const HIDDEN = '(not shown)';
 /* One line in the chat: what was handled, cut short; the docket keeps it whole. */
 const cut = (text, max) => { const s = String(text ?? '').replace(/\s+/g, ' ').trim(); return s.length > max ? `${s.slice(0, max - 1)}…` : s; };
 
 export class Dockets {
-    #resources; #store; #say; #event; #alert; #idle; #awake; #chatOn; #now; #every; #zone;
+    #resources; #store; #say; #event; #alert; #idle; #awake; #chatOn; #now; #every; #zone; #acked;
     #listening = new Map(); #zoned = new Set(); #busy = false;
+    /* The reminders a key set: plan id -> its name, for the line its chat shows. */
+    #setBy = new Map();
 
     /* `say(name, line)`: types one line into its terminal (true when typed). `event(name, line)`: a line
        in its chat (Talk.event). `alert({title, body, url})`: the owner's devices. `idle(name)`: not in a
        turn (its pulse). `awake()`: the conversations whose machine runs. `chatOn(name)`. `now()`: ms. */
     /* `zone`: the time zone the tool's times are read in -- this server's, as its wake-ups' (a machine runs in UTC). */
+    /* `acked(name, e)`: told of every answer of its tool, { event, ack } (signinhelp.mjs reads its own kind). */
     constructor({ store, resources, say, event = () => {}, alert = () => {}, idle = () => true, awake = () => [], chatOn = () => false, now = () => Date.now(), listenEveryMs = 2000,
-        zone = Intl.DateTimeFormat().resolvedOptions().timeZone }) {
-        this.#zone = zone; this.#store = store; this.#resources = resources; this.#say = say; this.#event = event; this.#alert = alert; this.#idle = idle; this.#awake = awake; this.#chatOn = chatOn; this.#now = now; this.#every = listenEveryMs;
+        zone = Intl.DateTimeFormat().resolvedOptions().timeZone, acked = () => {} }) {
+        this.#acked = acked; this.#zone = zone; this.#store = store; this.#resources = resources; this.#say = say; this.#event = event; this.#alert = alert; this.#idle = idle; this.#awake = awake; this.#chatOn = chatOn; this.#now = now; this.#every = listenEveryMs;
     }
 
     #dir(name) { return `${this.#resources.workFolder(name)}/${FOLDER}`; }
@@ -83,9 +111,22 @@ export class Dockets {
         return {
             on: true,
             plans: s.plans.filter((p) => !p.off && p.next !== null && !(p.due !== undefined && s.events.some((e) => e.plan === p.id))).map((p) => ({ id: p.id, text: p.text, cron: p.cron ?? null, next: new Date(p.next).toISOString(), tz: p.tz })),
-            events: s.events.slice(-20).reverse().map((e) => ({ id: e.id, at: e.at, from: e.from, kind: e.kind, text: e.text, state: e.state, ...(e.ack ? { note: e.ack.note } : {}), told: told[e.id]?.count ?? 0 })),
+            events: s.events.slice(-20).reverse().map((e) => ({ id: e.id, at: e.at, from: e.from, kind: e.kind, text: e.text, state: e.state, ...(e.ack ? { note: hidden(e) ? HIDDEN : e.ack.note } : {}), told: told[e.id]?.count ?? 0 })),
             waiting: s.waiting,
         };
+    }
+    /* AN API KEY sets a reminder, as the tool would (Docket's own rules: one of `at` or `cron`, ahead, within a year).
+       `by`: its signature ({ name }). Returns the plan: { id, text, cron, next }; throws a RangeError-like Error when not. */
+    remind(name, { at, cron, text }, by = null) {
+        if (!this.on(name)) throw new Error('Its chat is off: it has no docket.');
+        const d = this.#docket(name);
+        const before = new Set(d.read().plans.map((p) => p.id));
+        this.#listen(name);
+        verbs(this.#dir(name), { env: {}, now: this.#now }).remind({ ...(at ? { at } : {}), ...(cron ? { cron } : {}), text });
+        const plan = d.read().plans.find((p) => !before.has(p.id));
+        if (!plan) throw new Error('The reminder was not set.');
+        if (by?.name) this.#setBy.set(plan.id, String(by.name).slice(0, 80));
+        return { id: plan.id, text: plan.text, cron: plan.cron ?? null, next: plan.next === null ? null : new Date(plan.next).toISOString() };
     }
     /* The owner takes back a reminder of the tool. */
     cancel(name, plan) {
@@ -100,12 +141,14 @@ export class Dockets {
 
     /* What the tool did: said in its chat; a failure alerts its owner. */
     #heard(name, e) {
+        if (e.type === 'acked') { try { void Promise.resolve(this.#acked(name, { event: e.event, ack: e.ack })).catch(() => {}); } catch { /* a hook that fails stops nothing */ } }
+        if (e.type === 'acked' && e.ack.kind === 'done' && hidden(e.event)) { this.#line(name, { kind: 'docket-done', text: 'Handled: a sign-in for another conversation.', topic: 'Handled', brief: 'Sign-in' }); return; }
         if (e.type === 'acked' && e.ack.kind === 'done') this.#line(name, { kind: 'docket-done', text: `Handled: ${cut(e.event.text, 80)}${e.ack.note ? ` -- ${cut(e.ack.note, 120)}` : ''}`, topic: 'Handled', brief: e.event.text.slice(0, 60) });
         if (e.type === 'acked' && e.ack.kind === 'failed') {
             this.#line(name, { kind: 'docket-failed', text: `Could not be handled: ${e.event.text} -- ${e.ack.note}`, tone: 'warn', topic: 'Not handled' });
             try { this.#alert({ title: `${name}: could not be handled`, body: `${e.event.text}: ${e.ack.note}`, url: `/?c=${name}` }); } catch { /* as said */ }
         }
-        if (e.type === 'planned') this.#line(name, { kind: 'docket-reminder', text: `Reminder set by the tool: ${e.plan.text} (${e.plan.cron ? `"${e.plan.cron}", next ` : ''}${new Date(e.plan.next ?? e.plan.due).toISOString().slice(0, 16).replace('T', ' ')} UTC)`, topic: 'Reminder' });
+        if (e.type === 'planned') this.#line(name, { kind: 'docket-reminder', text: `Reminder set by ${this.#setBy.has(e.plan.id) ? `API key "${this.#setBy.get(e.plan.id)}"` : 'the tool'}: ${e.plan.text} (${e.plan.cron ? `"${e.plan.cron}", next ` : ''}${new Date(e.plan.next ?? e.plan.due).toISOString().slice(0, 16).replace('T', ' ')} UTC)`, topic: 'Reminder' });
     }
 
     /* Every few seconds: the reminders due posted; what waits told, or told again; what was never handled said. */
@@ -132,14 +175,22 @@ export class Dockets {
                 if (due.length && (fresh.length || this.#idle(name))) {
                     if (await this.#say(name, WAKE).catch(() => false)) for (const e of due) told[e.id] = { count: (told[e.id]?.count ?? 0) + 1, at: now };
                 }
+                /* One line per stall (20-11, the owner: a night frozen, 58 lines, one an hour): while one said
+                   is still unhandled, the next ones are only counted; once none is left, one line says how many. */
+                let grouped = record.grouped ?? 0;
                 for (const e of waiting) {
                     const t = told[e.id];
                     if (t && t.count >= TOLD_MAX && !t.said && now - t.at >= AGAIN_MS) {
+                        if (waiting.some((o) => told[o.id]?.said === true)) { t.said = 'grouped'; grouped += 1; continue; }
                         this.#line(name, { kind: 'docket-unhandled', text: `Not handled, told ${t.count} times: ${e.text}`, tone: 'warn', topic: 'Not handled' });
                         t.said = true;
                     }
                 }
-                if (JSON.stringify(told) !== JSON.stringify(record.told ?? {})) this.#store.put({ ...record, told });
+                if (grouped && !waiting.some((o) => told[o.id]?.said === true)) {
+                    this.#line(name, { kind: 'docket-unhandled', text: `And ${grouped} more not handled meanwhile.`, tone: 'warn', topic: 'Not handled' });
+                    grouped = 0;
+                }
+                if (JSON.stringify(told) !== JSON.stringify(record.told ?? {}) || grouped !== (record.grouped ?? 0)) this.#store.put({ ...record, told, grouped });
             }
         } finally { this.#busy = false; }
     }

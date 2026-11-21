@@ -343,3 +343,95 @@ test('branch names: check-ref-format and ours, and no part that looks like an ob
     assert.equal(branchProblem('a'.repeat(39)), '');
     assert.equal(branchProblem('a'.repeat(41)), '');
 });
+
+test('the branches listed only: the same checks as a read, no pack, no workspace', async (t) => {
+    const b = bench(t);
+    const reads = [];
+    const runner = b.runner({ spawnRead: standInRead(b.folder, { reads }) });
+    await failsWith(runner.tips('site'), 'empty', /No branches/);
+    const one = committed(b.repo, 'a.txt', 'a\n', 'one');
+    git(b.repo, 'checkout', '--quiet', '-b', 'feat/x');
+    const two = committed(b.repo, 'b.txt', 'b\n', 'two');
+    const got = await runner.tips('site');
+    assert.deepEqual(got.branches.sort((x, y) => x.name.localeCompare(y.name)), [{ name: 'feat/x', id: two }, { name: 'main', id: one }]);
+    assert.deepEqual(reads, ['site --tips', 'site --tips']);
+    assert.deepEqual(readdirSync(runner.workRoot), [], 'no workspace');
+    /* Refused as a read is: a ref git skips. */
+    writeFileSync(join(b.repo, '.git', 'refs', 'heads', 'loop'), 'ref: refs/heads/loop\n');
+    await failsWith(runner.tips('site'), 'refs');
+    rmSync(join(b.repo, '.git', 'refs', 'heads', 'loop'));
+    /* A "list" followed by a pack is not the reader's: refused. */
+    const whole = Buffer.concat([header(['# v2 git bundle', `${one} refs/heads/main`]), Buffer.from('PACK')]);
+    await failsWith(b.runner({ spawnRead: bytesRead(b.dir, whole) }).tips('site'), 'header', /list of branches/);
+});
+
+test('a read after a read: only what is new travels, what was had is lent, and the outcome is the same as a whole read', async (t) => {
+    const b = bench(t);
+    const reads = [];
+    const runner = b.runner({ spawnRead: standInRead(b.folder, { reads }) });
+    /* A history worth leaving out. */
+    for (let i = 0; i < 30; i++) committed(b.repo, `f${i}.txt`, `${i}\n${randomBytes(2000).toString('hex')}\n`, `c${i}`);
+    git(b.repo, 'branch', 'side');
+    let got = await runner.read('site');
+    assert.equal(got.partial, false, 'nothing kept yet: whole');
+    const wholeBytes = readdirSync(join(got.path, 'objects', 'pack')).filter((f) => f.endsWith('.pack')).length;
+    assert.equal(wholeBytes, 1);
+    got.remove();
+    const tip = committed(b.repo, 'new.txt', 'new\n', 'new');
+    got = await runner.read('site');
+    assert.equal(got.partial, true);
+    assert.deepEqual(reads.slice(-1), ['site --have']);
+    assert.deepEqual(got.branches.sort((x, y) => x.name.localeCompare(y.name)).map((x) => x.name), ['main', 'side'], 'the branch that did not move is listed and there');
+    assert.equal(git(got.path, 'rev-parse', 'refs/heads/main'), tip);
+    assert.equal(git(got.path, 'rev-list', '--count', 'refs/heads/main'), '31', 'the whole history is here');
+    git(got.path, 'fsck', '--connectivity-only', '--no-dangling');
+    /* What travelled: the new commit alone (its commit, its tree, its file). */
+    const packs = readdirSync(join(got.path, 'objects', 'pack')).filter((f) => f.endsWith('.idx'));
+    const sizes = packs.map((f) => execFileSync('git', ['show-index'], { input: readFileSync(join(got.path, 'objects', 'pack', f)), encoding: 'utf8' }).trim().split('\n').length).sort((x, y) => x - y);
+    assert.deepEqual(sizes[0], 3, `the new pack holds 3 objects (${sizes})`);
+    got.remove();
+    /* Nothing moved: a pack of nothing, still every branch. */
+    got = await runner.read('site');
+    assert.deepEqual([got.partial, got.branches.length], [true, 2]);
+    got.remove();
+});
+
+test('a partial read that cannot be made is made again whole: kept files gone, other waivers, a rewritten history', async (t) => {
+    const b = bench(t);
+    const reads = [];
+    const runner = b.runner({ spawnRead: standInRead(b.folder, { reads }) });
+    committed(b.repo, 'a.txt', 'a\n', 'one');
+    git(b.repo, 'branch', 'still');
+    (await runner.read('site')).remove();
+    committed(b.repo, 'b.txt', 'b\n', 'two');
+    /* The kept packs lost (their objects are what the partial pack leaves out): the pack is refused, then read whole. */
+    for (const f of readdirSync(runner.keptDir('site'))) if (f.startsWith('pack-')) rmSync(join(runner.keptDir('site'), f));
+    reads.length = 0;
+    let got = await runner.read('site');
+    assert.deepEqual([got.partial, reads], [false, ['site --have', 'site']]);
+    assert.equal(git(got.path, 'rev-list', '--count', 'refs/heads/still'), '1', 'the branch that did not move is whole too');
+    got.remove();
+    /* Other fsck waivers: what was kept was checked under others; whole. */
+    reads.length = 0;
+    got = await runner.read('site', { waivers: { missingEmail: 'warn' } });
+    assert.deepEqual([got.partial, reads], [false, ['site']]);
+    got.remove();
+    /* A history rewritten (a new root): nothing had is an ancestor; the pack carries it all, still partial, still right. */
+    git(b.repo, 'checkout', '--quiet', '--orphan', 'fresh');
+    const root = committed(b.repo, 'c.txt', 'c\n', 'again');
+    git(b.repo, 'branch', '-D', 'main'); git(b.repo, 'branch', '-D', 'still'); git(b.repo, 'branch', '-m', 'main');
+    reads.length = 0;
+    got = await runner.read('site', { waivers: { missingEmail: 'warn' } });
+    assert.deepEqual([got.partial, got.branches], [true, [{ name: 'main', id: root }]]);
+    got.remove();
+    /* No kept file at all, no reference: whole. */
+    runner.forget('site');
+    reads.length = 0;
+    (await runner.read('site')).remove();
+    assert.deepEqual(reads, ['site']);
+    /* Asked whole: whole. */
+    reads.length = 0;
+    (await runner.read('site', { partial: false })).remove();
+    assert.deepEqual(reads, ['site']);
+    assert.deepEqual(readdirSync(runner.workRoot), []);
+});

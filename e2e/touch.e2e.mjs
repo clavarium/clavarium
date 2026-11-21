@@ -484,6 +484,8 @@ test('a field being written in keeps its focus when the terminal\'s connection o
     await me.page.reload();
     await me.until('its chat', async () => me.page.locator('#simple-thread .parley-box').isVisible(), 30_000);
     await me.page.locator('#folders').click();
+    /* ⚙ opens on Access the first time (14-11): its name is in General. */
+    await me.chapter('general');
     const field = me.page.locator('#title-name');
     await field.click();
     await field.pressSequentially('A new nam');

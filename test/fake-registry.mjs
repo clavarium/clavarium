@@ -6,11 +6,11 @@
  *   GET /-/npm/v1/attestations/<name>@<v>     a provenance statement naming a repository (not signed: the
  *                                             signatures are npm's own check, `npm audit signatures`, not tried here)
  *
- * `publish(name, version, files, { tag, repo, packageJson })` adds a version while it runs.
+ * `publish(name, version, files, { tag, repo, packageJson, time })` adds a version while it runs.
  */
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -21,7 +21,7 @@ export async function fakeRegistry() {
     const asked = [];
     let origin = '';
 
-    function publish(name, version, files, { tag = version.includes('-') ? 'next' : 'latest', repo = 'https://github.com/clavarium/clavarium', packageJson = {}, attest = true, ref = 'refs/heads/main' } = {}) {
+    function publish(name, version, files, { tag = version.includes('-') ? 'next' : 'latest', repo = 'https://github.com/clavarium/clavarium', packageJson = {}, attest = true, ref = 'refs/heads/main', time } = {}) {
         const stage = join(dir, 'stage', `${name}-${version}`);
         rmSync(stage, { recursive: true, force: true });
         const manifest = { name, version, ...packageJson };
@@ -38,6 +38,8 @@ export async function fakeRegistry() {
         /* As the registry says of a package published with its shrinkwrap: npm then installs exactly what it lists. */
         p.versions[version] = { ...manifest, ...('npm-shrinkwrap.json' in files ? { _hasShrinkwrap: true } : {}), dist: { tarball: `${origin}/${name}/-/${name}-${version}.tgz`, integrity: `sha512-${sha512.toString('base64')}`, shasum: createHash('sha1').update(bytes).digest('hex'), ...(attest ? { attestations: { url: `${origin}/-/npm/v1/attestations/${name}@${version}`, provenance: { predicateType: 'https://slsa.dev/provenance/v1' } } } : {}) } };
         if (tag) p['dist-tags'][tag] = version;
+        /* The registry's `time` of a version: only when a test gives one (the tests' clocks are their own). */
+        if (time) p.time = { ...(p.time ?? {}), [version]: time };
         if (attest) {
             const statement = { _type: 'https://in-toto.io/Statement/v1', subject: [{ name: `pkg:npm/${name}@${version}`, digest: { sha512: sha512.toString('hex') } }], predicateType: 'https://slsa.dev/provenance/v1', predicate: { buildDefinition: { externalParameters: { workflow: { repository: repo, path: '.github/workflows/publish.yml', ref } } } } };
             p.attestations[version] = { attestations: [{ predicateType: 'https://slsa.dev/provenance/v1', bundle: { dsseEnvelope: { payloadType: 'application/vnd.in-toto+json', payload: Buffer.from(JSON.stringify(statement)).toString('base64') } } }] };
@@ -67,6 +69,8 @@ export async function fakeRegistry() {
         origin, publish, asked,
         /* A tag moved by hand (a version taken back to "latest"). */
         tag(name, tag, version) { packages.get(name)['dist-tags'][tag] = version; },
+        /* Its tag says it is out, its file is not served yet (a mirror behind, 16-11): back with the function returned. */
+        hold(name, version) { const file = join(dir, `${name}-${version}.tgz`); renameSync(file, `${file}.held`); return () => renameSync(`${file}.held`, file); },
         close() { server.close(); rmSync(dir, { recursive: true, force: true }); },
     };
 }

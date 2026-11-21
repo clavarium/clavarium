@@ -12,6 +12,16 @@
       "--continue"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".claude",
+        ".claude.json"
+      ],
+      "skip": [
+        ".claude/shell-snapshots",
+        ".claude/statsig"
+      ]
+    },
     "rights": {
       "full": [
         "--dangerously-skip-permissions",
@@ -36,13 +46,135 @@
         "@anthropic-ai/claude-code"
       ],
       "npm-writable",
+      [
+        "install",
+        "-D",
+        "-m",
+        "0600",
+        "/dev/null",
+        ".claude/settings.json"
+      ],
       {
         "argv": [
-          "install",
-          "-D",
-          "-m",
-          "0600",
-          "/dev/stdin",
+          "tee",
+          ".claude/settings.json"
+        ],
+        "input": "{\n  \"theme\": \"dark-ansi\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(parley:*)\"\n    ]\n  }\n}\n"
+      }
+    ],
+    "signin": {
+      "senders": [
+        "anthropic.com",
+        "claude.com",
+        "claude.ai"
+      ],
+      "links": [
+        "claude.ai",
+        "claude.com",
+        "anthropic.com"
+      ],
+      "screen": [
+        "type:(Not logged in|Login expired|OAuth token (has )?expired|Invalid API key)[^\\n]{0,24}/login=/login",
+        "keys:Select login method:=Enter",
+        "link:https://(claude\\.ai|claude\\.com|console\\.anthropic\\.com)/\\S*oauth\\S*",
+        "code:Paste code here"
+      ]
+    }
+  },
+  {
+    "id": "opencode",
+    "instructions": ".config/opencode/AGENTS.md",
+    "logs": [
+      ".local/share/opencode/log"
+    ],
+    "label": "OpenCode",
+    "command": [
+      "opencode"
+    ],
+    "resume": [
+      "opencode",
+      "--continue"
+    ],
+    "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".config/opencode",
+        ".local/share/opencode"
+      ],
+      "skip": [
+        ".local/share/opencode/log"
+      ]
+    },
+    "rights": {
+      "full": [
+        "--auto"
+      ]
+    },
+    "install": [
+      "node",
+      [
+        "sudo",
+        "-n",
+        "npm",
+        "install",
+        "-g",
+        "--no-fund",
+        "--no-audit",
+        "opencode-ai"
+      ],
+      "npm-writable"
+    ],
+    "signin": {
+      "senders": [
+        "anthropic.com",
+        "claude.com",
+        "claude.ai"
+      ],
+      "links": [
+        "claude.ai",
+        "claude.com",
+        "anthropic.com"
+      ],
+      "note": "15-11: screen rules from its Anthropic sign-in plugin (opencode-anthropic-auth 0.0.13: the link, then \"Paste the authorization code here\"); not tried on a real OpenCode screen; OpenCode has no launcher yet, so nothing reads them.",
+      "screen": [
+        "link:https://(claude\\.ai|console\\.anthropic\\.com)/oauth/authorize\\S*",
+        "code:Paste the authorization code here"
+      ]
+    }
+  },
+  {
+    "id": "guichet",
+    "instructions": ".guichet/INSTRUCTIONS.md",
+    "label": "Guichet (prototype)",
+    "command": [
+      "node",
+      "/tools/launch/guichet.mjs"
+    ],
+    "memoryMb": 1024,
+    "install": [
+      "node",
+      [
+        "sudo",
+        "-n",
+        "npm",
+        "install",
+        "-g",
+        "--no-fund",
+        "--no-audit",
+        "@anthropic-ai/claude-code"
+      ],
+      "npm-writable",
+      [
+        "install",
+        "-D",
+        "-m",
+        "0600",
+        "/dev/null",
+        ".claude/settings.json"
+      ],
+      {
+        "argv": [
+          "tee",
           ".claude/settings.json"
         ],
         "input": "{\n  \"theme\": \"dark-ansi\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(parley:*)\"\n    ]\n  }\n}\n"
@@ -62,38 +194,6 @@
     }
   },
   {
-    "id": "opencode",
-    "instructions": ".config/opencode/AGENTS.md",
-    "label": "OpenCode",
-    "command": [
-      "opencode"
-    ],
-    "resume": [
-      "opencode",
-      "--continue"
-    ],
-    "memoryMb": 2048,
-    "rights": {
-      "full": [
-        "--auto"
-      ]
-    },
-    "install": [
-      "node",
-      [
-        "sudo",
-        "-n",
-        "npm",
-        "install",
-        "-g",
-        "--no-fund",
-        "--no-audit",
-        "opencode-ai"
-      ],
-      "npm-writable"
-    ]
-  },
-  {
     "id": "codex",
     "instructions": ".codex/AGENTS.md",
     "label": "Codex CLI",
@@ -106,6 +206,14 @@
       "--last"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".codex"
+      ],
+      "skip": [
+        ".codex/log"
+      ]
+    },
     "rights": {
       "full": [
         "--dangerously-bypass-approvals-and-sandbox"
@@ -124,7 +232,95 @@
         "@openai/codex"
       ],
       "npm-writable"
-    ]
+    ],
+    "launch": "codex.sh",
+    "signin": {
+      "senders": [
+        "openai.com"
+      ],
+      "links": [
+        "openai.com",
+        "chatgpt.com"
+      ],
+      "note": "15-11: the links codex.sh watched (02-11); a device sign-in shows a one-time code beside its link, handed over with it.",
+      "screen": [
+        "link:https://auth\\.openai\\.com/\\S+",
+        "link:https://chatgpt\\.com/\\S*auth\\S*"
+      ]
+    }
+  },
+  {
+    "id": "vibe",
+    "instructions": ".vibe/AGENTS.md",
+    "label": "Mistral Vibe",
+    "launch": "vibe.sh",
+    "command": [
+      "vibe"
+    ],
+    "resume": [
+      "vibe",
+      "--continue"
+    ],
+    "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".vibe"
+      ]
+    },
+    "rights": {
+      "full": [
+        "--auto-approve"
+      ]
+    },
+    "install": [
+      [
+        "sudo",
+        "-n",
+        "apt-get",
+        "install",
+        "-y",
+        "-q",
+        "--no-install-recommends",
+        "python3-venv"
+      ],
+      [
+        "sudo",
+        "-n",
+        "python3",
+        "-m",
+        "venv",
+        "/opt/vibe"
+      ],
+      [
+        "sudo",
+        "-n",
+        "/opt/vibe/bin/pip",
+        "install",
+        "-q",
+        "--disable-pip-version-check",
+        "mistral-vibe"
+      ],
+      [
+        "sudo",
+        "-n",
+        "ln",
+        "-sf",
+        "/opt/vibe/bin/vibe",
+        "/usr/local/bin/vibe"
+      ]
+    ],
+    "signin": {
+      "senders": [
+        "mistral.ai"
+      ],
+      "links": [
+        "mistral.ai"
+      ],
+      "note": "15-11: screen rule from mistral-vibe 3.1.2 (browser sign-in at console.mistral.ai, which it then polls: no code to type); its own words on the screen not tried.",
+      "screen": [
+        "link:https://(console|auth)\\.mistral\\.ai/\\S+"
+      ]
+    }
   },
   {
     "id": "gemini",
@@ -139,6 +335,11 @@
       "latest"
     ],
     "memoryMb": 2048,
+    "state": {
+      "keep": [
+        ".gemini"
+      ]
+    },
     "rights": {
       "full": [
         "--yolo",
@@ -168,6 +369,13 @@
       "-l"
     ],
     "memoryMb": 768,
+    "state": {
+      "keep": [
+        ".bash_history",
+        ".bashrc",
+        ".profile"
+      ]
+    },
     "install": []
   }
 ]

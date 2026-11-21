@@ -282,3 +282,13 @@ test('the commit of a repository is read without following links or waiting on a
         assert.equal(headOf(pipe), null);
     } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+test('a new conversation has its chat from the start; asked otherwise, none (02-11)', async (t) => {
+    const a = await home(t);
+    await a.ok('/api/conversations', { name: 'withchat', tool: 'shell' });
+    await a.ok('/api/conversations', { name: 'nochat', tool: 'shell', chat: false });
+    await a.ready('withchat'); await a.ready('nochat');
+    await a.until('its chat is on', async () => Boolean((await a.ok('/api/conversations')).find((c) => c.name === 'withchat')?.talk));
+    const list = await a.ok('/api/conversations');
+    assert.equal(list.find((c) => c.name === 'nochat')?.talk, null, 'asked otherwise: no chat');
+});

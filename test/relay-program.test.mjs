@@ -154,3 +154,142 @@ test('the fetching code is the same, word for word, in the program and in relay.
     /* Outside the tests, the registry is npm's and only https is spoken. */
     assert.match(readFileSync(PROGRAM, 'utf8'), /\[ -z "\$ROOT" \] \|\| REGISTRY=/);
 });
+
+/* ------------------------------ several homes ------------------------------ */
+const HOME_A = key('A', 'clavarium-tunnel');
+const HOME_B = key('B', 'clavarium-tunnel');
+const LEGACY_LINE = `restrict,port-forwarding,permitlisten="8443",permitlisten="8080" ${TUNNEL}\n`;
+const homesOf = (p) => readFileSync(join(p.root, 'etc', 'clavarium-relay', 'homes'), 'utf8').split('\n').filter((l) => l && !l.startsWith('#'));
+const tunnelKeys = (p) => readFileSync(join(p.root, 'etc', 'ssh', 'clavarium-relay', 'clavarium-tunnel'), 'utf8');
+const sshdOf = (p) => readFileSync(join(p.root, 'etc', 'ssh', 'sshd_config.d', '10-clavarium-relay.conf'), 'utf8');
+/* A relay as 0.1.1 left it: one key file, the kernel rule, no list. */
+function legacy(p) {
+    const keys = join(p.root, 'etc', 'ssh', 'clavarium-relay');
+    mkdirSync(keys, { recursive: true });
+    writeFileSync(join(keys, 'clavarium-tunnel'), LEGACY_LINE);
+    writeFileSync(join(keys, 'clavarium-keeper'), `restrict ${KEEPER}\n`);
+}
+
+test('an existing relay of one home moves to the list at its update, and works as before', () => {
+    const p = place();
+    try {
+        legacy(p);
+        const installed = join(p.root, 'usr', 'local', 'sbin', 'clavarium-relay');
+        copyFileSync(PROGRAM, installed);
+        p.publish('0.2.0');
+        const r = p.run(installed, ['update-relay', '0.2.0']);
+        assert.equal(r.code, 0, r.err);
+        assert.match(r.out, /now the first of its list/);
+        assert.deepEqual(homesOf(p), [`- 8443 8080 ${TUNNEL}`], 'the principal, no name yet, the same ports and key');
+        assert.equal(tunnelKeys(p), LEGACY_LINE, 'its key line word for word');
+        assert.match(sshdOf(p), /PermitListen 8443 8080\n/);
+        assert.match(readFileSync(join(p.root, 'etc', 'clavarium-relay.nft'), 'utf8'), /tcp dport 443 redirect to :8443/, 'no name: the kernel rule, as before');
+        assert.ok(!existsSync(join(p.root, 'etc', 'systemd', 'system', 'clavarium-relay-router.service')));
+        assert.equal(p.run(installed, ['repair']).code, 0, 'again: nothing moves');
+        assert.deepEqual(homesOf(p), [`- 8443 8080 ${TUNNEL}`]);
+        /* No home is added while the principal has no name: the router could not find it. */
+        const refused = p.run(installed, ['add-home', 'b.example.com', '--key', HOME_B]);
+        assert.equal(refused.code, 78);
+        assert.match(refused.err, /name-principal/);
+    } finally { p.done(); }
+});
+
+test('add-home: its own key, its own two ports on the loopback only, the router in place of the kernel rule; remove-home', () => {
+    const p = place();
+    try {
+        legacy(p);
+        assert.equal(p.run(PROGRAM, ['repair']).code, 0);
+        assert.equal(p.run(PROGRAM, ['name-principal', 'clav.example.com']).code, 0);
+        const a = p.run(PROGRAM, ['add-home', 'a.example.com', '--key', HOME_A]);
+        assert.equal(a.code, 0, a.err);
+        assert.equal(a.out, 'home a.example.com\ntls-port 8444\nhttp-port 8081\nfingerprint SHA256:relayprint\n');
+        const b = p.run(PROGRAM, ['add-home', 'b.example.com,www.b.example.com', '--key', HOME_B]);
+        assert.match(b.out, /tls-port 8445\nhttp-port 8082/);
+        assert.deepEqual(homesOf(p), [`clav.example.com 8443 8080 ${TUNNEL}`, `a.example.com 8444 8081 ${HOME_A}`, `b.example.com,www.b.example.com 8445 8082 ${HOME_B}`]);
+        /* Each key line bounded to its own ports; the principal's line unchanged. */
+        assert.deepEqual(tunnelKeys(p).split('\n').filter(Boolean), [
+            LEGACY_LINE.trim(),
+            `restrict,port-forwarding,permitlisten="127.0.0.1:8444",permitlisten="127.0.0.1:8081" ${HOME_A}`,
+            `restrict,port-forwarding,permitlisten="127.0.0.1:8445",permitlisten="127.0.0.1:8082" ${HOME_B}`,
+        ]);
+        assert.match(sshdOf(p), /PermitListen 8443 8080 127\.0\.0\.1:8444 127\.0\.0\.1:8081 127\.0\.0\.1:8445 127\.0\.0\.1:8082\n/);
+        /* Every home named: the router takes 443 and 80, the kernel rule is gone. */
+        assert.ok(!existsSync(join(p.root, 'etc', 'clavarium-relay.nft')));
+        assert.ok(!existsSync(join(p.root, 'etc', 'systemd', 'system', 'clavarium-relay-ports.service')));
+        const unit = readFileSync(join(p.root, 'etc', 'systemd', 'system', 'clavarium-relay-router.service'), 'utf8');
+        for (const line of ['DynamicUser=yes', 'AmbientCapabilities=CAP_NET_BIND_SERVICE', 'NoNewPrivileges=yes', 'ProtectSystem=strict']) assert.ok(unit.includes(line), line);
+        assert.match(readFileSync(join(p.root, 'usr', 'local', 'lib', 'clavarium-relay', 'router.js'), 'utf8'), /THE ROUTER OF A CLAVARIUM RELAY/);
+        assert.match(p.calls(), /systemctl disable --quiet --now clavarium-relay-ports\.service/);
+        /* The same home asking again: the same ports, nothing added. Anything else that collides: refused. */
+        assert.match(p.run(PROGRAM, ['add-home', 'a.example.com', '--key', HOME_A]).out, /tls-port 8444/);
+        assert.equal(homesOf(p).length, 3);
+        for (const [args, why] of [
+            [['add-home', 'c.example.com', '--key', HOME_A], /key of another home/],
+            [['add-home', 'a.example.com', '--key', key('C', 'x')], /served by this relay already/],
+            [['add-home', 'www.b.example.com', '--key', key('C', 'x')], /served by this relay already/],
+            [['add-home', 'c.example.com', '--key', TUNNEL], /key of another home/],
+            [['add-home', 'clav.example.com', '--key', key('C', 'x')], /served by this relay already/],
+            [['remove-home', 'clav.example.com'], /principal/],
+            [['remove-home', 'nothere.example.com'], /no home/],
+            [['name-principal', 'a.example.com'], /another home/],
+        ]) { const r = p.run(PROGRAM, args); assert.equal(r.code, 78, args.join(' ')); assert.match(r.err, why); }
+        for (const args of [['add-home', 'A.example.com', '--key', HOME_A], ['add-home', 'a.example.com', '--key', 'ssh-rsa AAAA'], ['add-home', 'a.example.com;id', '--key', HOME_A], ['remove-home', '../x']]) assert.equal(p.run(PROGRAM, args).code, 64, args.join(' '));
+        const gone = p.run(PROGRAM, ['remove-home', 'a.example.com']);
+        assert.equal(gone.code, 0, gone.err);
+        assert.ok(!tunnelKeys(p).includes(HOME_A), 'its key opens nothing any more');
+        assert.match(p.calls(), /ss -ltnpH \( sport = :8444 or sport = :8081 \)/, 'a tunnel still open is looked for, to be cut');
+        /* Its ports are free again for the next one. */
+        assert.match(p.run(PROGRAM, ['add-home', 'd.example.com', '--key', key('D', 'x')]).out, /tls-port 8444\nhttp-port 8081/);
+        const homes = p.run(PROGRAM, ['homes']);
+        assert.match(homes.out, /^principal\s+clav\.example\.com\s+tls 8443\s+http 8080\s+waiting$/m);
+        assert.match(p.run(PROGRAM, ['status']).out, /router\s+ok[\s\S]*homes:/);
+        /* The principal's key rotated: the other homes stay. */
+        assert.equal(p.run(PROGRAM, ['rotate-key', 'tunnel', key('N', 'clavarium-tunnel')]).code, 0);
+        assert.equal(homesOf(p).length, 3);
+        assert.equal(p.run(PROGRAM, ['rotate-key', 'tunnel', HOME_B]).code, 78, 'not another home\'s key');
+    } finally { p.done(); }
+});
+
+test('a relay set up with its principal\'s name routes by name from the start; setup again keeps the other homes', () => {
+    const p = place();
+    try {
+        assert.equal(p.run(PROGRAM, ['setup', '--key', TUNNEL, '--keeper-key', KEEPER, '--name', 'clav.example.com']).code, 0);
+        assert.deepEqual(homesOf(p), [`clav.example.com 8443 8080 ${TUNNEL}`]);
+        assert.ok(existsSync(join(p.root, 'etc', 'systemd', 'system', 'clavarium-relay-router.service')));
+        assert.equal(p.run(PROGRAM, ['add-home', 'a.example.com', '--key', HOME_A]).code, 0);
+        const fresh = key('N', 'clavarium-tunnel');
+        assert.equal(p.run(PROGRAM, ['setup', '--key', fresh, '--name', 'clav.example.com']).code, 0);
+        assert.deepEqual(homesOf(p).map((l) => l.split(' ')[0]), ['clav.example.com', 'a.example.com']);
+        assert.ok(homesOf(p)[0].endsWith(fresh));
+        assert.equal(p.run(PROGRAM, ['setup', '--key', HOME_A]).code, 78, 'another home\'s key never becomes the principal\'s');
+    } finally { p.done(); }
+});
+
+test('the door lets the principal add, remove and list homes, with names and keys of the right shape only', () => {
+    const p = place();
+    try {
+        const door = (cmd) => p.run(PROGRAM, ['door'], { SSH_ORIGINAL_COMMAND: cmd });
+        for (const cmd of ['homes', `add-home a.example.com ${HOME_A}`, 'remove-home a.example.com', 'name-principal clav.example.com']) assert.equal(door(cmd).code, 0, cmd);
+        const sudo = p.calls().split('\n').filter((l) => l.startsWith('sudo '));
+        assert.ok(sudo.includes(`sudo -n /usr/local/sbin/clavarium-relay add-home a.example.com --key ${HOME_A}`));
+        assert.ok(sudo.includes('sudo -n /usr/local/sbin/clavarium-relay remove-home a.example.com'));
+        for (const cmd of ['homes x', 'add-home a.example.com', `add-home a.example.com;id ${HOME_A}`, `add-home A.example.com ${HOME_A}`, 'add-home a.example.com ssh-rsa AAAA',
+            `add-home a.example.com ${HOME_A} extra`, 'remove-home', 'remove-home a.example.com b.example.com', 'name-principal $(id)']) assert.equal(door(cmd).code, 64, cmd);
+    } finally { p.done(); }
+});
+
+test('relay.sh run again on a relay: its own router on 443 is not "something else"', () => {
+    const p = place();
+    try {
+        const pinned = /^RELAY_VERSION="([^"]+)"$/m.exec(readFileSync(RELAY_SH, 'utf8'))[1];
+        p.publish(pinned);
+        writeFileSync(join(p.dir, 'bin', 'ss'), '#!/bin/bash\necho \'LISTEN 0 511 *:443 *:* users:(("node",pid=7,fd=18))\'\n', { mode: 0o755 });
+        const first = p.run(RELAY_SH, ['--key', TUNNEL, '--name', 'clav.example.com']);
+        assert.equal(first.code, 78, 'a machine that is no relay: 443 is someone else\'s');
+        legacy(p);
+        const again = p.run(RELAY_SH, ['--key', TUNNEL, '--keeper-key', KEEPER, '--name', 'clav.example.com']);
+        assert.equal(again.code, 0, again.err);
+        assert.match(again.out, /CAA record to your DNS FOR EACH NAME/);
+        assert.deepEqual(homesOf(p), [`clav.example.com 8443 8080 ${TUNNEL}`]);
+    } finally { p.done(); }
+});

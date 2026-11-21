@@ -10,7 +10,7 @@
  * SKIPPED and says so: a suite that passes without having run is worse than
  * one that is absent.
  */
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -40,7 +40,7 @@ const TOOLS = readTools(JSON.stringify([
        so does what its rights add to every start (RIGHTS=full, or ask): the
        arguments after the script are variables of the shell it becomes.
        Its own instruction file gets the line that points to its guide (guide.mjs). */
-    { id: 'shell', label: 'Shell', instructions: '.tool/RULES.md', command: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> '], resume: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> ', 'RESUMED=1'], rights: { full: ['RIGHTS=full'], ask: ['RIGHTS=ask'] }, memoryMb: 768, install: [] },
+    { id: 'shell', label: 'Shell', instructions: '.tool/RULES.md', state: { keep: ['.bash_history'] }, command: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> '], resume: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> ', 'RESUMED=1'], rights: { full: ['RIGHTS=full'], ask: ['RIGHTS=ask'] }, memoryMb: 768, install: [] },
     { id: 'other', label: 'Other tool', command: ['env', 'PS1=other> ', 'bash', '--norc', '--noprofile'], memoryMb: 768, install: [] },
 ]));
 
@@ -56,7 +56,7 @@ export const tmuxOf = (name) => `${process.env.FAKE_TMUX_PREFIX ?? 'e2e-'}clv-${
 /* Starts everything; `t.after` takes it all down, tmux servers included. */
 /* `tools`: other tools than the two plain shells (the pictures of the site are
    taken on this bench, with the names a reader knows). */
-export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend, serverRoomMs, historyEveryMs } = {}) {
+export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend, serverRoomMs, historyEveryMs, tetherTargets, tetherConnectors, sshProbe } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-e2e-'));
     /* A speech-to-text engine that hears the same sentence whatever it is sent. */
     /* `engineKeys`: the authorization each request carried (Settings' key reaches the engine, and only it). */
@@ -87,6 +87,17 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     const sshRoot = join(dir, 'far');
     const gitSsh = installFakeSsh(sshRoot);
     process.env.FAKE_VM_LAUNCH_SECONDS = launchSeconds;
+    /* The first start's welcome (features.mjs) already passed: these tests begin where a person who
+       skipped it does. */
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(join(dir, 'data', 'features.json'), JSON.stringify({ welcomeDone: true }));
+    /* `tetherTargets`: Tether targets there from the start (a mailbox that leads nowhere: what is checked is the
+       request and its decision, never a send). Tether's own store, as it writes it. */
+    if (tetherTargets) {
+        mkdirSync(join(dir, 'data', 'tether'), { recursive: true });
+        const targets = Object.fromEntries(tetherTargets.map((x) => [x.id, { secrets: {}, config: {}, grants: {}, created: new Date().toISOString(), ...x }]));
+        writeFileSync(join(dir, 'data', 'tether', 'state.json'), JSON.stringify({ v: 1, targets, stopped: {} }));
+    }
     const server = await startHome({
         port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true, gitSsh,
         /* A test machine may have little free disk: no reserve beyond the cap. */
@@ -104,6 +115,10 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         ...(serverRoomMs === undefined ? {} : { serverRoomMs }),
         /* `historyEveryMs`: a look for the curves this often (one a minute otherwise). */
         ...(historyEveryMs === undefined ? {} : { historyEveryMs }),
+        /* `tetherConnectors`: Tether connectors of the test (a mailbox that answers what the test decides). */
+        ...(tetherConnectors ? { tetherConnectors } : {}),
+        /* `sshProbe`: a machine's host key, read from a stand-in (sshmachine.mjs). */
+        ...(sshProbe ? { sshProbe } : {}),
         env: { ...process.env, ...(answerFetcher ? { CLAVARIUM_ANSWERER_URL: 'http://127.0.0.1:9/v1/chat/completions', CLAVARIUM_ANSWERER_MODELS: 'reader-one,reader-two,reader-three' } : {}), CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
         /* What the updater would write: an installation only once a test writes update.conf (updates.e2e.mjs). */
@@ -133,7 +148,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     async function person({ phone = false, at = '/', context: given, locale, chapters = { general: true, machine: true, access: true } } = {}) {
         const context = given ?? await browser.newContext({ ...(microphone ? { viewport: { width: 1200, height: 760 }, permissions: ['microphone'] } : phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true }), ...(locale ? { locale } : {}) });
         contexts.push(context);
-        await context.addInitScript((open) => { try { if (sessionStorage.getItem('clavarium-chapters') === null) sessionStorage.setItem('clavarium-chapters', open); } catch { /* an opaque page */ } }, JSON.stringify(chapters));
+        await context.addInitScript((open) => { try { if (sessionStorage.getItem('clavarium-chapters') === null) sessionStorage.setItem('clavarium-chapters', open); if (localStorage.getItem('clavarium-list') === null) localStorage.setItem('clavarium-list', 'open'); } catch { /* an opaque page */ } }, JSON.stringify(chapters));
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', (e) => errors.push(String(e)));
@@ -158,19 +173,46 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             while (rows.length > 0 && rows.at(-1) === '') rows.pop();
             return rows.length >= 2 && rows.at(-2) === line && /^[a-z]+>$/.test(rows.at(-1));
         }, ms);
-        const type = async (text) => { await page.locator('#terminal').click(); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
+        /* Typed in its terminal: its Terminal tab first, if its chat is the one shown (a conversation whose chat is on
+           opens on it after a reload or a rebuild). */
+        const type = async (text) => {
+            const tab = page.locator('#view-terminal');
+            if (await tab.isVisible() && (await tab.getAttribute('aria-pressed')) !== 'true') await tab.click();
+            await page.locator('#terminal').click(); await page.keyboard.type(text); await page.keyboard.press('Enter');
+        };
         const api = (path, body) => page.evaluate(async ([p, b]) => { const r = await fetch(p, b === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, body: await r.json().catch(() => null) }; }, [path, body]);
-        /* Creates a conversation from the page, as a person does, and waits for its terminal. */
-        async function create(name, tool = 'Shell', { onDisk = false } = {}) {
+        /* Creates a conversation from the page, as a person does, and waits for its terminal. Its chat is on from
+           the start, as in the product (02-11); `chat: false` unticks it in « More »: its terminal only. */
+        async function create(name, tool = 'Shell', { onDisk = false, chat = true } = {}) {
+            /* « + » is in the list: opened again first if a place folded it. */
+            await unfold();
             await page.locator('#new').click();
             await page.fill('#newconv-name', name);
             if (onDisk) await page.locator('#newconv-work [data-work="disk"]').click();
+            if (!chat) { await page.locator('#newconv-more > summary').click(); await page.locator('#newconv-chat').uncheck(); }
             await page.locator('#newconv-tools button', { hasText: tool }).click();
             await page.locator('#newconv-create').click();
             await until(`${name} is live`, async () => (await state()) === 'live', 30_000);
             await sees(tool === 'Shell' ? 'ready>' : 'other>');
+            /* « + » folds the list now (14-11), as any pick that changes the right pane: open again, as tests found it. */
+            await unfold();
             await fullSize(name);
         }
+        /* THE LIST OPENED AGAIN, if a pick folded it (14-11, foldOnOpen in app.js: Settings, Assets, Access, New,
+           the server gauge fold it on a wide screen unless it is pinned). The menu at the bottom left folds with it,
+           so a test that clicks a second place first opens it, as a person does with « » ». Its button may be
+           out of sight (a place has its own, .fold-here, which clicks it): it is clicked as they do. */
+        async function unfold() {
+            const folding = await page.evaluate(() => {
+                const app = document.getElementById('app');
+                if (app?.dataset.list !== 'folded' || innerWidth <= 700) return false;
+                document.getElementById('fold').click();
+                return true;
+            });
+            if (folding) await until('the list is open again', async () => page.evaluate(() => { const app = document.getElementById('app'); return app.dataset.list === 'open' && !app.classList.contains('sliding'); }));
+        }
+        /* A place of the menu at the bottom left ('settings', 'assets', 'access'), the list opened first if it was folded. */
+        async function nav(which) { await unfold(); await page.locator(`#nav-${which}`).click(); }
         /* Waits until the terminal in the machine has the page's size. A screen
            that takes a terminal already open (bridge.mjs) sets it a line
            short, then right a moment later, so that the tool redraws: until
@@ -185,6 +227,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         }
         /* A place at the bottom left: 'assets' (the server's Assets), or 'map' (Access, the map alone; 'devices' too: devices are on the map). */
         async function openAccess(tab = 'map') {
+            await unfold();
             if (tab === 'assets') {
                 await page.locator('#nav-assets').click();
                 await until('the Assets place is shown', async () => page.locator('#assets').isVisible());
@@ -199,15 +242,16 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             const box = page.locator('#links .lk-node[data-id^="device:"]', { hasText: label }).first();
             await until(`${label} is on the map`, async () => (await box.count()) === 1);
             /* Already shown (the map opened on it): a second tap would put it away. */
-            const shown = async () => (await page.locator('#links-card').isVisible()) && (await page.locator('#links-card .device', { hasText: label }).count()) === 1;
+            const shown = async () => (await page.locator('#links-card').isVisible()) && (await page.locator('#links-card .device-panel', { hasText: label }).count()) === 1;
             if (!(await shown())) await box.click();
             await until(`the card of ${label}`, shown);
-            return page.locator('#links-card .device');
+            return page.locator('#links-card .device-panel');
         }
-        /* In the server's Assets: the "+" of a kind, then its form. */
+        /* In the server's Assets: the one "+ New", its kind, then its form. */
         async function addAsset(kind) {
             await openAccess('assets');
-            await page.locator(`#assets-rows .as-kind[data-kind="${kind}"] .as-add`).click();
+            await page.locator('#assets-new').click();
+            await page.locator(`#assets-detail .as-kinds button[data-kind="${kind}"]`).click();
         }
         /* One asset opened in the server's Assets; its detail. */
         async function openAsset(kind, name) {
@@ -218,13 +262,25 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await until(`${name} is opened`, async () => (await page.locator('#assets-detail h2').innerText().catch(() => '')).includes(name));
             return page.locator('#assets-detail');
         }
+        /* Out of the Assets place, back where it was opened from (07-11: its bar has no « ‹ Conversations » of its own;
+           Back, as a person's browser or phone does). */
+        async function leaveAssets() {
+            for (let i = 0; i < 6 && await page.locator('#assets').isVisible(); i++) {
+                /* One step at a time: the next Back only once this one is done (its address changed), never one too many. */
+                const before = page.url();
+                await page.goBack();
+                for (let t = 0; t < 40 && page.url() === before && await page.locator('#assets').isVisible(); t++) await page.waitForTimeout(50);
+                await page.waitForTimeout(100);
+            }
+            await until('the Assets place is closed', async () => !(await page.locator('#assets').isVisible()));
+        }
         /* A folder is made in Assets. */
         async function newFolder(name) {
             await addAsset('folder');
             await page.fill('#folder-name', name);
             await page.locator('#folder-new button[type=submit]').click();
             await until(`${name} is listed in Assets`, async () => (await page.locator(`#assets-rows .as-row[data-asset="folder:${name}"]`).count()) === 1);
-            await page.locator('#assets-close').click();
+            await leaveAssets();
         }
         /* The files of a folder of the conversation shown: its Assets, that folder. */
         async function files(name) {
@@ -236,35 +292,55 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             if ((await row.getAttribute('data-asset')).startsWith('git:')) await page.locator('#cassets-detail button[data-act="files"]').click();
             await until(`the files of ${name}`, async () => await page.locator('#cassets-detail #files').isVisible());
         }
-        /* What the conversation shown may do with it, set in Access: 'Read', 'Write', or 'Off' (detached). */
+        /* What the conversation shown may do with it, set in its Assets tab (07-11, assets step 4): 'Read', 'Write', 'Use',
+           or 'None' ('Off' says the same). Had already: its own row's picker; else « + Give… », the row, its right, « Give ».
+           Then back to the tab it was on. */
         async function access(name, level) {
-            await page.locator('#folders').click();
-            const row = page.locator(`#panel-rows .folder[data-name="${name}"]`);
-            await until('its sheet is painted', async () => (await page.locator('#panel-title').innerText()).startsWith('This conversation - '));
-            await chapter('access');
-            if (level === 'Off') {
-                await row.locator('button', { hasText: 'Detach' }).click();
-                await until(`${name} is detached`, async () => (await row.count()) === 0);
-            } else if ((await row.count()) > 0) {
-                await row.locator('.levels button', { hasText: level }).click();
-                await until(`${name} is ${level}`, async () => (await row.locator('.levels button[aria-pressed=true]').innerText().catch(() => '')) === level);
-            } else {
-                await page.locator('#attach-open').click();
-                await page.locator(`#attach-rows .folder[data-name="${name}"]`).locator('button', { hasText: level }).click();
-                await until(`${name} is attached`, async () => (await row.count()) === 1);
+            const want = level === 'Off' ? 'None' : level;
+            if ((await page.locator('#view-assets').getAttribute('aria-pressed')) !== 'true') await page.locator('#view-assets').click();
+            await until('its Assets tab is painted', async () => (await page.locator('#cassets').isVisible()) && (await page.locator('#cassets-rows .kit-aslist').count()) === 1);
+            const row = page.locator(`#cassets-rows .as-row[data-name="${name}"]`);
+            const mine = page.locator(`#cassets-detail .kit-access-here .kit-rights-pick`);
+            if ((await row.count()) > 0) {
+                await row.click();
+                await until(`${name} is opened`, async () => (await mine.count()) === 1);
+                await mine.locator('button', { hasText: want }).click();
+                if (want === 'None') await until(`${name} is taken back`, async () => (await row.count()) === 0);
+                else await until(`${name} is ${want}`, async () => (await mine.locator('button[aria-pressed=true]').innerText().catch(() => '')) === want);
+            } else if (want !== 'None') {
+                await page.locator('#cassets-attach').click();
+                const offer = page.locator(`#cassets-detail .kit-aspick-row[data-name="${name}"]`);
+                await until(`${name} is offered`, async () => (await offer.count()) === 1);
+                await offer.click();
+                const bar = page.locator('#cassets-detail .kit-aspick-give');
+                await bar.locator('.kit-rights-pick button', { hasText: want }).click();
+                await bar.locator('.kit-aspick-go').click();
+                await until(`${name} is given`, async () => (await row.count()) === 1);
             }
-            await page.goBack();
+            for (let i = 0; i < 4 && await page.locator('#cassets').isVisible(); i++) { await page.goBack(); await page.waitForTimeout(150); }
+            await until('back from its Assets tab', async () => !(await page.locator('#cassets').isVisible()));
+        }
+        /* A repository of the conversation shown, its review: its Assets tab, the repository, « Open the review ». */
+        async function review(name) {
+            if ((await page.locator('#view-assets').getAttribute('aria-pressed')) !== 'true') await page.locator('#view-assets').click();
+            const row = page.locator(`#cassets-rows .as-row[data-asset="git:${name}"]`);
+            await until(`${name} is in its Assets`, async () => (await row.count()) === 1);
+            await row.click();
+            await page.locator('#cassets-detail button[data-act="review"]').click();
         }
         /* A chapter of "This conversation" is unfolded, if it is not already. */
         async function chapter(key) {
             const box = page.locator(`details.chapter[data-chapter="${key}"]`);
+            /* In a tab of its page not shown: that tab first. */
+            const [sheet, tab] = await box.evaluate((d) => [d.closest('.sheet')?.id ?? '', d.closest('.settings-group.tab-off')?.dataset.group ?? '']);
+            if (tab) await page.locator(`#${sheet} .settings-tabs button[data-group="${tab}"]`).click();
             if (!(await box.evaluate((d) => d.open))) await box.locator(':scope > summary').click();
         }
         /* A shared device's bar has a "..." menu; the owner's has none any more (everything of it is in sight). */
         async function menu() { if (await page.locator('#menu').isVisible() && (await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
         /* On a phone: the keys behind "More". */
         async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
-        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, newFolder, files, access, chapter, menu, more };
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, unfold, nav, fullSize, openAccess, openDevice, addAsset, openAsset, leaveAssets, newFolder, files, access, review, chapter, menu, more };
     }
     return { origin, dir, person, browser, sshRoot, engineKeys, engineLanguages, engineUrl: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` };
 }

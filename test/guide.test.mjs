@@ -96,11 +96,12 @@ test('the part of one conversation: read-only and read-write right, the chat on 
     assert.ok(own.includes("git -C /resources/site fetch /resources/site-origin '+refs/heads/*:refs/remotes/origin/*'"));
     assert.match(own, /^- \/work is kept by the server/m);
     assert.match(own, /^- Chat with the person: on\. Parley is installed: run parley guide\. When you were given Parley as your own tools \(MCP: tell, ask, doing, status\.\.\.\), use them to talk to the person, and say with doing what you do at each new step; the parley command does the same\.$/m);
+    assert.match(own, /^- To cite a mail, write \[its subject\]\(mail:REF\) with the ref Tether gives/m, 'how to cite a mail: a chip the person opens');
     /* How Parley is used is said by parley guide, not here again. */
     assert.ok(!/--short|parley close|parley tell|parley status/.test(own), 'no Parley usage described here');
     assert.doesNotMatch(own, /npm install|\.tgz/);
     assert.match(own, /^- Internet: on\.$/m);
-    assert.match(own, /^- Secrets given, by name only: MODEL_KEY\.$/m);
+    assert.match(own, /^- Secrets given, by name only: MODEL_KEY\. Each value is the file \/run\/secrets\/NAME, always the current one/m);
     for (const never of ['sk-the-value-itself', 'example.com', 'ssh:', 'imap', '@']) assert.ok(!own.includes(never), `never: ${never}`);
     const other = b.guide.own('helper');
     assert.match(other, /^- Folders given: none\.$/m);
@@ -271,9 +272,42 @@ test('isolation: one conversation\'s part goes into its own machine only, on its
 
 test("each tool's own instruction file is a line of its configuration, checked", () => {
     const real = Object.fromEntries(loadTools().map((x) => [x.id, x.instructions]));
-    assert.deepEqual(real, { 'claude-code': '.claude/CLAUDE.md', opencode: '.config/opencode/AGENTS.md', codex: '.codex/AGENTS.md', gemini: '.gemini/GEMINI.md', shell: undefined });
+    assert.deepEqual(real, { 'claude-code': '.claude/CLAUDE.md', opencode: '.config/opencode/AGENTS.md', codex: '.codex/AGENTS.md', vibe: '.vibe/AGENTS.md', gemini: '.gemini/GEMINI.md', guichet: '.guichet/INSTRUCTIONS.md', shell: undefined });
     const one = (instructions) => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], memoryMb: 768, install: [], instructions }]));
     for (const bad of ['/etc/passwd', '../x', 'a/../b', './a', 'a//b', 'a b', '$(x)', '']) assert.throws(() => one(bad), /instructions/, bad);
     assert.equal(one('.x/RULES.md')[0].instructions, '.x/RULES.md');
     assert.ok(!existsSync('/nonexistent-guide-check'));
+});
+
+test('the common part names the commands every assistant has, MCP or not (#352)', () => {
+    const t = commonText();
+    for (const c of ['parley', 'docket', 'binder', 'tether mcp TARGET', 'tether mcp TARGET TOOL']) assert.ok(t.includes(c), c);
+});
+
+test('in a shared machine its own part goes to its own file, which its door shows at the usual place (#221)', async (t) => {
+    const b = bench(t, { conversations: { writer: { name: 'writer', tool: 'claude-code', work: 'kept', phase: 'ready' }, other: { name: 'other', tool: 'claude-code', work: 'kept', phase: 'ready' } } });
+    b.vms.shared = (name) => name === 'writer';
+    await b.guide.prepared('writer', true);
+    await b.guide.prepared('other', true);
+    const mine = b.sent.find((s) => s.name === 'writer' && s.argv.includes('install'));
+    assert.deepEqual(mine.argv, ['sudo', '-n', 'install', '-D', '-m', '0440', '-o', 'root', '-g', 'c-writer', '/dev/stdin', '/etc/clavarium/own/writer.md'], 'its own file, for its own user: never the machine-wide one another would overwrite');
+    assert.equal(readFileSync(join(b.root('writer'), '/etc/clavarium/own/writer.md'), 'utf8'), b.guide.own('writer'));
+    assert.equal(b.sent.find((s) => s.name === 'other' && s.argv.includes('install')).argv.at(-1), OWN_PATH, 'a machine of its own: as always');
+    assert.match(b.guide.own('writer'), /you are its user c-writer, NOT root \(no sudo\)/, 'told it has no sudo there');
+    assert.ok(!b.guide.own('other').includes('NOT root'));
+});
+
+/* Its guide changed while its tool ran (15-11): its docket tells it, once; not at its start, when it reads it anyway. */
+test('a guide changed while its tool runs is told by its docket, once; not at its start', async (t) => {
+    const b = bench(t);
+    const told = []; b.guide.told = (name, line) => told.push([name, line]);
+    await b.guide.prepared('writer', true);
+    assert.deepEqual(told, [], 'its start: it reads it anyway');
+    await b.guide.setLines('writer', 'Answer in French.');
+    assert.deepEqual(told, [['writer', TELL_AGAIN]], 'changed: told');
+    await b.guide.prepared('writer', false);
+    assert.equal(told.length, 1, 'the same guide: not told again');
+    await b.guide.setLines('writer', '');
+    assert.equal(told.length, 2, 'changed again: told again');
+    assert.deepEqual(b.guide.lines('writer'), []);
 });

@@ -1,0 +1,135 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { bench, SKIP } from './bench.mjs';
+
+/* API keys (server/apikeys.mjs), as a person makes one: Settings, Access, a new key with the status
+   scope and one conversation to talk in, its secret copied this once; a program reads the status with
+   it, and posts in that conversation (signed with the key's name); the key's journal says it; the
+   conversation turned to Read, the next post is refused; revoked in place, the next call is refused. */
+test('API keys: made in Settings, copied once, read the status, talk in a conversation, journal, revoked: then 401', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: b.origin });
+    await me.create('alpha');
+    await me.create('beta');
+    /* A room, given to the key to talk in (07-11): its rows beside the conversations', Off first. */
+    const kitchen = (await me.api('/api/rooms', { name: 'Kitchen', conversations: ['alpha'] })).body;
+    /* A binder list, given to the key to write (07-11): its picker shown only when there are lists. */
+    const tasks = (await me.api('/api/binder', { op: 'create-list', args: { template: 'simple', title: 'Tasks' } })).body.data;
+    await me.page.locator('#nav-settings').click();
+    await me.until('Settings are shown', async () => me.page.locator('#settings').isVisible());
+    await me.until('the chapter is there', async () => !(await me.page.locator('#settings-ch-apikeys').evaluate((d) => d.hidden)));
+    await me.chapter('s-apikeys');
+    await me.until('no key yet', async () => me.page.locator('#apikeys-empty').isVisible());
+
+    /* A new key: a name, the one scope ticked (none is, at first), 90 days proposed. */
+    await me.page.locator('#apikeys-new').click();
+    assert.equal(await me.page.locator('#apikeys-scopes input[value="status"]').isChecked(), false, 'no scope until ticked');
+    assert.equal(await me.page.locator('#apikeys-days').inputValue(), '90');
+    await me.page.fill('#apikeys-label', 'Home automation');
+    await me.page.locator('#apikeys-scopes input[value="status"]').check();
+    /* And "Create rooms" (07-11): a room it makes is its own to manage. */
+    assert.equal(await me.page.locator('#apikeys-scopes input[value="create-rooms"]').isChecked(), false);
+    await me.page.locator('#apikeys-scopes input[value="create-rooms"]').check();
+    /* Its conversations, one by one: Off until chosen. */
+    const pick = me.page.locator('#apikeys-convs .apikey-conv[data-name="alpha"] .kit-seg');
+    assert.equal(await pick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'Off until chosen');
+    assert.deepEqual(await pick.locator('button').evaluateAll((bs) => bs.map((b) => b.dataset.value)), ['', 'read', 'talk', 'act'], 'Off, Read, Talk, Act');
+    await pick.locator('button[data-value="talk"]').click();
+    const roomPick = me.page.locator(`#apikeys-rooms .apikey-room[data-id="${kitchen.id}"] .kit-seg`);
+    assert.equal(await roomPick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'a room: Off until chosen');
+    assert.deepEqual(await roomPick.locator('button').evaluateAll((bs) => bs.map((b) => b.dataset.value)), ['', 'read', 'talk', 'manage'], 'Off, Read, Talk, Manage');
+    await roomPick.locator('button[data-value="manage"]').click();
+    assert.match(await me.page.locator('#apikeys-boxes').innerText(), /No voice box yet/);
+    assert.equal(await me.page.locator('#apikeys-binders-row').isVisible(), true, 'Binders: there is a list');
+    const listPick = me.page.locator(`#apikeys-binders .apikey-binder[data-id="${tasks.id}"] .kit-seg`);
+    assert.equal(await listPick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'a list: Off until chosen');
+    assert.deepEqual(await listPick.locator('button').evaluateAll((bs) => bs.map((b) => b.dataset.value)), ['', 'read', 'write'], 'Off, Read, Write');
+    await listPick.locator('button[data-value="write"]').click();
+    await me.page.locator('#apikeys-form button[type="submit"]').click();
+
+    /* Shown this once, copied. */
+    await me.until('the secret is shown', async () => me.page.locator('#apikeys-once').isVisible());
+    const shown = await me.page.locator('#apikeys-secret').inputValue();
+    assert.match(shown, /^clv_[A-Za-z0-9_-]{43}$/);
+    await me.page.locator('#apikeys-copy').click();
+    await me.until('it says copied', async () => (await me.page.locator('#apikeys-copy').innerText()) === 'Copied');
+    const secret = await me.page.evaluate(() => navigator.clipboard.readText());
+    assert.equal(secret, shown);
+    await me.until('the key is listed', async () => (await me.page.locator('#apikeys-rows .list-item').count()) === 1);
+    const row = me.page.locator('#apikeys-rows .list-item').first();
+    assert.match(await row.innerText(), /Home automation[\s\S]*Its state[\s\S]*Create rooms[\s\S]*alpha · Talk[\s\S]*Kitchen · Manage[\s\S]*Tasks · Write[\s\S]*Never used[\s\S]*Expires/);
+    await me.page.locator('#apikeys-done').click();
+    assert.equal(await me.page.locator('#apikeys-once').isVisible(), false);
+    assert.equal(await me.page.locator('#apikeys-secret').inputValue(), '', 'Done: gone from the page');
+    /* Shown that once (its field, the configuration to paste, the curl line), then nowhere in the page. */
+    assert.equal((await me.page.content()).includes(secret), false, 'Done: nowhere in the page');
+
+    /* A program elsewhere: the status, with the key. */
+    const status = (key) => fetch(`${b.origin}/api/ext/v1/status`, { headers: { authorization: `Bearer ${key}` } });
+    const ok = await status(secret);
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.deepEqual(body.conversations.map((c) => c.id).sort(), ['alpha', 'beta']);
+    assert.ok(['awake', 'working', 'needs-you'].includes(body.conversations[0].state));
+    assert.equal(typeof body.versions.clavarium, 'string');
+
+    /* Its conversation: listed, read, and a message posted in it -- signed with the key's name, never as the person. */
+    const ext = (path, more = {}) => fetch(`${b.origin}/api/ext/v1${path}`, { ...more, headers: { authorization: `Bearer ${secret}`, ...(more.body ? { 'content-type': 'application/json' } : {}) } });
+    await me.until('its chat is on', async () => (await (await ext('/conversations')).json()).conversations?.[0]?.chat === true, 30_000);
+    assert.deepEqual((await (await ext('/conversations')).json()).conversations.map((c) => [c.id, c.level]), [['alpha', 'talk']]);
+    const posted = await ext('/conversations/alpha/messages', { method: 'POST', body: JSON.stringify({ text: 'The heating is on' }) });
+    assert.equal(posted.status, 201);
+    const thread = await (await ext('/conversations/alpha/messages?last=10')).json();
+    const mine = thread.messages.find((m) => m.text === 'The heating is on');
+    assert.equal(mine?.from, 'person'); assert.equal(mine?.by, 'Home automation');
+    assert.equal((await ext('/conversations/beta/messages')).status, 403, 'a conversation not given');
+
+    /* Its room: listed by name, a message posted there signed with the key, read back by names. */
+    assert.deepEqual((await (await ext('/rooms')).json()).rooms.map((r) => [r.name, r.level]), [['Kitchen', 'manage']]);
+    /* Managed, and one made by the key: its own, at Manage. */
+    assert.equal((await ext(`/rooms/${kitchen.id}`, { method: 'POST', body: JSON.stringify({ add: { conversations: ['alpha'] } }) })).status, 200);
+    assert.equal((await ext(`/rooms/${kitchen.id}`, { method: 'POST', body: JSON.stringify({ add: { conversations: ['beta'] } }) })).status, 403, 'beta was not given');
+    const hall = await ext('/rooms', { method: 'POST', body: JSON.stringify({ name: 'Hall', conversations: ['alpha'] }) });
+    assert.equal(hall.status, 201); assert.equal((await hall.json()).room.level, 'manage');
+    assert.equal((await ext(`/rooms/${kitchen.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'Dinner at eight' }) })).status, 201);
+    const inRoom = (await (await ext(`/rooms/${kitchen.id}/messages?last=10`)).json()).messages.find((m) => m.text === 'Dinner at eight');
+    assert.equal(inRoom?.by, 'Home automation');
+    /* Its list: listed, a record added signed with the key's name. */
+    assert.deepEqual((await (await ext('/binders')).json()).binders.map((l) => [l.title, l.level]), [['Tasks', 'write']]);
+    const card = await ext(`/binders/${tasks.id}/records`, { method: 'POST', body: JSON.stringify({ title: 'Buy bulbs' }) });
+    assert.equal(card.status, 201);
+    const history = (await me.api('/api/binder', { op: 'get', args: { id: (await card.json()).record.id } })).body.data.history;
+    assert.equal(history[0].by.name, 'Home automation');
+    assert.deepEqual((await (await ext('/boxes')).json()).boxes, [], 'no box given');
+
+    /* Its journal, under it: its last calls, the newest first. */
+    await row.locator('button[data-act="journal"]').click();
+    await me.until('the journal is shown', async () => (await row.locator('.apikey-more .apikey-use').count()) >= 4);
+    assert.match(await row.locator('.apikey-more .apikey-use').first().innerText(), /GET \/v1\/boxes[\s\S]*200/, 'the newest first');
+    assert.match(await row.locator('.apikey-more').innerText(), /POST \/v1\/rooms\/[0-9a-f-]{36}\/messages[\s\S]*201/);
+    assert.match(await row.locator('.apikey-more').innerText(), /GET \/v1\/conversations\/beta\/messages[\s\S]*403/);
+    assert.match(await row.locator('.apikey-more').innerText(), /POST \/v1\/conversations\/alpha\/messages[\s\S]*201/);
+
+    /* Turned to Read in place: the next post is refused. */
+    await row.locator('button[data-act="convs"]').click();
+    const level = row.locator('.apikey-more .apikey-conv[data-name="alpha"] .kit-seg');
+    await level.locator('button[data-value="read"]').click();
+    await me.until('the row says Read', async () => /alpha · Read/.test(await me.page.locator('#apikeys-rows .list-item').first().innerText()));
+    assert.equal((await ext('/conversations/alpha/messages', { method: 'POST', body: JSON.stringify({ text: 'Again' }) })).status, 403);
+    /* Its room turned Off in place: the next read is refused. */
+    await row.locator('button[data-act="rooms"]').click();
+    await row.locator(`.apikey-more .apikey-room[data-id="${kitchen.id}"] .kit-seg button[data-value=""]`).click();
+    await me.until('the row no longer says Kitchen', async () => !/Kitchen ·/.test(await me.page.locator('#apikeys-rows .list-item').first().innerText()));
+    assert.equal((await ext(`/rooms/${kitchen.id}/messages`)).status, 403);
+
+    /* Revoked, confirmed in place: the next call is refused. */
+    await row.locator('button[data-act="revoke"]').click();
+    await row.locator('.kit-confirm button.danger').click();
+    await me.until('the list is empty again', async () => (await me.page.locator('#apikeys-rows .list-item').count()) === 0);
+    const refused = await status(secret);
+    assert.equal(refused.status, 401);
+    assert.match((await refused.json()).error, /not valid/);
+
+    assert.deepEqual(me.errors, [], 'no page error at any point');
+});

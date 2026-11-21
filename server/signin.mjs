@@ -23,6 +23,7 @@
 import { connect as tlsConnect } from 'node:tls';
 import { Refusal } from './conversations.mjs';
 import { Exchange, quoted, imapDate } from './imap.mjs';
+import { refreshAccess, thunderbird, xoauth2 } from './oauth.mjs';
 
 export { quoted, imapDate };
 
@@ -111,15 +112,50 @@ export function readSettings(body) {
     return { host, port, user, password };
 }
 
+/* The IMAP server for each OAuth provider: when a mailbox is connected by token,
+   the person never types a host -- it is the provider's own. */
+export const PROVIDER_IMAP = {
+    google: { host: 'imap.gmail.com', port: 993 },
+    microsoft: { host: 'outlook.office365.com', port: 993 },
+};
+
+/* Settings for a token-connected mailbox, from the provider, the address and the
+   refresh token obtained at consent. The stored secret (`password` here) is that
+   refresh token; a fresh access token is spent from it at each read. */
+export function oauthSettings({ provider, user, refresh }) {
+    const client = PROVIDER_IMAP[String(provider ?? '')];
+    if (!client) throw new Refusal(400, 'Choose Gmail or Microsoft.');
+    const address = String(user ?? '').trim();
+    if (address === '' || address.length > 200) throw new Refusal(400, 'The mailbox needs its email address.');
+    if (!refresh || String(refresh).length > 4096) throw new Refusal(400, 'The connection did not return a usable token.');
+    return { host: client.host, port: client.port, user: address, provider: String(provider), password: String(refresh) };
+}
+
+/* The IMAP auth step, shared by both readers: AUTHENTICATE XOAUTH2 with a fresh
+   access token when the mailbox is OAuth (its stored secret being the refresh
+   token), a plain LOGIN with the password otherwise. `fetch` is injectable. */
+export async function imapAuthenticate(imap, settings, { fetch: fetchImpl = globalThis.fetch } = {}) {
+    if (!settings.provider) {
+        await imap.command(`LOGIN ${quoted(settings.user)} ${quoted(settings.password)}`, 'The mailbox refused the user or the password.');
+        return;
+    }
+    const { clientId, clientSecret } = thunderbird(settings.provider);
+    let accessToken;
+    try {
+        ({ accessToken } = await refreshAccess(settings.provider, { clientId, clientSecret, refreshToken: settings.password, fetch: fetchImpl }));
+    } catch { throw new Refusal(502, 'The mail account must be reconnected: its authorisation was refused.'); }
+    await imap.authenticateXoauth2(xoauth2(settings.user, accessToken), 'The mailbox refused the token: reconnect the account.');
+}
+
 /* Recent sign-in messages of this mailbox, newest first. `connect` and `now`
    are injectable; a connection is always TLS, and never anything else. */
-export async function recentSignIns(settings, rules, { connect = tlsConnect, now = new Date(), ca } = {}) {
+export async function recentSignIns(settings, rules, { connect = tlsConnect, now = new Date(), ca, fetch: fetchImpl = globalThis.fetch } = {}) {
     const socket = connect({ host: settings.host, port: settings.port, servername: settings.host, ...(ca ? { ca } : {}) });
     const timer = setTimeout(() => socket.destroy(new Error('timeout')), TIMEOUT_MS);
     try {
         const imap = new Exchange(socket, BYTES_MAX);
         await imap.greeting();
-        await imap.command(`LOGIN ${quoted(settings.user)} ${quoted(settings.password)}`, 'The mailbox refused the user or the password.');
+        await imapAuthenticate(imap, settings, { fetch: fetchImpl });
         await imap.command('EXAMINE INBOX', 'The inbox could not be opened.');
         const since = new Date(now.getTime() - 24 * 3_600_000);
         const found = await imap.command(`UID SEARCH SINCE ${imapDate(since)}`, 'The mailbox could not be searched.');
@@ -145,23 +181,40 @@ export async function recentSignIns(settings, rules, { connect = tlsConnect, now
 const CACHE_MS = 5_000;
 
 export class SignInMailboxes {
-    #store; #vault; #rules; #cache = new Map(); #reader;
+    #store; #vault; #rules; #cache = new Map(); #reader; #mailboxes;
 
-    /* `rules(conversation)` gives the tool's sign-in rules, or undefined. */
-    constructor({ store, vault, rules, reader = recentSignIns }) { this.#store = store; this.#vault = vault; this.#rules = rules; this.#reader = reader; }
+    /* `rules(conversation)` gives the tool's sign-in rules, or undefined. `mailboxes()`: the mailboxes of Assets
+       (mailbox.mjs), one of which may be chosen instead of a mailbox typed in here (20-11, #395). */
+    constructor({ store, vault, rules, reader = recentSignIns, mailboxes = () => null }) { this.#store = store; this.#vault = vault; this.#rules = rules; this.#reader = reader; this.#mailboxes = mailboxes; }
 
-    /* What the page may know: that a mailbox is set, and where. Never the password. */
-    settings(conversation) {
-        const s = this.#store.get(conversation);
-        return { available: this.#rules(conversation) !== undefined, configured: s !== undefined, host: s?.host ?? null, port: s?.port ?? null, user: s?.user ?? null };
+    /* Where it reads, whichever way it was set: an asset's own settings, or its own. */
+    #where(s) {
+        if (s?.mailbox) { const boxes = this.#mailboxes(); if (!boxes) throw new Refusal(404, 'No such mailbox.'); return boxes.readSettings(s.mailbox); }
+        return { host: s.host, port: s.port, user: s.user, password: this.#vault.open(s.sealed) };
     }
 
-    /* Saves a mailbox after proving it can be read; an empty host removes it. */
+    /* What the page may know: that a mailbox is set, and where (an asset by its name). Never the password. */
+    settings(conversation) {
+        const s = this.#store.get(conversation);
+        let host = s?.host ?? null; let port = s?.port ?? null; let user = s?.user ?? null;
+        if (s?.mailbox) { const m = (this.#mailboxes()?.list() ?? []).find((x) => x.name === s.mailbox); host = m?.host ?? null; port = m?.port ?? null; user = m?.user ?? null; }
+        const offered = (this.#mailboxes()?.list() ?? []).map((m) => ({ name: m.name, user: m.user }));
+        return { available: this.#rules(conversation) !== undefined, configured: s !== undefined, mailbox: s?.mailbox ?? null, host, port, user, mailboxes: offered };
+    }
+
+    /* Saves a mailbox after proving it can be read: one of Assets by its name, or one typed in; an empty host
+       (and no mailbox) removes it. */
     async set(conversation, body) {
         this.#cache.delete(conversation);
-        if (String(body?.host ?? '').trim() === '') { this.#store.remove(conversation); return this.settings(conversation); }
+        const chosen = String(body?.mailbox ?? '').trim();
+        if (!chosen && String(body?.host ?? '').trim() === '') { this.#store.remove(conversation); return this.settings(conversation); }
         const rules = this.#rules(conversation);
         if (!rules) throw new Refusal(400, 'The tool of this conversation has no sign-in by mail.');
+        if (chosen) {
+            await this.#reader(this.#where({ mailbox: chosen }), rules);
+            this.#store.put({ name: conversation, mailbox: chosen });
+            return this.settings(conversation);
+        }
         const settings = readSettings(body);
         await this.#reader(settings, rules);
         this.#store.put({ name: conversation, host: settings.host, port: settings.port, user: settings.user, sealed: this.#vault.seal(settings.password) });
@@ -176,7 +229,7 @@ export class SignInMailboxes {
         if (!s || !rules) return [];
         const cached = this.#cache.get(conversation);
         if (cached && Date.now() - cached.at < CACHE_MS) return cached.items;
-        const items = await this.#reader({ host: s.host, port: s.port, user: s.user, password: this.#vault.open(s.sealed) }, rules);
+        const items = await this.#reader(this.#where(s), rules);
         this.#cache.set(conversation, { at: Date.now(), items });
         return items;
     }

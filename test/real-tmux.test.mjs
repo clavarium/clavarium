@@ -55,3 +55,25 @@ test('the line the server types and its Enter reach the program in two reads, in
     const lines = reads.trim().split('\n').map((l) => l.trim());
     assert.deepEqual(lines, ['R e a d i t ;', '\\r'], 'the line in one read, Enter in another, the ";" kept');
 });
+
+test('a pane left in copy mode (a screen scrolled back) still gets the line the server types: the mode is left first (17-11)', { skip: !hasTmux && 'tmux is not installed' }, async (t) => {
+    const { typeCommand } = await import('../server/talk.mjs');
+    const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-mode-'));
+    const socket = `clvmode-${process.pid}`;
+    t.after(() => { spawnSync('tmux', ['-L', socket, 'kill-server']); rmSync(dir, { recursive: true, force: true }); });
+    assert.equal(spawnSync('tmux', ['-L', socket, 'new-session', '-d', '-s', 'main', 'sh', '-c', `cat > ${dir}/got`]).status, 0);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(spawnSync('tmux', ['-L', socket, 'copy-mode', '-t', '=main:']).status, 0);
+    const argv = typeCommand('You have a new message.').map((a) => (a === 'clavarium' ? socket : a));
+    assert.equal(spawnSync(argv[0], argv.slice(1)).status, 0);
+    let got = '';
+    for (let i = 0; i < 100 && !got.includes('\n'); i++) { await new Promise((r) => setTimeout(r, 20)); try { got = readFileSync(join(dir, 'got'), 'utf8'); } catch { /* not yet */ } }
+    assert.equal(got, 'You have a new message.\n');
+    /* And a pane in no mode is left as it is: typed again, the same. */
+    assert.equal(spawnSync(argv[0], argv.slice(1)).status, 0);
+    for (let i = 0; i < 100 && got.split('\n').length < 3; i++) { await new Promise((r) => setTimeout(r, 20)); got = readFileSync(join(dir, 'got'), 'utf8'); }
+    assert.equal(got, 'You have a new message.\nYou have a new message.\n');
+});

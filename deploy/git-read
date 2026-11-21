@@ -27,12 +27,37 @@
 # Every setting the repository could use to run something is overridden on
 # every git command.
 #
+# Two more ways, after the same checks (the same refusals, the same list):
+#   --tips          the header alone: the list of branches, no pack. What
+#                   To send needs to see which branches moved, at the cost of
+#                   one for-each-ref.
+#   --have <id>...  the pack leaves out what those commits reach, for the
+#                   server has it already (the remote's history, the last
+#                   read): only what is new travels. A commit the repository
+#                   does not have is left out of that list, never an error.
+#                   The header is the same whole list of branches: a branch
+#                   whose commits did not travel is still listed, and the
+#                   server checks that it has every object each one needs.
+#
 # Exit codes: 0; 3 (refs unreadable); 128 only with the 17 bytes of an
 # empty bundle (no branches); 66 for anything else, with one line on stderr
 # saying what. git's own codes become 66, so that a code systemd uses for
 # itself (200-243) can only come from systemd. A git killed by a signal is
 # killed again here by the same signal, so that the host still sees a signal.
 NAME="$1"
+MODE="${2:-}"
+case "$MODE" in
+  "") [ $# -eq 1 ] || { echo "BAD ARGUMENTS" >&2; exit 66; } ;;
+  --tips) [ $# -eq 2 ] || { echo "BAD ARGUMENTS" >&2; exit 66; } ;;
+  --have)
+    shift 2
+    [ $# -ge 1 ] && [ $# -le 256 ] || { echo "BAD ARGUMENTS" >&2; exit 66; }
+    for id in "$@"; do
+      case "$id" in *[!0-9a-f]*) echo "BAD ARGUMENTS" >&2; exit 66 ;; esac
+      [ "${#id}" -eq 40 ] || { echo "BAD ARGUMENTS" >&2; exit 66; }
+    done ;;
+  *) echo "BAD ARGUMENTS" >&2; exit 66 ;;
+esac
 [ -d .git ] && [ ! -L .git ] && [ ! -e .git/commondir ] && [ ! -L .git/commondir ] \
   || { echo "NOT A PLAIN .git DIRECTORY" >&2; exit 66; }
 for p in .git/refs .git/packed-refs; do
@@ -66,12 +91,31 @@ format=$(g rev-parse --show-object-format) || failed $? "GIT COULD NOT OPEN THE 
 [ "$format" = "sha1" ] || { echo "NOT SHA-1" >&2; exit 66; }
 
 refs=$(g for-each-ref --format='%(objectname) %(refname)' refs/heads/) || failed $? "GIT COULD NOT LIST THE BRANCHES"
-listed=$(printf '%s\n' "$refs" | sed -n 's|^[0-9a-f]\{40\} ||p' | sort -u)
+listed=$(printf '%s\n' "$refs" | sed -n 's|^[0-9a-f]\{40\} ||p')
+# A file or folder whose name starts with a dot is no ref, for git either: no
+# ref name may have a part that starts with one (check-ref-format), so git
+# can never make it and never lists it. Such files do appear on their own:
+# a folder shared into a machine (sshfs, FUSE) keeps a ref file that was
+# replaced while something still had it open as .fuse_hidden<number>, beside
+# the new one, until it is closed. Counted, it refused healthy repositories
+# as "broken or changing".
 on_disk=$( {
-  [ -d .git/refs/heads ] && find -L .git/refs/heads -type f ! -name '*.lock' -printf 'refs/heads/%P\n'
+  [ -d .git/refs/heads ] && find -L .git/refs/heads -mindepth 1 -name '.*' -prune -o -type f ! -name '*.lock' -printf 'refs/heads/%P\n'
   [ -f .git/packed-refs ] && sed -n 's|^[0-9a-f]\{40\} \(refs/heads/.*\)$|\1|p' .git/packed-refs
-} | sort -u)
-[ "$listed" = "$on_disk" ] || { echo "BROKEN OR CHANGING REFS" >&2; exit 66; }
+})
+# The two lists compared as sets, in the shell alone. No sort, no cut, nothing
+# of coreutils here: on a host whose coreutils are the Rust ones (uutils),
+# sort crashed inside this sandbox ("Aborted (core dumped)"), the list on disk
+# came out empty, and healthy repositories were refused as "broken or
+# changing". Every line of each list must be a line of the other.
+nl='
+'
+in_list() { case "$nl$2$nl" in *"$nl$1$nl"*) return 0 ;; esac; return 1; }
+same=yes; saved=$IFS; IFS=$nl; set -f
+for x in $listed; do in_list "$x" "$on_disk" || same=no; done
+for x in $on_disk; do in_list "$x" "$listed" || same=no; done
+set +f; IFS=$saved
+[ "$same" = yes ] || { echo "BROKEN OR CHANGING REFS" >&2; exit 66; }
 [ "$(printf '%s\n' "$refs" | grep -c .)" -le 1000 ] || { echo "MORE THAN 1000 BRANCHES" >&2; exit 66; }
 
 if [ -z "$refs" ]; then
@@ -79,7 +123,15 @@ if [ -z "$refs" ]; then
   exit 128
 fi
 printf '# v2 git bundle\n%s\n\n' "$refs"
-printf '%s\n' "$refs" | cut -c1-40 | g pack-objects --stdout --revs --delta-base-offset -q
+[ "$MODE" = "--tips" ] && exit 0
+# The commits to leave out: only those this repository has (a name of
+# another kind, or none, would stop pack-objects). Should this look fail,
+# nothing is left out: the whole pack goes, larger, never wrong.
+have=""
+if [ "$MODE" = "--have" ]; then
+  have=$(printf '%s\n' "$@" | g cat-file --batch-check='%(objectname) %(objecttype)' | sed -n 's/^\([0-9a-f]\{40\}\) commit$/^\1/p')
+fi
+{ printf '%s\n' "$refs" | sed -n 's/^\([0-9a-f]\{40\}\) .*/\1/p'; [ -z "$have" ] || printf '%s\n' "$have"; } | g pack-objects --stdout --revs --delta-base-offset -q
 rc=$?
 [ "$rc" -eq 0 ] && exit 0
 failed "$rc" "GIT COULD NOT PACK THE BRANCHES"

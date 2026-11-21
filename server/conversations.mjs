@@ -9,14 +9,30 @@
 import { isConversationName, identifierFrom, titleProblem, groupProblem } from './names.mjs';
 import { JsonFile } from './store.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
-import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
+import { WORK, VM_USER, SHARING_STEP, stepLine, vmName, WAIT_FRESH_MS } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
+import { homeExcludes, wholeStream, readManifest, workEmpty, unpackHere, restoreWork, CARRY } from './carry.mjs';
 import { availableParallelism } from 'node:os';
+import { spawn } from 'node:child_process';
+import { readFileSync, createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
+/* A copy reading its original's memory: nothing for this long, and it is ended (and why said). */
+export const COPY_QUIET_MS = Number(process.env.CLAVARIUM_COPY_QUIET_MS) || 3 * 60_000;
+/* A size in words: 840 KB, 12 MB, 1.4 GB. */
+const sizeWords = (bytes) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : bytes >= 1024 ** 2 ? `${Math.round(bytes / 1024 ** 2)} MB` : `${Math.round(bytes / 1024)} KB`);
+/* The door of a conversation in a shared machine (#221), put in the machine by the server. */
+export const DOOR = new URL('../config/machine/clavarium-enter', import.meta.url);
+/* The most programs one conversation may run in a shared machine. */
+export const SHARED_PROCS = 1024;
+/* A NEW SHARED MACHINE's memory (12-11, operator): chosen when it is made, 4 GB unless said; the conversations
+   that live in it share it, each within its own limit. */
+export const SHARED_MB = 4096;
 /* Moving a work folder: what must stay free after it, and how long a copy may take. */
 export const ROOM_MB = 1024;
 /* A file shown straight from a machine's disk: where, and how large at most. */
@@ -54,6 +70,26 @@ export const ANSWER_PROBE = Object.freeze(['test', '-d', '/']);
    that is starting): the page tries again without being asked. */
 /* The name a chat gives its tool, at most. */
 export const CHAT_NAME_MAX = 40;
+/* WHAT AN OWNER DOES TO A MACHINE (machineAction, 09-11): start it, stop it, restart it, put it to
+   sleep, or force it off as a power cut would. One at a time per machine; Force stop takes the place
+   of any other. */
+export const MACHINE_KINDS = Object.freeze(['start', 'stop', 'restart', 'sleep', 'force']);
+/* How long each step is given (seconds), as the host program bounds it: past it, the page offers
+   "Force now", which moves on to the next step. */
+export const STEP_LIMITS = Object.freeze({ polite: 60, force: 30, term: 5, kill: 5, check: 10, start: 180, suspend: 120, resleep: 300, stop: 120 });
+/* The way down, in order (the host program's `vm halt`), and the step "Force now" moves on to. */
+const DOWN = ['polite', 'force', 'term', 'kill', 'check'];
+const NEXT = Object.freeze({ polite: 'force', force: 'term', term: 'kill' });
+/* Each step in words, for the journal and the chat (the page has its own, web/app.js). */
+const STEP_WORDS = Object.freeze({ polite: 'polite stop', force: 'forced stop', term: 'SIGTERM', kill: 'SIGKILL', check: 'check', start: 'start', suspend: 'sleep', resleep: 'wake and sleep again', stop: 'clean stop' });
+const KIND_DOING = Object.freeze({ start: 'starting', stop: 'stopping', restart: 'restarting', sleep: 'going to sleep', force: 'being forced off', resize: 'being resized', move: 'moving to a shared machine' });
+/* THE WATCHDOG of a machine (watchdog.mjs), as its owner set it: on, with how long it may stay mute or
+   full before it is forced off and started again. The defaults, and what may be chosen (minutes). */
+export const WATCHDOG_DELAY_MIN = 60;
+export const WATCHDOG_MIN = 10;
+export const WATCHDOG_MAX = 24 * 60;
+const KIND_WORDS = Object.freeze({ start: ['Started', 'Not started'], stop: ['Stopped', 'Not stopped'], restart: ['Restarted', 'Not restarted'], sleep: ['Asleep', 'Not asleep'], force: ['Stopped by force', 'Not stopped by force'], resize: ['Resized', 'Not resized'] });
+
 export class Refusal extends Error {
     constructor(status, message, { retry = false } = {}) { super(message); this.status = status; if (retry) this.retry = true; }
 }
@@ -71,7 +107,14 @@ const sizeSaid = (c, asked = {}) => {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #uid; #gid;
+    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #holding = new Set(); #borrowed = new Set(); #uid; #gid;
+    /* THE ONE ACTION RUNNING ON EACH MACHINE (machineAction), by name: a start, a stop, a restart, a
+       sleep, a resize, a force stop. A second one is refused while it runs; Force stop ends it and
+       takes its place. */
+    #acts = new Map();
+    /* Set by the server: an action's outcome, in words -- written in the journal (events.mjs), and
+       said in its chat when `chat` (a restart says it already, through `renewed`). */
+    machineSaid = () => {};
     /* Set by the server: prepares the VM before the tool is attached, and
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
@@ -109,6 +152,21 @@ export class Conversations {
        or growing a machine would leave this server less than its reserve
        (capacity.mjs). `{ kind: 'create'|'start'|'grow', name, memoryMb, diskMb }`. */
     room = async () => {};
+    /* Set by the server: a COPY's work folder made from its original's (host side, its own files only), and the
+       accesses of the original given to the copy (copy, below). */
+    copyWork = async () => {};
+    copyRights = async () => {};
+    /* Set by the server: what a conversation was given, for a whole export -- each by its id, a secret by its name
+       only (never its value); and the same given again on an import, where it exists here -> { linked, missing }. */
+    accessesOf = async () => ({});
+    relink = async () => ({ linked: [], missing: [] });
+    /* Set by the server: its wake-ups, for a whole export; and on its import, when asked, its reminders (from the
+       export's work folder) and those wake-ups given again (15-11, as a copy does). */
+    wakeupsOf = () => undefined;
+    /* Set by the server: a machine put to sleep or stopped, woken by an opening -- `by` who (16-11: a sleeper found
+       awake in the morning, and nothing said who woke it). Said in What happened. */
+    woken = () => {};
+    importReminders = async () => {};
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
@@ -122,8 +180,14 @@ export class Conversations {
             /* A move cut short leaves the machine as it was at that moment:
                it is said, with where to look, rather than guessed at. */
             if (c.phase === 'moving') store.patch(c.name, { phase: 'ready', step: undefined, moved: 'The server restarted while the work folder was being moved. The files are safe, in the machine: look at /work, /work.before-move and /work.moving.' });
-            if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
+            /* A move into a shared machine cut short (14-11): back in its own machine, as it was -- never « build it
+               again », which would make its own machine anew and lose its tool's memory. */
+            if (c.phase === 'building' && c.movingTo) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, sharedMachine: undefined, machineMb: undefined, machineUser: undefined, ...(c.movingFromMb ? { memoryMb: c.movingFromMb } : {}), movingTo: undefined, movingFromMb: undefined, stopped: true, moved: `The server restarted while it was moving to the shared machine ${c.movingTo}: it stays in its own machine, as it was. Move it again when you like.` });
+            else if (c.phase === 'building' && c.movingOutOf) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, ...c.movingOutOf, movingOutOf: undefined, stopped: true, moved: `The server restarted while it was moving out of the shared machine ${c.movingOutOf.sharedMachine}: it stays there. Move it again when you like.` });
+            else if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
             if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restartingSince: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
+            /* An action cut short: said as such, never left running on the page. */
+            if (store.get(c.name)?.machine) store.patch(c.name, { machine: undefined, machineReport: { kind: c.machine.kind, ok: false, cut: true, at: new Date().toISOString(), steps: (c.machine.steps ?? []).filter((x) => x.state !== 'todo').map(({ id, state, s }) => ({ id, result: state === 'run' ? 'cut' : state, ...(s !== undefined ? { s } : {}) })), advice: 'look', said: 'The server restarted during this action: look at its state.' } });
             /* Nothing of a start is going on any more: a page must not wait for it. */
             if (store.get(c.name)?.progress) store.patch(c.name, { progress: undefined });
         }
@@ -190,7 +254,7 @@ export class Conversations {
             while (!done) {
                 await new Promise((r) => { setTimeout(r, this.#pollMs).unref?.(); });
                 if (done) return;
-                const state = await this.#vms.state(name).catch(() => undefined);
+                const state = await this.#vms.state(name, { within: WAIT_FRESH_MS }).catch(() => undefined);
                 if (done) return;
                 if (how === 'stop' && (state === 'Stopping' || state === 'Suspending')) this.#reach(name, 'stopping');
                 if (how === 'start' && state === 'Running') this.#reach(name, 'answering');
@@ -230,7 +294,7 @@ export class Conversations {
         return this.#store.all().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
             /* An AI tool has an instruction file; a shell has none: what is dictated there is never marked. */
-            return { ...c, rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
+            return { ...c, ...(c.lentTo && !this.#borrowed.has(c.name) ? { lentTo: undefined } : {}), rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
         });
     }
 
@@ -238,12 +302,15 @@ export class Conversations {
 
     /* Whether a new machine may be made for this request: what `create`
        checks, and the server's room (capacity.mjs). Asked before `create`. */
-    async admit({ name, title, tool, memoryMb } = {}) {
+    async admit({ name, title, tool, memoryMb, machine, machineMb } = {}) {
         if (!name && typeof title === 'string' && !titleProblem(title)) ({ name } = this.#naming({ title }));
+        /* Into a shared machine that is there already: no new machine, no room asked for it. */
+        if (typeof machine === 'string' && this.#machineMbOf(machine) !== undefined) return;
         const chosen = this.#tools.find((t) => t.id === tool);
         /* What `create` refuses anyway is said by `create`. */
         if (!chosen || !isConversationName(name) || this.#store.get(name)) return;
-        const memory = memoryMb ?? chosen.memoryMb;
+        /* A new shared machine: the room it takes is its own size, not the conversation's. */
+        const memory = typeof machine === 'string' ? (machineMb ?? SHARED_MB) : (memoryMb ?? chosen.memoryMb);
         if (!Number.isInteger(memory)) return;
         await this.room({ kind: 'create', memoryMb: memory });
     }
@@ -260,8 +327,20 @@ export class Conversations {
         return { name: id, title: title !== undefined && title !== id ? title : undefined };
     }
 
-    create({ name: given, title: read, tool, memoryMb, workOnDisk, group }) {
+    /* The size of a shared machine: what its first conversation made it with (each of its conversations carries
+       it); undefined while none lives in it. */
+    #machineMbOf(machine) {
+        const there = this.#store.all().filter((x) => x.sharedMachine === machine);
+        if (!there.length) return undefined;
+        return there.map((x) => x.machineMb).find(Number.isInteger) ?? Math.max(...there.map((x) => Number(x.memoryMb) || 0));
+    }
+
+    /* `after`: a promise its build waits for (a copy reads its original first); resolving false, no build. */
+    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group, machine, machineMb, after }) {
         const { name, title } = this.#naming({ name: given, title: read });
+        /* IN A SHARED MACHINE (#221), named: its work is always kept here (mounted into its place there). */
+        if (machine !== undefined && (typeof machine !== 'string' || !isConversationName(machine))) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
+        if (machine !== undefined && machine === given) throw new Refusal(400, 'A shared machine has a name of its own, not a conversation\'s.');
         if (group !== undefined) { const problem = groupProblem(group); if (problem) throw new Refusal(400, problem); }
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         const chosen = this.#tools.find((t) => t.id === tool);
@@ -270,20 +349,40 @@ export class Conversations {
         if (!Number.isInteger(memory) || memory < chosen.memoryMb || memory > 16384) {
             throw new Refusal(400, `This tool needs at least ${chosen.memoryMb} MB of memory.`);
         }
+        /* Cores and disk, chosen at creation like the memory; their defaults when not given. */
+        const cores = cpus ?? 1;
+        if (!Number.isInteger(cores) || cores < 1 || cores > availableParallelism()) throw new Refusal(400, `Cores are 1 to ${availableParallelism()} (what this server has).`);
+        const disk = diskGb ?? DISK_GB;
+        if (!Number.isInteger(disk) || disk < DISK_GB || disk > DISK_MAX_GB) throw new Refusal(400, `Disk is ${DISK_GB} to ${DISK_MAX_GB} GB.`);
+        /* Its shared machine's size: chosen when it is made (4 GB unless said), then the same for all in it; a
+           conversation never asks more than its machine has. */
+        let size;
+        if (machine !== undefined) {
+            const there = this.#machineMbOf(machine);
+            size = there ?? machineMb ?? SHARED_MB;
+            if (there === undefined && (!Number.isInteger(size) || size < 1024 || size > 16384)) throw new Refusal(400, 'A shared machine has 1024 to 16384 MB of memory.');
+            if (memory > size) throw new Refusal(400, `The machine ${machine} has ${size} MB of memory: this conversation cannot have more (${memory} MB).`);
+        }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, ...(machine ? { sharedMachine: machine, machineMb: size } : {}), work: workOnDisk === true && !machine ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         /* A new one comes first in its folder (or first of those in none). */
         const { order, groups } = this.#order();
         this.#store.put(conversation);
         this.#keepOrder({ order: [name, ...order], groups: group && !groups.includes(group) ? [...groups, group] : groups });
-        this.built = this.#build(name, chosen, memory);
+        this.built = after === undefined ? this.#build(name, chosen, memory) : Promise.resolve(after).then((go) => (go === false || !this.#store.get(name) ? undefined : this.#build(name, chosen, memory)));
         return conversation;
     }
 
     /* `again`: a machine built anew for a conversation that had one. */
     async #build(name, tool, memoryMb, again = false) {
+        if (this.#store.get(name)?.sharedMachine) return this.#buildShared(name, tool, memoryMb);
         const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
+        /* The size chosen at creation (stored by create, kept on a rebuild): launched with it, or, for a
+           copy of a ready-made machine, brought to it while the copy is still stopped. */
+        const made = this.#store.get(name);
+        const diskGb = made?.diskGb ?? DISK_GB; const cpus = made?.cpus ?? 1;
+        const custom = diskGb !== DISK_GB || cpus !== 1;
         /* A COPY OF THE READY-MADE MACHINE when there is one that holds this
            tool (see shelf.mjs): it only has to boot. Anything wrong with the
            copy -- an older VM manager without "clone", a copy that does not
@@ -293,13 +392,18 @@ export class Conversations {
         let readyMade = false;
         if (from) {
             const cloned = await this.#vms.clone(name, from, memoryMb);
+            if (cloned.code === 0 && custom) {
+                /* Still stopped, like the memory the clone set: its cores, and its disk grown to the chosen size. */
+                if (cpus !== 1) await this.#vms.setCpus(name, cpus).catch(() => {});
+                if (diskGb !== DISK_GB) await this.#vms.setDisk(name, diskGb).catch(() => {});
+            }
             const started = cloned.code === 0 ? await this.#vms.start(name) : cloned;
             readyMade = started.code === 0;
             if (!readyMade && await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
             if (!this.#store.get(name)) return undefined; /* archived meanwhile */
         }
         if (!readyMade) {
-            const launched = await this.#vms.launch(name, memoryMb);
+            const launched = await this.#vms.launch(name, memoryMb, custom ? diskGb : undefined, custom ? cpus : undefined);
             if (launched.code !== 0) return fail('The machine did not start', launched);
         }
         this.#store.patch(name, { step: 'Preparing the machine', readyMade: readyMade || undefined });
@@ -349,6 +453,8 @@ export class Conversations {
         }
         /* A new disk holds no session of the tool: its first start is a plain
            one (`false`: known, as opposed to a record made before this was kept). */
+        /* A copy being made (copy): built, but not usable until its work and its state are in. */
+        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', toolStarted: false }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
         this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
         this.#reach(name, 'folders');
         /* A machine that has just been built holds nothing of what was put
@@ -362,42 +468,113 @@ export class Conversations {
         return undefined;
     }
 
+    /* A CONVERSATION IN A SHARED MACHINE (#221): the machine made by the first one that lives in it (its door
+       installed), started if it sleeps; then this one's place in it -- told to the host, its own user made by its
+       door, its work mounted there for that user, its tool installed (what runs as root for the machine, the rest
+       as its user). The same end as a machine of its own: ready, its tool started by the next opening. */
+    async #buildShared(name, tool, memoryMb) {
+        const c = this.#store.get(name);
+        const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`, buildingSince: undefined }); return undefined; };
+        let state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (state === undefined) {
+            this.#store.patch(name, { step: `Making the shared machine ${c.sharedMachine}` });
+            const launched = await this.#vms.launch(name, Number.isInteger(c.machineMb) ? c.machineMb : memoryMb);
+            if (launched.code !== 0) return fail('The shared machine did not start', launched);
+            const sharing = await this.#vms.execMachine(name, [...SHARING_STEP], { timeoutMs: STEP_MS });
+            if (sharing.code !== 0) return fail('The shared machine could not be prepared for shared folders', sharing);
+        } else if (state !== 'Running') {
+            this.#store.patch(name, { step: `Starting the shared machine ${c.sharedMachine}` });
+            const started = await this.#vms.start(name);
+            if (started.code !== 0) return fail('The shared machine did not start', started);
+        }
+        /* Its door, always the one of this version (put again: an older one is replaced). The page's steps follow
+           (preparing, installing): a new shared machine takes minutes, never one frozen "Starting". */
+        this.#reach(name, 'preparing');
+        this.#store.patch(name, { step: `Opening its door in the shared machine ${c.sharedMachine}` });
+        const door = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-m', '0755', '-o', 'root', '-g', 'root', '/dev/stdin', '/usr/local/sbin/clavarium-enter'], { input: readFileSync(DOOR, 'utf8'), timeoutMs: STEP_MS });
+        if (door.code !== 0) return fail('The door of the shared machine could not be put in place', door);
+        this.#store.patch(name, { step: 'Making its place in the shared machine' });
+        const told = await this.#vms.share(name);
+        if (told.code !== 0) return fail('The host did not take it into the shared machine', told);
+        const me = await this.#vms.execMachine(name, ['sudo', '-n', 'clavarium-enter', name, '--', 'sh', '-c', 'id -u; id -g'], { timeoutMs: STEP_MS });
+        const [uid, gid] = String(me.stdout ?? '').trim().split('\n').map(Number);
+        if (me.code !== 0 || !Number.isInteger(uid) || !Number.isInteger(gid)) return fail('Its own user could not be made', me);
+        this.#store.patch(name, { machineUser: { uid, gid } });
+        /* Its limits, read by its door at each entry: the memory chosen for it, and a bound on its programs -- one
+           conversation that runs away never takes the machine from the others. */
+        const limits = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-D', '-m', '0644', '-o', 'root', '-g', 'root', '/dev/stdin', `/etc/clavarium/limits/${name}`],
+            { input: `mem=${Number(c.memoryMb) || tool.memoryMb}\nprocs=${SHARED_PROCS}\n`, timeoutMs: STEP_MS });
+        if (limits.code !== 0) return fail('Its limits could not be set in the shared machine', limits);
+        const kept = await this.#vms.workMake(name);
+        const shown = kept.code === 0 ? await this.#vms.workMount(name, this.#uid, this.#gid) : kept;
+        if (shown.code !== 0) return fail('The work folder could not be shown in the shared machine', shown);
+        /* Its tool: there already (another conversation installed it), or installed -- a step as root for the
+           machine, any other as its own user (its settings, in its home). */
+        const there = tool.steps.length === 0 || (await this.#vms.exec(name, ['sh', '-c', `command -v ${tool.command[0]}`])).code === 0;
+        /* There already: its own steps still (its settings, in its own home), the machine's not. */
+        const steps = there ? tool.steps.filter((s) => s.argv[0] !== 'sudo') : tool.steps;
+        this.#reach(name, 'installing', there ? 'came' : undefined);
+        for (const [i, step] of steps.entries()) {
+            if (!this.#store.get(name)) return undefined;
+            this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${steps.length})` });
+            this.#reach(name, 'installing', `${i + 1}/${steps.length}`);
+            const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
+            if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
+        }
+        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', toolStarted: false }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
+        this.#reach(name, 'folders');
+        this.#fresh.add(name);
+        this.#mountAgain.add(name);
+        this.ready(name);
+        return undefined;
+    }
+
     /* Builds the machine of a conversation AGAIN: after a build that failed,
        or when the machine is gone (a backup put back on a new computer brings
        the conversation's name, tool and folders, not its machine). What was
        on the old machine's disk is not brought back: nothing here can.
        A conversation that has a working machine is refused -- this is not a
        reset button. */
-    async rebuild(name) {
+    /* `reset` (01-11, its owner's ask, confirmed by typing its name): a working machine too -- deleted with
+       everything on it and its work files, and built anew; its settings and what is attached to it stay. */
+    async rebuild(name, { reset = false } = {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
-        if (c.phase === 'building') throw new Refusal(409, 'This conversation is still being built.');
+        if (c.phase === 'building' && !reset) throw new Refusal(409, 'This conversation is still being built.');
         const tool = this.#tools.find((t) => t.id === c.tool);
         if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
         const state = await this.#vms.state(name, { fresh: true });
-        if (state !== undefined && c.phase !== 'failed') throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
-        await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
+        if (state !== undefined && c.phase !== 'failed' && !reset) throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
+        /* A reset replaces its own machine: the room it takes is given back first. */
+        if (!(reset && state !== undefined)) await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
         this.#cancelStop(name);
         this.drop(name);
         /* Marked first: two requests cannot both start a build. */
         const now = new Date().toISOString();
         this.#store.patch(name, { phase: 'building', step: 'Starting the machine', error: undefined, asleep: false, buildingSince: now, progress: buildProgress(now) });
         this.built = (async () => {
-            /* What a failed build left behind is cleared away first. */
+            /* What a failed build left behind is cleared away first; a reset, its files too. */
             if (state !== undefined) await this.#vms.remove(name);
+            if (reset && c.work === 'kept') await this.#vms.workErase(name);
             return this.#build(name, tool, c.memoryMb, true);
         })();
         return this.#store.get(name);
     }
 
     /* What a terminal must run to reach this conversation. Wakes the VM first. */
-    async open(name, say = () => {}) {
+    async open(name, say = () => {}, by = 'the server') {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : c.phase === 'moving' ? 'This conversation is moving its work folder.' : 'This conversation could not be built.');
+        /* Being stopped, put to sleep or forced off: not woken under it; the page tries again after. */
+        const acting = this.#acts.get(name);
+        if (acting && ['stop', 'force', 'sleep', 'start'].includes(acting.kind)) throw new Refusal(409, 'Its machine is being changed: wait for the end of it.', { retry: true });
         this.#cancelStop(name);
-        /* Opening is the explicit gesture that ends a sleep. */
+        /* Opening is the explicit gesture that ends a sleep, or a stop its owner asked for. */
         if (c.asleep) this.#store.patch(name, { asleep: false });
+        if (c.stopped) this.#store.patch(name, { stopped: undefined });
+        if (c.asleep || c.stopped) { try { this.woken(name, by, c.asleep ? 'asleep' : 'stopped'); } catch { /* said, nothing more */ } }
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
         /* Another screen is applying the size kept for its wake: this one opens once it is over. */
         await this.#resizing.get(name)?.catch(() => {});
@@ -593,6 +770,18 @@ export class Conversations {
         return this.#store.get(name);
     }
 
+    /* WHICH BINDER ITS CHAT SHOWS BESIDE IT (the side panel), the same on every device:
+       '' for the automatic choice (the first binder of batches it was given), '-' for none,
+       else a binder's id. Which binders it was given is Binder's: one it no longer has
+       falls back to the automatic choice on the page. */
+    setTasksBinder(name, given) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (typeof given !== 'string' || given.length > 100 || !/^(|-|[a-z0-9][a-z0-9._-]*)$/.test(given)) throw new Refusal(400, 'Give a binder\'s id, "-" for none, or nothing for the automatic choice.');
+        this.#store.patch(name, { tasksBinder: given || undefined });
+        return this.#store.get(name);
+    }
+
     /* THE NAME A PERSON READS, changed at any time; its identifier stays.
        Kept only when it differs from the identifier: a conversation made
        before free names is read by its identifier, and nothing is rewritten. */
@@ -710,7 +899,7 @@ export class Conversations {
     async #until(name, done, ms) {
         const end = Date.now() + ms;
         for (;;) {
-            const state = await this.#vms.state(name).catch(() => 'Unknown');
+            const state = await this.#vms.state(name, { within: WAIT_FRESH_MS }).catch(() => 'Unknown');
             if (done(state) || Date.now() >= end) return state;
             await new Promise((r) => setTimeout(r, this.#pollMs));
         }
@@ -747,6 +936,562 @@ export class Conversations {
         return { session: 'renewed' };
     }
 
+    /* RESTARTS ONLY ITS TOOL (04-11), for a tool that asks to be restarted (to take up new tools): its
+       machine is not touched -- a whole-machine restart may not start again, and a tool has no need of
+       it. Its tmux is ended and the tool started again in its terminal (`ready`), taking up its last
+       session, as after any start. A machine that does not run is left as it is: its next opening starts
+       the tool anyway. Resolves with whether the tool was restarted. */
+    async restartTool(name) {
+        this.#busyCheck(name);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') return false;
+        this.drop(name);
+        await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+        this.ready(name);
+        return true;
+    }
+
+    /* CARRIED ELSEWHERE (11-11, #351): what the conversation is beyond /work -- its tool's state, where its
+       entry in config/tools.json says it is (`state.keep`, without `state.skip`) -- as one .tar.gz streamed
+       from its machine, a manifest first (clavarium-conversation.json: its tool, its name, its size). Nothing
+       of the tool is known here: any tool that says where its state is can be exported, imported, moved.
+       The machine must run (its home is in it). -> { name: the file's name, stream } */
+    /* `toWork` (14-11): the archive written into its own work folder (/work/.clavarium-carry/<toWork>.tgz), that
+       the server reads on its side, rather than sent out through the VM manager's output -- which stalled for good
+       past ~36 KB on the owner's server. Its output is then empty. */
+    async exportState(name, { toWork } = {}) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: it cannot be exported.`);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        const manifest = JSON.stringify({ kind: 'clavarium-conversation', version: 1, tool: c.tool, name: c.name, ...(c.title ? { title: c.title } : {}), memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB, at: new Date().toISOString() });
+        /* In its machine: the manifest written aside, then one archive -- the manifest first, then what is kept
+           (a path it has not made yet left out), the cache left out. */
+        /* (Its paths are plain -- letters, digits, . _ / - -- checked by tools.mjs: given as words.) */
+        /* A reading of an earlier try that never ended (14-11: three left, each holding its pipe): ended first. */
+        const script = 'for p in $(pgrep -f "^tar -czf .* clavarium-conversation.json"); do kill $p 2>/dev/null; done; m=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+            + 'ex=""; for a in $2; do ex="$ex --exclude=./$a"; done; ks=""; for a in $3; do if [ -e "$HOME/$a" ]; then ks="$ks ./$a"; fi; done; '
+            + 'out=-; if [ -n "$4" ]; then mkdir -p /work/.clavarium-carry && out="/work/.clavarium-carry/$4.tgz"; fi; '
+            + 'rc=0; tar -czf "$out" --warning=no-file-changed -C "$m" clavarium-conversation.json -C "$HOME" $ex $ks || rc=$?; rm -rf "$m"; '
+            /* 1: a file changed while read (its tool writing its log as it is read, 14-11: a live Claude Code): the
+               archive is whole all the same -- what was there, read; only a real error (2) fails. */
+            + '[ "$rc" -le 1 ]';
+        const id = typeof toWork === 'string' && /^[a-z0-9-]{1,64}$/.test(toWork) ? toWork : '';
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' '), id]);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
+        /* What it said when it failed: kept short, for the message that says why (a copy, a move). */
+        child.said = '';
+        child.stderr.on('data', (d) => { child.said = (child.said + d).slice(-2000); });
+        return { name: `${name}-${new Date().toISOString().slice(0, 10)}.clavarium.tar.gz`, stream: child.stdout, child };
+    }
+
+    /* EVERYTHING OF IT, CARRIED (14-11, its owner's ask): its manifest with what it was given (accesses, by id), its
+       whole home (without HOME_LEFT_OUT, carry.mjs) and its work folder, as one .tar.gz streamed to the person. Its
+       home is written by its machine into its work folder (never through the VM manager's output), then sent from
+       here followed by its work, read here. Its work must be kept on this server. -> { name, stream, child } */
+    async exportWhole(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        if (!workDir) throw new Refusal(409, 'Its work is on its own machine\'s disk: keep it here first (Its files), then export it.');
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        const accesses = await this.accessesOf(name);
+        const manifest = JSON.stringify({ kind: 'clavarium-conversation', version: 2, whole: true, tool: c.tool, name: c.name, ...(c.title ? { title: c.title } : {}), memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB, at: new Date().toISOString(), accesses, wakeups: this.wakeupsOf(name) });
+        const id = `whole-${Date.now()}`;
+        /* In its machine: the manifest, then its home as home/ (a link's target left as it is), one block per record
+           so that its work can follow it (carry.mjs). Globs off: the words left out are given to tar as they are. */
+        const script = 'set -f; m=$(mktemp -d) || exit 2; printf "%s" "$1" > "$m/clavarium-conversation.json"; '
+            + 'ex=""; for a in $2; do ex="$ex --exclude=$a"; done; mkdir -p /work/' + CARRY + '; '
+            + 'rc=0; tar -cf "/work/' + CARRY + '/$3.tar" -b 1 --warning=no-file-changed -C "$m" clavarium-conversation.json -C "$HOME" $ex --transform "s,^\\.,home,S" . || rc=$?; rm -rf "$m"; '
+            /* 1: a file changed while read: the archive is whole all the same. */
+            + '[ "$rc" -le 1 ]';
+        const homeTar = join(workDir, CARRY, `${id}.tar`);
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, homeExcludes(tool?.state?.skip ?? []).join(' '), id]);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] });
+        let said = '';
+        child.stderr.on('data', (d) => { said = (said + d).slice(-2000); });
+        const code = await new Promise((ok) => { child.on('error', () => ok(-1)); child.on('close', ok); });
+        const drop = () => rmSync(homeTar, { force: true });
+        if (code !== 0) { drop(); throw new Refusal(502, `Not exported: ${firstLine(said) || `exit ${code}`}`); }
+        let out;
+        try { out = wholeStream(homeTar, workDir, drop); } catch (error) { throw new Refusal(502, `Not exported: ${error.message}`); }
+        return { name: `${name}-${new Date().toISOString().slice(0, 10)}.clavarium-all.tar.gz`, stream: out.stream, child: { kill: out.kill } };
+    }
+
+    /* PUT BACK an exported state in this conversation (same tool): its tool stopped, the archive unpacked in
+       its home, its tool started again, taking up its last session. -> { tool, from } */
+    /* A WHOLE export (exportWhole) puts back its home, its work folder and its accesses: its work only into an empty
+       one, unless `replaceWork` -- what is there is never thrown away silently; its reminders and wake-ups only when
+       asked (`reminders`). -> { tool, from, whole, linked, toLink } */
+    async importState(name, input, { replaceWork = false, reminders = false } = {}) {
+        const c = this.#busyCheck(name);
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        /* Received first, whole, beside its work when it has one here (the same disk its work goes to). */
+        const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        const id = `up-${Date.now()}`;
+        const aside = workDir ? join(workDir, CARRY) : mkdtempSync(join(tmpdir(), 'clv-import-'));
+        mkdirSync(aside, { recursive: true });
+        const file = join(aside, `${id}.tgz`); const stage = join(aside, id);
+        try {
+            if (typeof input === 'string') copyFileSync(input, file);
+            else await new Promise((ok, fail) => { const w = createWriteStream(file); input.on('error', fail); w.on('error', fail); w.on('finish', ok); input.pipe(w); });
+            const manifest = await readManifest(file).catch((error) => { throw new Refusal(502, `Not imported: ${error.message}`); });
+            if (manifest?.kind !== 'clavarium-conversation') throw new Refusal(400, 'This is not an exported conversation.');
+            if (manifest.tool !== c.tool) throw new Refusal(400, 'This export is of another tool: import it into a conversation with that tool.');
+            if (!manifest.whole) {
+                if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: nothing can be imported in it.`);
+                await this.#stopTool(name);
+                try { return { tool: c.tool, from: await this.#unpack(name, c.tool, file) }; } finally { this.ready(name); }
+            }
+            if (!workDir) throw new Refusal(409, 'Its work is on its own machine\'s disk: keep it here first (Its files), then import into it.');
+            if (!replaceWork && !workEmpty(workDir)) throw Object.assign(new Refusal(409, 'Its work folder is not empty: import again to replace it.'), { kind: 'work-not-empty' });
+            await unpackHere(file, stage).catch((error) => { throw new Refusal(400, `Not imported: ${error.message}`); });
+            rmSync(file, { force: true });
+            await this.#stopTool(name);
+            try {
+                /* Its home: in its machine, each part of home/ in place of the old (as #unpackFrom does). */
+                const script = 'set -e; s="/work/' + CARRY + '/$1/home"; [ -d "$s" ] || exit 0; '
+                    + 'for e in "$s"/.[!.]* "$s"/*; do if [ ! -e "$e" ] && [ ! -L "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
+                const r = await this.#vms.exec(name, ['sh', '-c', script, 'import', id], { timeoutMs: 30 * 60_000 });
+                if (r.code !== 0) throw new Refusal(502, `Not imported: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+                restoreWork(join(stage, 'work'), workDir, replaceWork);
+                const { linked, missing } = await this.relink(name, manifest.accesses ?? {});
+                if (reminders) await Promise.resolve().then(() => this.importReminders(name, join(stage, 'work'), manifest.wakeups)).catch(() => {});
+                return { tool: c.tool, from: { name: manifest.name, at: manifest.at }, whole: true, linked, toLink: missing };
+            } finally { this.ready(name); }
+        } finally {
+            rmSync(file, { force: true }); rmSync(stage, { recursive: true, force: true });
+            if (!workDir) rmSync(aside, { recursive: true, force: true });
+        }
+    }
+    async #stopTool(name) {
+        this.drop(name);
+        await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+    }
+
+    /* An exported state unpacked into its home (its tool stopped by the caller): its manifest checked, then each
+       part put in place of the old. -> the manifest's { name, at }, or null. */
+    /* `input`: a stream, sent through the VM manager's input; or the path of a file here -- then, when it has a work
+       folder here, put there and read from it in its machine (14-11: the VM manager's channel failed past a few tens
+       of KB on the owner's server, both ways). */
+    async #unpack(name, toolId, input) {
+        let viaWork = '';
+        let source = input;
+        const workDir = typeof input === 'string' && this.#store.get(name)?.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        if (workDir) {
+            const id = `in-${Date.now()}`;
+            viaWork = join(workDir, '.clavarium-carry', `${id}.tgz`);
+            mkdirSync(dirname(viaWork), { recursive: true });
+            copyFileSync(input, viaWork);
+            source = id;
+        } else if (typeof input === 'string') source = createReadStream(input);
+        try { return await this.#unpackFrom(name, toolId, source, Boolean(viaWork)); } finally { if (viaWork) rmSync(viaWork, { force: true }); }
+    }
+    async #unpackFrom(name, toolId, input, fromWork) {
+        /* Unpacked aside first: its manifest read, its tool checked; then moved into the home. */
+        /* Aside in the home itself (never /tmp, which may be memory): then each part moved in place of the old. */
+        const script = 'set -e; m=$(mktemp -d "$HOME/.clavarium-import.XXXXXX"); trap \'rm -rf "$m"\' EXIT; if [ -n "$2" ]; then tar -xzf "/work/.clavarium-carry/$2.tgz" -C "$m"; else tar -xzf - -C "$m"; fi; '
+            + 'grep -q "\\"kind\\":\\"clavarium-conversation\\"" "$m/clavarium-conversation.json" || { echo "not an exported conversation" >&2; exit 3; }; '
+            + 'grep -q "\\"tool\\":\\"$1\\"" "$m/clavarium-conversation.json" || { echo "another tool" >&2; exit 4; }; '
+            + 'cat "$m/clavarium-conversation.json"; rm -f "$m/clavarium-conversation.json"; '
+            + 'for e in "$m"/.[!.]* "$m"/*; do if [ ! -e "$e" ]; then continue; fi; b=$(basename "$e"); rm -rf "$HOME/$b"; mv "$e" "$HOME/$b"; done';
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'import', toolId, fromWork ? input : '']);
+        const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
+        const out = []; const err = [];
+        child.stdout.on('data', (d) => out.push(d)); child.stderr.on('data', (d) => err.push(d));
+        if (fromWork) child.stdin.end(); else input.pipe(child.stdin);
+        child.stdin.on('error', () => { /* it stopped reading: said below */ });
+        const code = await new Promise((ok) => child.on('close', ok));
+        if (code === 3) throw new Refusal(400, 'This is not an exported conversation.');
+        if (code === 4) throw new Refusal(400, `This export is of another tool: import it into a conversation with that tool.`);
+        if (code !== 0) throw new Refusal(502, `Not imported: ${firstLine(Buffer.concat(err).toString()) || `exit ${code}`}`);
+        let from = null; try { from = JSON.parse(Buffer.concat(out).toString()); } catch { /* said nothing */ }
+        return from ? { name: from.name, at: from.at } : null;
+    }
+
+    /* A COPY OF A CONVERSATION (#221, 13-11, its owner's ask: safer than a move -- nothing is destroyed). A new
+       conversation, in a machine of its own or a shared one, with what its original has: its work folder (its
+       chat with it), its tool's state (the AI's memory), its settings, and the accesses it was given; its reminders
+       and wake-ups only when asked (`reminders`, 15-11). Its devices and its pending asks are NOT copied: one of the two answers them, the original. Its original is
+       not touched; asleep, its machine is woken the time to read its tool's state, then put to sleep again.
+       -> the copy's record, at once; `this.copied`: the end of it. */
+    async copy(name, { title, machine, machineMb, reminders = false } = {}) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (c.phase !== 'ready') throw new Refusal(409, 'It is busy: copy it once it is ready.');
+        if (c.work !== 'kept') throw new Refusal(409, 'Its work is on its own machine\'s disk: it cannot be copied from here. Keep it here first (Its files), then copy it.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
+        const shared = machine !== undefined && machine !== null && machine !== '';
+        const size = shared ? this.#machineMbOf(machine) ?? machineMb ?? SHARED_MB : undefined;
+        const memory = shared ? Math.max(tool.memoryMb, Math.min(Number(c.memoryMb) || tool.memoryMb, Number(size) || SHARED_MB)) : Number(c.memoryMb) || tool.memoryMb;
+        const label = typeof title === 'string' && title.trim() ? title.trim() : `${c.title ?? c.name} (copy)`;
+        await this.admit({ title: label, tool: c.tool, memoryMb: memory, ...(shared ? { machine, machineMb } : {}) });
+        /* Its tool's memory is read FIRST, its original then put back to sleep, and only then its machine built: the
+           two never run at once (14-11: a new 4 GB machine and the woken original together starved the server). */
+        let open; const gate = new Promise((ok) => { open = ok; });
+        const made = this.create({ title: label, tool: c.tool, memoryMb: memory, ...(shared ? { machine, machineMb } : { cpus: c.cpus, diskGb: c.diskGb }), ...(c.group ? { group: c.group } : {}), after: gate });
+        /* Before its build can end (it awaits first): held, never usable half made. */
+        this.#holding.add(made.name);
+        this.#store.patch(made.name, { copyOf: name });
+        const building = this.built;
+        this.copied = this.#copying(name, made.name, c, tool, building, open, reminders === true);
+        return this.#store.get(made.name);
+    }
+
+    async #copying(from, to, c, tool, building, open = () => {}, reminders = false) {
+        const dir = mkdtempSync(join(tmpdir(), 'clv-copy-'));
+        const carried = join(dir, 'state.tar.gz');
+        let woke = false; let putBack = 'sleep';
+        const back = () => (putBack === 'stop' ? this.machineAction(from, 'stop', { wait: true }) : this.sleep(from));
+        try {
+            /* Said as it goes, once a second at most: a long copy is seen moving (13-11, "on ne sait pas si ça marche"). */
+            let said = 0;
+            const say = (step) => { const now = Date.now(); if (now - said < 1000) return; said = now; if (this.#store.get(to)) this.#store.patch(to, { step }); };
+            if (tool.state) {
+                this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
+                const state = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
+                if (state !== 'Running') {
+                    /* Put back as it was found (14-11: one stopped was left asleep, its memory held). */
+                    /* Asleep by its record and not seen stopped: back to sleep; otherwise (stopped, or its state not read --
+                       14-11 on test-c, just after a restart) stopped, which frees its memory. */
+                    putBack = this.#store.get(from)?.asleep === true && state !== 'Stopped' ? 'sleep' : 'stop';
+                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory: ${putBack === 'stop' ? 'starting its original (it was stopped)' : 'waking its original'}` });
+                    await this.room({ kind: 'start', name: from, memoryMb: Number(c.memoryMb) || tool.memoryMb });
+                    /* Woken outside a wake, it is still marked asleep: borrowed, so that the server's sweep of sleepers
+                       holding memory (capacity.mjs, reclaimSleepers) does not put it back to sleep while it is read --
+                       the reading would end cut (13-11: exit 255). */
+                    this.#borrowed.add(from);
+                    /* Its page says so while it is read (not « Stopped » or « Asleep »): cleared once put back. */
+                    this.#store.patch(from, { lentTo: this.#store.get(to)?.title ?? to });
+                    const started = await this.#vms.start(from);
+                    if (started.code !== 0) throw new Error(`its original's machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
+                    woke = true;
+                    /* Started is not yet reachable: its commands wait for it, two minutes at most. */
+                    for (let i = 0; i < 24 && (await this.#vms.exec(from, ['true'], { timeoutMs: 20_000 }).catch(() => ({ code: 1 }))).code !== 0; i++) await new Promise((ok) => setTimeout(ok, 5000));
+                }
+                /* Read once more if the VM manager could not reach it (255): a machine just woken may still be settling. */
+                let code; let child;
+                for (let attempt = 0; attempt < 2 && code !== 0; attempt++) {
+                    if (attempt) await new Promise((ok) => setTimeout(ok, 10_000));
+                    this.#store.patch(to, { step: `Copying ${tool.label}'s memory` });
+                    /* Through its work folder when there is one here (14-11): its folders put back first -- a machine
+                       started outside an opening may have them loose -- then its archive written there, its size read
+                       on this side as it grows. Else, as before, through the VM manager's output. */
+                    const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(from) : '';
+                    const carryId = workDir ? `copy-${to}-${Date.now()}` : '';
+                    const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
+                    if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(from, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+                    if (inWork && !(await this.#workShown(from, workDir))) throw new Error('its original\'s work folder is not shown in its machine: open the original once, then copy it again');
+                    const out = await this.exportState(from, inWork ? { toWork: carryId } : {});
+                    child = out.child;
+                    let read = 0; let lastAt = Date.now(); let stalled = false;
+                    const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); };
+                    if (inWork) out.stream.resume(); else out.stream.on('data', (d) => grew(read + d.length));
+                    const sizing = inWork ? setInterval(() => { try { grew(statSync(inWork).size); } catch { /* not there yet */ } }, 1000) : null;
+                    /* Nothing comes for a while: said, with how long; for too long, the reading is ended and why said --
+                       never an endless wait nobody can read (14-11: stuck at "36 KB read"). */
+                    /* Quiet for 30 s: its machine asked, once, what its reading does -- the file it is on and its state
+                       (D: waiting on the disk), its load, its free memory -- or said not to answer at all. Written to the
+                       copy's job log; the screen and the end's why stay short (14-11: stuck at 36 KB on the owner's server, never here). */
+                    let seen = '';
+                    /* Each tar and gzip: its state, what the kernel has it wait on (wchan), the file it holds and that
+                       file's filesystem -- enough to tell a disk, a network mount or a pipe nobody empties. */
+                    const probe = 'for p in $(pgrep -x tar) $(pgrep -x gzip); do f=$(ls -l /proc/$p/fd 2>/dev/null | grep -o "/home/[^ ]*" | tail -1); '
+                        + 'echo "$(cat /proc/$p/comm) $p $(cut -d" " -f3 /proc/$p/stat) $(cat /proc/$p/wchan 2>/dev/null) ${f#$HOME/}${f:+ [$(stat -f -c %T "$f" 2>/dev/null)]}"; done; '
+                        + 'echo "load $(cut -d" " -f1 /proc/loadavg)"; awk \'/MemAvailable/{print "free " int($2/1024) " MB"}\' /proc/meminfo';
+                    /* What it said goes to the copy's job log (jobs.mjs), read in Settings and by its AI -- not on screen. */
+                    const heard = (said) => { seen = said; this.jobs?.note(to, `Its original's reading: ${said}`); };
+                    const ask = () => { seen = '…'; this.#vms.exec(from, ['sh', '-c', probe], { timeoutMs: 20_000 }).then((r) => { heard(r.code === 0 ? (r.stdout || '').trim().split('\n').join(', ').slice(0, 200) : 'its machine did not answer'); }, () => { heard('its machine did not answer'); }); };
+                    const watch = setInterval(() => {
+                        const quiet = Math.round((Date.now() - lastAt) / 1000);
+                        if (quiet >= COPY_QUIET_MS / 1000) { stalled = true; child.kill('SIGKILL'); return; }
+                        if (quiet >= 30 && !seen) ask();
+                        if (quiet >= 15) say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read, nothing more for ${quiet} s`);
+                    }, 5000);
+                    const failed = new Promise((ok) => child.on('error', () => ok(-1)));
+                    const file = inWork ? null : createWriteStream(carried, { mode: 0o600 });
+                    if (file) out.stream.pipe(file);
+                    code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => { clearInterval(watch); if (sizing) clearInterval(sizing); });
+                    /* Written in its work folder: taken from there, and the folder left as it was. */
+                    if (inWork) {
+                        try { if (code === 0 && !stalled) { copyFileSync(inWork, carried); grew(statSync(carried).size); } } finally { rmSync(inWork, { force: true }); }
+                    }
+                    if (stalled) {
+                        const now = await this.#vms.state(from, { fresh: true }).catch(() => undefined);
+                        throw new Error(`its original stopped sending its tool's memory: ${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min, its machine ${now ?? 'unreadable'} (see its job's log in Settings)`);
+                    }
+                    if (file) await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
+                    if (code !== 255) break;
+                }
+                if (code !== 0) throw new Error(`its tool's memory could not be read (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`);
+                /* Read: its original back to sleep at once, before the copy's machine is made. */
+                if (woke) { await back().catch(() => {}); woke = false; }
+                this.#borrowed.delete(from);
+                if (this.#store.get(from)?.lentTo) this.#store.patch(from, { lentTo: undefined });
+            }
+            open(true);
+            await building;
+            const built = this.#store.get(to);
+            if (!built) return undefined;   /* erased meanwhile */
+            if (built.phase === 'failed') throw new Error(built.error ?? 'its machine could not be made.');
+            this.#store.patch(to, { step: 'Copying its work' });
+            const work = await this.copyWork(from, to, (p) => say(`Copying its work: ${p.files} file${p.files === 1 ? '' : 's'}, ${sizeWords(p.bytes)}`));
+            if (work?.files !== undefined) this.#store.patch(to, { step: `Copying its work: ${work.files} file${work.files === 1 ? '' : 's'}, ${sizeWords(work.bytes)}, done` });
+            if (tool.state) {
+                if ((await this.#vms.state(to, { fresh: true }).catch(() => undefined)) !== 'Running') {
+                    const started = await this.#vms.start(to);
+                    if (started.code !== 0) throw new Error(`its machine did not start: ${firstLine(started.stderr) || `exit ${started.code}`}.`);
+                }
+                this.#store.patch(to, { step: `Putting ${tool.label}'s memory in the copy` });
+                await this.#unpack(to, c.tool, carried);
+            }
+            this.#store.patch(to, { step: 'Giving it the same accesses' });
+            await this.copyRights(from, to);
+            /* Its reminders and wake-ups too, when asked (15-11): an unticked box on the copy's last screen. */
+            if (reminders && typeof this.copyReminders === 'function') await Promise.resolve().then(() => this.copyReminders(from, to)).catch(() => {});
+            this.#holding.delete(to);
+            if (!this.#store.get(to)) return undefined;
+            this.#store.patch(to, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined });
+            this.ready(to);
+            return undefined;
+        } catch (error) {
+            open(false);
+            this.#holding.delete(to);
+            if (this.#store.get(to)) this.#store.patch(to, { phase: 'failed', step: undefined, progress: undefined, buildingSince: undefined, error: `Not copied: ${String(error?.message ?? error).replace(/\.?$/, '.')} Its original is untouched; erase this copy.` });
+            return undefined;
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+            if (woke) await back().catch(() => {});
+            this.#borrowed.delete(from);
+            if (this.#store.get(from)?.lentTo) this.#store.patch(from, { lentTo: undefined });
+        }
+    }
+
+    /* MOVED INTO A SHARED MACHINE (#221, 12-11, its owner's ask: put existing conversations together). From a
+       machine of its own: its tool's state carried (state.keep, as an export), its machine stopped -- kept until the
+       end, to go back to -- its place made in the shared machine as for a new one, the state put back in its home,
+       then its old machine deleted. Its work folder is kept by the server: it simply follows. One on its machine's
+       own disk is refused (its files would stay behind): kept first (its settings, Its files).
+       -> the record, at once; `this.built`: the end of it. */
+    async moveToShared(name, { machine, machineMb } = {}) {
+        const c = this.#busyCheck(name);
+        if (c.sharedMachine) throw new Refusal(409, `It lives in the shared machine ${c.sharedMachine} already.`);
+        if (typeof machine !== 'string' || !isConversationName(machine)) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
+        if (machine === name || this.#store.get(machine)) throw new Refusal(400, 'A shared machine has a name of its own, not a conversation\'s.');
+        if (c.work !== 'kept') throw new Refusal(409, 'Its work is on its own machine\'s disk: it would stay behind. Keep it here first (Its files), then move it.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
+        const there = this.#machineMbOf(machine);
+        const size = there ?? machineMb ?? SHARED_MB;
+        if (there === undefined && (!Number.isInteger(size) || size < 1024 || size > 16384)) throw new Refusal(400, 'A shared machine has 1024 to 16384 MB of memory.');
+        const memory = Math.max(tool.memoryMb, Math.min(Number(c.memoryMb) || tool.memoryMb, size));
+        if (memory > size) throw new Refusal(400, `The machine ${machine} has ${size} MB of memory: ${tool.label} needs ${tool.memoryMb} MB.`);
+        const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (tool.state && state !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first, so that its tool\'s state can come along.', { retry: false });
+        /* A new shared machine takes its size; its own, running, is stopped before it starts: that memory is given back. */
+        if (there === undefined) await this.room({ kind: 'create', memoryMb: Math.max(0, size - (state === 'Running' ? Number(c.memoryMb) || 0 : 0)) });
+        const act = this.#take(name, 'move');
+        this.#cancelStop(name);
+        const now = new Date().toISOString();
+        /* `movingTo`: what a restart of this server finds, to put it back in its own machine, as it was (14-11). */
+        this.#store.patch(name, { phase: 'building', step: `Moving to the shared machine ${machine}`, buildingSince: now, progress: buildProgress(now), movingTo: machine, movingFromMb: c.memoryMb, moveFailed: undefined });
+        this.built = this.#moving(name, c, tool, machine, size, memory, state).finally(() => this.#give(name, act));
+        return this.#store.get(name);
+    }
+
+    /* ITS WORK FOLDER SEEN FROM ITS MACHINE (15-11): a file made there is found here -- else what is written for the
+       server to read stays inside the machine (a work folder unmounted by a move cut short). Shown again once if not. */
+    async #workShown(name, workDir) {
+        const seen = async () => {
+            const id = `probe-${Date.now()}`;
+            await this.#vms.exec(name, ['sh', '-c', `mkdir -p /work/.clavarium-carry && : > /work/.clavarium-carry/${id}`], { timeoutMs: 30_000 }).catch(() => {});
+            const there = existsSync(join(workDir, '.clavarium-carry', id));
+            rmSync(join(workDir, '.clavarium-carry', id), { force: true });
+            return there;
+        };
+        if (await seen()) return true;
+        await this.#vms.workMount(name, this.#uid, this.#gid).catch(() => {});
+        return seen();
+    }
+
+    /* ITS TOOL'S STATE, TAKEN ALONG for a move (12-11, 15-11): through its work folder, as a copy reads it (14-11),
+       written to `carried`. -> undefined, or why it could not be. */
+    async #takeState(name, c, tool, carried) {
+        this.#store.patch(name, { step: `Taking ${tool.label}'s state along` });
+        /* Through its work folder, as a copy reads it (14-11): the VM manager's output stalls past ~36 KB on
+           the owner's server -- a move then waited for ever. Its size read as it grows, said; quiet too long: ended. */
+        const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
+        const carryId = workDir ? `move-${name}-${Date.now()}` : '';
+        const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
+        if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(name, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+        if (inWork && !(await this.#workShown(name, workDir))) return 'its work folder is not shown in its machine: open the conversation once, then move it again.';
+        const { stream, child } = await this.exportState(name, inWork ? { toWork: carryId } : {});
+        let read = 0; let lastAt = Date.now(); let stalled = false;
+        const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); this.#store.patch(name, { step: `Taking ${tool.label}'s state along: ${sizeWords(read)}` }); };
+        const sizing = setInterval(() => {
+            if (inWork) { try { grew(statSync(inWork).size); } catch { /* not there yet */ } }
+            if (Date.now() - lastAt >= COPY_QUIET_MS) { stalled = true; child.kill('SIGKILL'); }
+        }, 1000);
+        const failed = new Promise((ok) => child.on('error', () => ok(-1)));
+        const file = inWork ? null : createWriteStream(carried, { mode: 0o600 });
+        if (file) { stream.on('data', (d) => grew(read + d.length)); stream.pipe(file); } else stream.resume();
+        const code = await Promise.race([new Promise((ok) => child.on('close', ok)), failed]).finally(() => clearInterval(sizing));
+        if (file) await new Promise((ok) => (file.writableFinished ? ok() : file.on('finish', ok)));
+        if (inWork) { try { if (code === 0 && !stalled) copyFileSync(inWork, carried); } finally { rmSync(inWork, { force: true }); } }
+        if (stalled) return `its tool's state stopped coming (${sizeWords(read)} read, then nothing for ${COPY_QUIET_MS / 60_000} min).`;
+        if (code !== 0) return `its tool's state could not be taken (exit ${code}${firstLine(child.said) ? `: ${firstLine(child.said)}` : ''}).`;
+        return undefined;
+    }
+
+    async #moving(name, c, tool, machine, size, memory, state) {
+        const old = vmName(name);
+        const dir = mkdtempSync(join(tmpdir(), 'clv-move-'));
+        const carried = join(dir, 'state.tar.gz');
+        const back = (why) => {
+            /* Back to its own machine, as it was (stopped: the next opening wakes it). */
+            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingTo: undefined, movingFromMb: undefined, moveFailed: `Not moved: ${why}` });
+            this.#fresh.add(name); this.#mountAgain.add(name);
+            try { this.renewed(name, `Not moved to the shared machine ${machine}: ${why} It stays in its own machine, as it was.`, false); } catch { /* told, nothing more */ }
+        };
+        try {
+            this.drop(name);
+            if (state === 'Running') await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+            if (tool.state) {
+                const why = await this.#takeState(name, c, tool, carried);
+                if (why) return back(why);
+            }
+            if (state !== undefined) {
+                this.#store.patch(name, { step: 'Stopping its own machine' });
+                const stopped = await this.#vms.stop(name);
+                if (stopped.code !== 0) return back(`its machine did not stop: ${firstLine(stopped.stderr) || `exit ${stopped.code}`}.`);
+            }
+            this.#store.patch(name, { sharedMachine: machine, machineMb: size, memoryMb: memory });
+            await this.#buildShared(name, tool, memory);
+            const now = this.#store.get(name);
+            if (!now) return undefined; /* archived meanwhile */
+            if (now.phase !== 'ready') {
+                const why = now.error ?? 'its place there could not be made.';
+                await this.#vms.unshare(name).catch(() => {});
+                return back(`${why.replace(/\.?$/, '.')}`);
+            }
+            if (tool.state) {
+                /* Not opened while its state is put back: building still, to the end. */
+                this.#store.patch(name, { phase: 'building', step: `Putting ${tool.label}'s state back` });
+                this.drop(name);
+                try { await this.#unpack(name, c.tool, carried); } catch (error) {
+                    this.#store.patch(name, { phase: 'ready', step: undefined });
+                    this.ready(name);
+                    this.#store.patch(name, { movingTo: undefined, movingFromMb: undefined });
+                    this.renewed(name, `Moved to the shared machine ${machine}, but ${tool.label}'s state did not come along (${error.message}): it starts afresh. Its old machine is kept, stopped.`, true);
+                    return undefined;
+                }
+                this.#store.patch(name, { phase: 'ready', step: undefined });
+                this.ready(name);
+            }
+            /* There for good: its own machine can go. */
+            this.#store.patch(name, { movingTo: undefined, movingFromMb: undefined });
+            await this.#vms.removeVm(old).catch(() => {});
+            this.renewed(name, `Moved to the shared machine ${machine}: its work folder${tool.state ? `, ${tool.label}'s state` : ''} and this chat came along. Its own machine is deleted.`, true);
+            return undefined;
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
+
+    /* OUT OF ITS SHARED MACHINE, INTO ONE OF ITS OWN (#221, 15-11): the move the other way. Its tool's state carried
+       (as into a shared machine), its programs there ended and its work taken out of its place, its own machine built
+       as a new one's, the state put back, then its place in the shared machine removed -- its user and home there, or
+       the whole machine when it was the last in it. Anything wrong before its own machine is ready: back in the shared
+       machine, as it was (its place there kept until the end). -> the record, at once; `this.built`: the end of it. */
+    async moveToOwn(name) {
+        const c = this.#busyCheck(name);
+        if (!c.sharedMachine) throw new Refusal(409, 'It has a machine of its own already.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
+        const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (tool.state && state !== 'Running') throw new Refusal(409, 'Its shared machine is not running: open the conversation first, so that its tool\'s state can come along.', { retry: false });
+        const memory = Math.max(tool.memoryMb, Number(c.memoryMb) || tool.memoryMb);
+        /* One of its own left by an attempt cut short (a restart meanwhile): not its machine any more -- removed
+           first, so that the room it takes is counted free (15-11, seen on test-c). */
+        const states = await this.#vms.states().catch(() => null);
+        if (states?.has(vmName(name))) await this.#vms.removeVm(vmName(name)).catch(() => {});
+        await this.room({ kind: 'create', memoryMb: memory });
+        const act = this.#take(name, 'move');
+        this.#cancelStop(name);
+        const now = new Date().toISOString();
+        /* `movingOutOf`: what a restart of this server finds, to put it back in its shared machine (constructor). */
+        this.#store.patch(name, { phase: 'building', step: `Moving out of the shared machine ${c.sharedMachine}`, buildingSince: now, progress: buildProgress(now), movingOutOf: { sharedMachine: c.sharedMachine, machineMb: c.machineMb, machineUser: c.machineUser, memoryMb: c.memoryMb }, moveFailed: undefined });
+        this.built = this.#movingOut(name, c, tool, memory, state).finally(() => this.#give(name, act));
+        return this.#store.get(name);
+    }
+
+    async #movingOut(name, c, tool, memory, state) {
+        const shared = c.sharedMachine;
+        const was = { sharedMachine: shared, machineMb: c.machineMb, machineUser: c.machineUser, memoryMb: c.memoryMb };
+        const dir = mkdtempSync(join(tmpdir(), 'clv-move-'));
+        const carried = join(dir, 'state.tar.gz');
+        let left = false;
+        const back = async (why) => {
+            /* Back in its shared machine, as it was: its own machine, if begun, removed; its work shown there again. */
+            if (!this.#store.get(name)) return undefined;
+            this.#store.patch(name, { sharedMachine: undefined });
+            if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== undefined) await this.#vms.removeVm(vmName(name)).catch(() => {});
+            this.#store.patch(name, { ...was, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingOutOf: undefined, moveFailed: `Not moved: ${why}` });
+            if (left) await this.#vms.workMount(name, this.#uid, this.#gid).catch(() => {});
+            this.#fresh.add(name); this.#mountAgain.add(name);
+            try { this.renewed(name, `Not moved out of the shared machine ${shared}: ${why} It stays there, as it was.`, false); } catch { /* told, nothing more */ }
+            return undefined;
+        };
+        try {
+            this.drop(name);
+            if (state === 'Running') await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+            if (tool.state) {
+                const why = await this.#takeState(name, c, tool, carried);
+                if (why) return back(why);
+            }
+            if (state === 'Running') {
+                /* Its programs there ended, its work taken out of its place: nothing of it runs there any more. */
+                this.#store.patch(name, { step: `Leaving the shared machine ${shared}` });
+                await this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: 30_000 }).catch(() => {});
+                await this.#vms.workUnmount(name).catch(() => {});
+                left = true;
+            }
+            /* Its own machine, as a new conversation's: built with its name, held before its tool starts. */
+            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: memory, step: 'Starting the machine' });
+            /* One left behind by an attempt cut short: not this conversation's any more. */
+            if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== undefined) await this.#vms.removeVm(vmName(name)).catch(() => {});
+            this.#holding.add(name);
+            try { await this.#build(name, tool, memory); } finally { this.#holding.delete(name); }
+            const now = this.#store.get(name);
+            if (!now) return undefined; /* archived meanwhile */
+            if (now.phase === 'failed') return back(`${String(now.error ?? 'its own machine could not be made.').replace(/\.?$/, '.')}`);
+            let lost = '';
+            if (tool.state) {
+                this.#store.patch(name, { step: `Putting ${tool.label}'s state back` });
+                try { await this.#unpack(name, c.tool, carried); } catch (error) { lost = error.message; }
+            }
+            this.#store.patch(name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, toolStarted: false, movingOutOf: undefined });
+            this.ready(name);
+            /* There for good: its place in the shared machine goes -- the whole machine with the last one in it. */
+            const others = this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared);
+            if (others.length) {
+                const there = this.#vms.run;
+                await there(['vm', 'unshare', vmName(shared), name]).catch(() => {});
+                if (left) {
+                    await there(['vm', 'exec', vmName(shared), '--', 'sudo', '-n', 'userdel', '--remove', `c-${name}`], { timeoutMs: 60_000 }).catch(() => {});
+                    await there(['vm', 'exec', vmName(shared), '--', 'sudo', '-n', 'rm', '-f', `/etc/clavarium/limits/${name}`], { timeoutMs: 30_000 }).catch(() => {});
+                }
+            } else await this.#vms.removeVm(vmName(shared)).catch(() => {});
+            this.renewed(name, lost
+                ? `Moved out of the shared machine ${shared} into a machine of its own, but ${tool.label}'s state did not come along (${lost}): it starts afresh.`
+                : `Moved out of the shared machine ${shared} into a machine of its own: its work folder${tool.state ? `, ${tool.label}'s state` : ''} and this chat came along.`, true);
+            return undefined;
+        } catch (error) {
+            return back(`${String(error?.message ?? error).replace(/\.?$/, '.')}`);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    }
+
     async #fixup(name, tool) {
         for (const step of tool.fixups) {
             const r = await this.#vms.exec(name, step.argv, { timeoutMs: 120_000 }).catch(() => ({ code: 1 }));
@@ -765,7 +1510,9 @@ export class Conversations {
         const c = this.#busyCheck(name);
         const want = c.sizeAtWake;
         const had = { memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB };
-        const release = this.#claim(name, 'restarting', 'Looking at the machine');
+        const act = this.#take(name, 'restart');
+        const claimed = this.#claim(name, 'restarting', 'Looking at the machine');
+        const release = () => { claimed(); this.#give(name, act); };
         let state;
         try {
             state = await this.#vms.state(name);
@@ -779,12 +1526,14 @@ export class Conversations {
         this.#store.patch(name, { phase: 'restarting', restartingSince: since, step: 'Stopping the machine', restarted: undefined, sizeAtWake: undefined });
         const tool = this.#tools.find((t) => t.id === c.tool);
         this.#begin(name, 'restart', [...(state === 'Stopped' ? [] : ['stopping']), ...(want ? ['setting'] : []), 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
-        this.restarted = this.#cycle(name, c, want ? this.#setter(name, c, want) : async () => undefined, true).then(async (failure) => {
+        this.#plan(name, act, [...this.#downSteps(name), 'start']);
+        this.restarted = this.#cycle(name, c, want ? this.#setter(name, c, want) : async () => undefined, true, act).then(async (failure) => {
+            this.#report(name, act, { ok: !failure, why: failure, chat: false });
             if (!want) return this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.', Boolean(failure));
             await this.reconcile(name);
             const said = sizeSaid(this.#store.get(name), had);
             return this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `Restarted: it now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
-        });
+        }).finally(() => this.#give(name, act));
         return this.#store.get(name);
     }
 
@@ -797,9 +1546,12 @@ export class Conversations {
     async resize(name, asked = {}) {
         const c = this.#busyCheck(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
+        if (c.sharedMachine) return this.#limitShared(name, c, tool, asked);
         const { memory, disk, cpus } = this.#sizeAsked(c, tool, asked);
         if (c.asleep === true) return this.#later(name, c, { memoryMb: memory, cpus, diskGb: disk });
-        const release = this.#claim(name, 'restarting', 'Looking at the machine');
+        const act = this.#take(name, 'resize');
+        const claimed = this.#claim(name, 'restarting', 'Looking at the machine');
+        const release = () => { claimed(); this.#give(name, act); };
         let state;
         try {
             state = await this.#vms.state(name);
@@ -813,11 +1565,14 @@ export class Conversations {
         /* Started again only when it ran: then the page is told each step to its tool. */
         if (state === 'Running') this.#begin(name, 'resize', ['stopping', 'setting', 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
         const set = this.#setter(name, c, { memoryMb: memory, cpus, diskGb: disk });
-        this.resized = this.#cycle(name, c, set, state === 'Running').then(async (failure) => {
+        if (state === 'Running') this.#plan(name, act, [...this.#downSteps(name), 'start']);
+        this.resized = this.#cycle(name, c, set, state === 'Running', act).then(async (failure) => {
+            if (state === 'Running') this.#report(name, act, { ok: !failure, why: failure, chat: false });
+            else this.#store.patch(name, { machine: undefined });
             await this.reconcile(name);
             const said = sizeSaid(this.#store.get(name), { memoryMb: memory, cpus, diskGb: disk });
             await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
-        });
+        }).finally(() => this.#give(name, act));
         return this.#store.get(name);
     }
 
@@ -895,7 +1650,8 @@ export class Conversations {
 
     /* What the VM manager says the machine has, written in its record. */
     async reconcile(name) {
-        if (!this.#store.get(name)) return;
+        /* In a shared machine (#221): what the machine has is the machine's; its memory is its own limit there. */
+        if (!this.#store.get(name) || this.#store.get(name).sharedMachine) return;
         const real = await this.#vms.size(name).catch(() => ({}));
         const patch = {};
         if (real.memoryMb !== undefined && real.memoryMb !== this.#store.get(name).memoryMb) patch.memoryMb = real.memoryMb;
@@ -925,13 +1681,19 @@ export class Conversations {
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'restarting' ? 'Its machine is being restarted already.' : c.phase === 'moving' ? 'It is moving its work folder.' : 'This conversation is not ready.');
         if (this.#resizing.has(name)) throw new Refusal(409, 'Its machine is being given its new size as it wakes.', { retry: true });
+        if (this.#acts.has(name)) throw this.#busy(name);
         return c;
     }
 
     /* Stops the machine (cleanly, then by force), runs `between` on the
        stopped machine, and starts it again when `restart`. Returns what
        went wrong, in words, or undefined. */
-    async #cycle(name, c, between, restart) {
+    /* `act`: the action it runs for (restart, resize); one of its own when none is given (a size
+       applied at a wake), taken and given back here. The stop is the way down (#down): its steps
+       told to the page, "Force now" taken, Force stop taking its place. */
+    async #cycle(name, c, between, restart, given = null) {
+        const act = given ?? this.#take(name, 'resize');
+        if (!given) this.#plan(name, act, [...this.#downSteps(name), ...(restart ? ['start'] : [])]);
         const step = (text) => { if (this.#store.get(name)) this.#store.patch(name, { step: text }); };
         try {
             await this.#calm(name, step);
@@ -939,21 +1701,21 @@ export class Conversations {
             let state = await this.#vms.state(name);
             if (state !== 'Stopped') {
                 step('Stopping the machine');
-                /* A machine asleep cannot be stopped cleanly: it is not running. */
-                const clean = state === 'Suspended' ? { code: 1 } : await this.#watched(name, 'stop', this.#vms.stop(name, STOP_MS));
-                state = await this.#vms.state(name);
-                if (clean.code !== 0 || state !== 'Stopped') {
-                    step('Stopping the machine by force');
-                    await this.#watched(name, 'stop', this.#vms.kill(name));
-                    state = await this.#vms.state(name);
-                }
+                const down = await this.#down(name, act);
+                if (down.preempted) return 'it was stopped by force instead.';
+                state = await this.#vms.state(name).catch(() => undefined);
                 if (state !== 'Stopped') return `the machine did not stop (${state ? `it is ${state}` : 'its state could not be read'}).`;
-            }
+            } else this.#skipDown(name, act);
             const failed = await between();
             if (!restart) return failed;
             step('Starting the machine');
             this.#reach(name, 'starting');
-            const started = await this.#watched(name, 'start', this.#vms.start(name));
+            if (act.preempted) return 'it was stopped by force instead.';
+            this.#stepAt(name, act, 'start', 'start');
+            act.ctl = new AbortController();
+            const started = await this.#watched(name, 'start', this.#vms.start(name, { signal: act.ctl.signal }));
+            if (started.aborted) return 'it was stopped by force instead.';
+            this.#stepAt(name, act, 'start', started.code === 0 ? 'ok' : 'fail');
             /* The VM manager may fail its start for its own mounts while the machine runs: those are mounted again here. */
             if (started.code !== 0 && (await this.#vms.state(name).catch(() => undefined)) !== 'Running') return `${failed ? `${failed} And ` : ''}the machine did not start (${firstLine(started.stderr) || firstLine(started.stdout) || `exit ${started.code}`}).`;
             /* Whatever was put in its memory is gone: the next opening prepares it again, its folders first. */
@@ -962,6 +1724,7 @@ export class Conversations {
             this.#reach(name, 'answering');
             return failed;
         } catch { return 'it stopped on an unexpected error.'; }
+        finally { if (!given) { this.#store.patch(name, { machine: undefined }); this.#give(name, act); } }
     }
 
     /* Before its machine is stopped: its folders being mounted again are
@@ -980,7 +1743,7 @@ export class Conversations {
     async #settle(name, said, chat, failed = false) {
         if (!this.#store.get(name)) return;
         const running = (await this.#vms.state(name).catch(() => undefined)) === 'Running';
-        this.#store.patch(name, { phase: 'ready', step: undefined, restartingSince: undefined, asleep: false, restarted: said });
+        this.#store.patch(name, { phase: 'ready', step: undefined, restartingSince: undefined, asleep: false, stopped: undefined, restarted: said });
         /* Its steps go on to the tool only when it runs; a failure ends them, said in `restarted`. */
         if (!running || failed) this.#end(name);
         /* The tool is started again in its terminal, as after any start. */
@@ -1009,14 +1772,42 @@ export class Conversations {
         const alive = await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`]);
         /* true: the tool is still there, only the channel to it dropped. */
         if (alive.code === 0) return true;
+        /* Before its machine stops (and its kernel's memory of the night with it): why the tool
+           ended, kept on the conversation and said -- a person without access to the server
+           sees it in Machine, and is told at once when it was cut for lack of memory. */
+        const report = await this.exitReport(name).catch(() => null);
+        if (report) { this.#store.patch(name, { lastExit: report }); try { this.onToolExit?.(name, report); } catch { /* telling is best effort */ } }
         this.#cancelStop(name);
         const timer = setTimeout(() => {
             this.#timers.delete(name);
-            if (!this.#watching.has(name)) { this.drop(name); void this.#vms.stop(name); }
+            /* Not under an action of its owner's (a restart, a sleep): that one decides. */
+            if (!this.#watching.has(name) && !this.#acts.has(name)) { this.drop(name); void this.#stopUnlessShared(name); }
         }, this.#stopDelayMs);
         timer.unref?.();
         this.#timers.set(name, timer);
         return false;
+    }
+
+    /* WHY ITS TOOL ENDED, read inside the machine while it still runs: the kernel's kills for
+       lack of memory since it started (with the program's name), its memory, and the last
+       lines of the tool's own log (`logs` in config/tools.json). Read as the machine's
+       ordinary user; dmesg through sudo when it may. Nothing is changed. */
+    async exitReport(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (await this.#vms.state(name) !== 'Running') throw new Refusal(409, 'Its machine is not running.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        const logs = Array.isArray(tool?.logs) ? tool.logs.filter((d) => /^[A-Za-z0-9._/-]+$/.test(d)) : [];
+        const script = [
+            '( sudo -n dmesg -T 2>/dev/null || dmesg -T 2>/dev/null ) | grep -E "Killed process|Out of memory|Memory cgroup out of memory" | tail -n 4 | sed "s/^/oom /"',
+            'awk \'/^MemTotal:/{print "memory", int($2/1024)}\' /proc/meminfo',
+            'for d in "$@"; do f=$(ls -t "$HOME/$d"/*.log 2>/dev/null | head -1); [ -n "$f" ] && { echo "logfile $f"; tail -n 25 "$f" | cut -c1-300 | sed "s/^/log /"; }; done; true',
+        ].join('\n');
+        const r = await this.#vms.exec(name, ['bash', '-c', script, 'report', ...logs], { timeoutMs: 20_000 });
+        const lines = String(r.stdout ?? '').split('\n');
+        const pick = (p) => lines.filter((l) => l.startsWith(`${p} `)).map((l) => l.slice(p.length + 1));
+        const memoryMb = Number(pick('memory')[0]) || null;
+        return { at: new Date().toISOString(), oom: pick('oom'), memoryMb, logFile: pick('logfile')[0] ?? null, log: pick('log') };
     }
 
     /* ONE FILE OF THE MACHINE'S OWN DISK, read for the person who asked to
@@ -1168,20 +1959,279 @@ export class Conversations {
     resizing(name) { return this.#resizing.has(name); }
 
     /* The conversations whose machine should be running: built, not asleep. */
-    awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true).map((c) => c.name); }
+    /* (Stopped by its owner: not running either, until somebody starts it.) */
+    awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true && c.stopped !== true).map((c) => c.name); }
+    /* Every machine running, its disk trimmed (vm.mjs trim), one machine at a time, a shared one once. */
+    async trimAll() {
+        const seen = new Set();
+        for (const name of this.awake()) {
+            const vm = this.#vms.vmOf?.(name) ?? name;
+            if (seen.has(vm)) continue;
+            seen.add(vm);
+            if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') continue;
+            await this.#trim(name);
+        }
+    }
+    /* Before a stop or a sleep: what it erased given back first, never holding the stop up long. */
+    async #trim(name, timeoutMs) { if (typeof this.#vms.trim !== 'function') return; await this.#vms.trim(name, timeoutMs).catch(() => undefined); }
+    /* Put to sleep, and nothing else: not one being built (02-11: a reset machine was taken for a sleeper and
+       suspended mid-build), not a failed one. */
+    /* (One woken the time a copy reads it -- #borrowed -- is not asleep then: its memory is never "reclaimed" under it.) */
+    asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true && !this.#borrowed.has(c.name)).map((c) => c.name); }
 
     /* Whether the machine of a conversation runs right now. */
     async running(name) { return (await this.#vms.state(name)) === 'Running'; }
 
+    /* PUT TO SLEEP, through the one lock of its machine: refused while another action runs on it.
+       Resolves once asleep; throws, in words, when it could not be. */
     async sleep(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
-        this.#cancelStop(name);
-        this.drop(name);
-        const r = await this.#vms.suspend(name);
-        if (r.code !== 0) throw new Refusal(502, `The machine did not go to sleep: ${firstLine(r.stderr)}`);
-        /* Remembered: a sleep that was asked for holds until somebody wakes
-           it on purpose. A page that merely reloads must not wake it. */
-        this.#store.patch(name, { asleep: true });
+        if (this.#acts.has(name)) throw this.#busy(name);
+        const act = this.#take(name, 'sleep');
+        const report = await this.#perform(name, act);
+        if (!report.ok) throw new Refusal(502, `The machine did not go to sleep: ${report.why ?? 'it did not answer.'}`);
+    }
+
+    /* ---------- ONE ACTION AT A TIME ON A MACHINE (09-11) ---------- */
+    /* Taken at once, before anything is awaited, so that a second action asked meanwhile sees it. */
+    #take(name, kind) {
+        let finish;
+        const act = { kind, since: new Date().toISOString(), steps: [], ctl: null, next: null, current: null, preempted: false, until: kind !== 'force' && this.#store.get(name)?.stopEscalate === false ? 'force' : 'kill' };
+        act.done = new Promise((r) => { finish = r; });
+        act.finish = finish;
+        this.#acts.set(name, act);
+        return act;
+    }
+    /* Refused while another action runs: which one, since when, and what can be done. */
+    #busy(name) {
+        const act = this.#acts.get(name);
+        const s = act ? Math.max(0, Math.round((Date.now() - Date.parse(act.since)) / 1000)) : 0;
+        return new Refusal(409, `Its machine is busy: ${KIND_DOING[act?.kind] ?? 'another action'} for ${s} s. Wait, or force it off.`, { retry: true });
+    }
+    #give(name, act) { if (this.#acts.get(name) === act) this.#acts.delete(name); act.finish(); }
+    /* The steps the page shows, in order: done, running, to come (`todo`). */
+    #plan(name, act, ids) {
+        act.steps = ids.map((id) => ({ id, state: 'todo' }));
+        this.#show(name, act);
+    }
+    #show(name, act) {
+        if (!this.#store.get(name)) return;
+        this.#store.patch(name, { machine: { kind: act.kind, since: act.since, until: act.until, steps: act.steps.map((x) => ({ ...x })) } });
+    }
+    /* The way down's steps, as this machine's owner chose: to its own qemu, or the VM manager's ways only. */
+    #downSteps(name) { return this.#store.get(name)?.stopEscalate === false ? ['polite', 'force', 'check'] : [...DOWN]; }
+    /* A step reached (`start`) or ended (ok|fail|timeout|skip|cut), with its seconds. */
+    #stepAt(name, act, id, result, { s, more, freedGb } = {}) {
+        let at = act.steps.find((x) => x.id === id);
+        if (!at) { at = { id, state: 'todo' }; const check = act.steps.findIndex((x) => x.id === 'check' || x.id === 'start'); act.steps.splice(check < 0 || id === 'start' ? act.steps.length : check, 0, at); }
+        if (result === 'start') { at.state = 'run'; at.since = new Date().toISOString(); act.current = id; }
+        else {
+            at.state = result;
+            at.s = s ?? (at.since ? Math.round((Date.now() - Date.parse(at.since)) / 1000) : 0);
+            if (more) at.more = more;
+            if (freedGb !== undefined) at.freedGb = freedGb;
+            if (act.current === id) act.current = null;
+            /* Nothing left to stop: the steps before the check are not needed. */
+            if (result === 'skip' && more === 'gone') for (const x of act.steps) if (x.state === 'todo' && x.id !== 'check' && x.id !== 'start') x.state = 'skip';
+        }
+        this.#show(name, act);
+    }
+    /* Nothing to stop: the way down is skipped whole. */
+    #skipDown(name, act) { for (const x of act.steps) if (DOWN.includes(x.id)) x.state = 'skip'; this.#show(name, act); }
+    /* A line of the host program's output. */
+    #seen(name, act, line) {
+        const step = stepLine(line);
+        if (!step) return;
+        if (step.result === 'start') this.#reach(name, 'stopping');
+        this.#stepAt(name, act, step.id, step.result, step);
+    }
+
+    /* THE WAY DOWN (the host program's `vm halt`, or `vm hardstop` for Force stop): a polite stop, a
+       stop by force, SIGTERM then SIGKILL to its own qemu, then the check -- each step said as it
+       goes. "Force now" ends the step running and starts the next (#forceNow); Force stop ends it
+       all (`preempted`). Resolves with { ok, freedGb, more } or { preempted }. */
+    async #down(name, act, { hard = false } = {}) {
+        let from = hard ? 'term' : 'polite';
+        let first = true;
+        for (;;) {
+            /* Force stop asked before this step began: it does not begin. */
+            if (act.preempted) return { ok: false, preempted: true };
+            act.ctl = new AbortController(); act.next = null;
+            const options = { signal: act.ctl.signal, onLine: (line) => this.#seen(name, act, line) };
+            const r = hard && first ? await this.#vms.hardstop(name, options) : await this.#vms.halt(name, { from, until: act.until, ...options });
+            first = false;
+            if (r.aborted && act.next && !act.preempted) {
+                if (act.current) this.#stepAt(name, act, act.current, 'skip', { more: 'moved on' });
+                from = act.next;
+                continue;
+            }
+            if (r.aborted) return { ok: false, preempted: true };
+            /* A step still said running when the program ended (it was cut): ended so. */
+            if (act.current) this.#stepAt(name, act, act.current, 'fail', { more: 'cut' });
+            const check = act.steps.find((x) => x.id === 'check');
+            return { ok: r.code === 0, freedGb: check?.freedGb, more: check?.more ?? (r.code === 0 ? '' : firstLine(r.stderr)) };
+        }
+    }
+
+    /* WHAT AN OWNER ASKS OF A MACHINE (`kind`, MACHINE_KINDS; 'force-now' moves the running action
+       to its next step). Answers at once with what the page reads (machineState); the action goes
+       on, its steps on the record (`machine`), its report kept after it (`machineReport`), said in
+       the journal and in its chat. `this.acted`: its end, for whoever waits for it. */
+    /* `wait`: resolves with its report instead, once it is done (the watchdog, the memory watch, the
+       server's list: callers that act on it, so that no other action's end is taken for theirs). */
+    async machineAction(name, kind, { wait = false } = {}) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (kind === 'force-now') return this.#forceNow(name);
+        if (!MACHINE_KINDS.includes(kind)) throw new Refusal(400, 'Not an action of a machine.');
+        if (kind === 'restart') { await this.restart(name); const done = this.restarted; this.acted = done; return wait ? done : this.machineState(name); }
+        const running = this.#acts.get(name);
+        if (kind !== 'force') this.#busyCheck(name);
+        else {
+            if (c.phase === 'building' || c.phase === 'moving') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : 'It is moving its work folder.');
+            if (running) { running.preempted = true; running.ctl?.abort(); await running.done; }
+        }
+        if (kind === 'start' && (c.asleep !== true && (await this.#vms.state(name).catch(() => undefined)) === 'Running')) throw new Refusal(409, 'Its machine runs already.');
+        if (kind === 'start') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
+        if (this.#acts.has(name)) throw this.#busy(name);
+        const act = this.#take(name, kind);
+        const done = this.#perform(name, act);
+        this.acted = done;
+        return wait ? done : this.machineState(name);
+    }
+
+    /* "FORCE NOW": the step running is ended and the next one started (polite -> forced -> SIGTERM ->
+       SIGKILL). Past the VM manager's own ways, for an owner who chose them alone, it is the owner's
+       choice now: the way goes on to its qemu. */
+    #forceNow(name) {
+        const act = this.#acts.get(name);
+        const now = act?.steps.find((x) => x.state === 'run');
+        if (!act || !now || !NEXT[now.id] || !act.ctl) throw new Refusal(409, 'Nothing to move on from just now.');
+        if (now.id === 'force' && act.until === 'force') {
+            act.until = 'kill';
+            const check = act.steps.findIndex((x) => x.id === 'check');
+            act.steps.splice(check, 0, { id: 'term', state: 'todo' }, { id: 'kill', state: 'todo' });
+        }
+        act.next = NEXT[now.id]; act.current = now.id;
+        this.#show(name, act);
+        act.ctl.abort();
+        return this.machineState(name);
+    }
+
+    /* What the page reads: the action running (its steps, each with its state and since when), the
+       last report, each step's bound, and the owner's choice for the way down. */
+    machineState(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        return { action: c.machine ?? null, report: c.machineReport ?? null, limits: STEP_LIMITS, escalate: c.stopEscalate !== false, watchdog: this.watchdog(name) };
+    }
+
+    /* ITS WATCHDOG, as its owner set it (a default, changed per conversation): on, and how long its
+       machine may stay mute or full before it is forced off and started again (watchdog.mjs). */
+    watchdog(name) {
+        const w = this.#store.get(name)?.watchdog;
+        return { on: w?.on !== false, delayMin: Number.isInteger(w?.delayMin) ? w.delayMin : WATCHDOG_DELAY_MIN };
+    }
+    setWatchdog(name, { on, delayMin } = {}) {
+        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        const now = this.watchdog(name);
+        const minutes = delayMin === undefined ? now.delayMin : delayMin;
+        if (!Number.isInteger(minutes) || minutes < WATCHDOG_MIN || minutes > WATCHDOG_MAX) throw new Refusal(400, `The watchdog waits ${WATCHDOG_MIN} to ${WATCHDOG_MAX} minutes.`);
+        const next = { on: on === undefined ? now.on : on !== false, delayMin: minutes };
+        /* Kept only where it differs from the default. */
+        const kept = { ...(next.on ? {} : { on: false }), ...(next.delayMin === WATCHDOG_DELAY_MIN ? {} : { delayMin: next.delayMin }) };
+        this.#store.patch(name, { watchdog: Object.keys(kept).length ? kept : undefined });
+        return this.machineState(name);
+    }
+
+    /* THE WAY DOWN, AS ITS OWNER CHOSE (a default, changed per conversation): on (the default), a stop
+       that hangs goes on to its own qemu by itself; off, it stops after the VM manager's own ways, and
+       the page offers to go further. */
+    setStopEscalate(name, on) {
+        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        this.#store.patch(name, { stopEscalate: on === false ? false : undefined });
+        return this.machineState(name);
+    }
+
+    /* AN ACTION, RUN TO ITS END: start, stop, sleep, force (a restart and a resize run #cycle). Gives
+       its machine back, writes its report, resolves with it. */
+    async #perform(name, act) {
+        const c = this.#store.get(name);
+        const kind = act.kind;
+        let result = { ok: false };
+        try {
+            this.#cancelStop(name);
+            if (kind === 'start') {
+                const before = await this.#vms.state(name).catch(() => undefined);
+                this.#plan(name, act, ['start']);
+                this.#stepAt(name, act, 'start', 'start');
+                act.ctl = new AbortController();
+                if (act.preempted) act.ctl.abort();
+                const r = act.preempted ? { code: 143, aborted: true } : await this.#vms.start(name, { signal: act.ctl.signal });
+                if (r.aborted) result = { ok: false, preempted: true };
+                else {
+                    const now = await this.#vms.state(name).catch(() => undefined);
+                    this.#stepAt(name, act, 'start', now === 'Running' ? 'ok' : 'fail');
+                    result = now === 'Running' ? { ok: true } : { ok: false, more: firstLine(r.stderr) || firstLine(r.stdout) || `it is ${now ?? 'in a state that could not be read'}` };
+                    if (now === 'Running') {
+                        /* From a stop, whatever was in its memory is gone: the next opening prepares it again, its folders
+                           first. From sleep, it is as it was. */
+                        if (before !== 'Suspended') { this.#fresh.add(name); this.#mountAgain.add(name); }
+                        this.#store.patch(name, { asleep: false, stopped: undefined });
+                    }
+                }
+            } else if (kind === 'sleep') {
+                this.#plan(name, act, ['suspend']);
+                this.drop(name);
+                act.ctl = new AbortController();
+                await this.#trim(name, 60_000);
+                const r = await this.#vms.suspend(name, { signal: act.ctl.signal, onLine: (line) => this.#seen(name, act, line) });
+                if (r.aborted) result = { ok: false, preempted: true };
+                else {
+                    if (act.current) this.#stepAt(name, act, act.current, r.code === 0 ? 'ok' : 'fail');
+                    if (!act.steps.some((x) => x.state !== 'todo')) this.#stepAt(name, act, 'suspend', r.code === 0 ? 'ok' : 'fail');
+                    result = r.code === 0 ? { ok: true } : { ok: false, more: firstLine(r.stderr) || `exit ${r.code}` };
+                    /* Remembered: a sleep that was asked for holds until somebody wakes
+                       it on purpose. A page that merely reloads must not wake it. */
+                    if (r.code === 0) this.#store.patch(name, { asleep: true, stopped: undefined });
+                }
+            } else {
+                /* stop, force: the way down, all of it or from its own qemu. */
+                this.#plan(name, act, kind === 'force' ? ['term', 'kill', 'check'] : this.#downSteps(name));
+                await this.#calm(name, () => {});
+                this.drop(name);
+                result = await this.#down(name, act, { hard: kind === 'force' });
+                /* Stopped: no longer asleep (its saved state is gone); it stays stopped until somebody starts it. */
+                if (result.ok) this.#store.patch(name, { asleep: false, stopped: true });
+            }
+        } catch (error) { result = { ok: false, more: error instanceof Refusal ? error.message : 'an unexpected error' }; }
+        let report;
+        try { report = this.#report(name, act, { ...result, why: result.preempted ? 'Force stop took its place.' : undefined, chat: true }); }
+        finally { this.#give(name, act); }
+        /* Started: its tool starts in its terminal, as after any start (once the machine is given back). */
+        if (kind === 'start' && result.ok) try { this.ready(name); } catch { /* the next opening starts it */ }
+        return report;
+    }
+
+    /* THE REPORT OF AN ACTION, kept on the conversation (`machineReport`), the steps it took with
+       their seconds, the memory freed, and what to do when it failed (`advice`: force | manager |
+       again | look); said in the journal, and in its chat when `chat`. */
+    #report(name, act, { ok, freedGb, more, why, chat = true, preempted = false }) {
+        const steps = act.steps.filter((x) => x.state !== 'todo').map(({ id, state, s }) => ({ id, result: state, ...(s !== undefined ? { s } : {}) }));
+        const check = act.steps.find((x) => x.id === 'check');
+        const freed = freedGb ?? check?.freedGb;
+        const left = /qemu-left/.test(more ?? check?.more ?? '');
+        const mute = /mute/.test(more ?? check?.more ?? '');
+        const advice = ok || preempted ? undefined : left ? (act.until === 'force' ? 'force' : 'manager') : mute ? 'manager' : act.kind === 'sleep' ? 'force' : act.kind === 'force' || act.kind === 'stop' ? 'manager' : 'again';
+        const seconds = Math.max(0, Math.round((Date.now() - Date.parse(act.since)) / 1000));
+        const [yes, no] = KIND_WORDS[act.kind] ?? ['Done', 'Not done'];
+        const listed = steps.filter((x) => x.result !== 'skip').map((x) => `${STEP_WORDS[x.id] ?? x.id} ${x.result === 'ok' ? '' : `${x.result} `}${x.s ?? 0} s`).join(', ');
+        const advised = { force: ' Use Force stop.', manager: ' The VM manager may need a restart: that is your call.', again: ' Try again in a moment.', look: ' Look at its state.' }[advice] ?? '';
+        const said = `${ok ? yes : no} in ${seconds} s${listed ? ` (${listed})` : ''}${ok && freed ? `, ${freed.toFixed(1)} GB freed` : ''}.${!ok && why ? ` ${why}` : ''}${!ok && !why && more ? ` ${more}.` : ''}${advised}`;
+        const report = { kind: act.kind, ok: Boolean(ok), at: new Date().toISOString(), s: seconds, steps, ...(freed !== undefined ? { freedGb: freed } : {}), ...(advice ? { advice } : {}), ...(preempted ? { preempted: true } : {}), said };
+        if (this.#store.get(name)) this.#store.patch(name, { machine: undefined, machineReport: report });
+        try { this.machineSaid(name, said, Boolean(ok), chat); } catch { /* told, nothing more */ }
+        return { ...report, ...(why ? { why } : more ? { why: more } : {}) };
     }
 
     /* Online or offline: remembered here, enforced by network.mjs. */
@@ -1197,10 +2247,112 @@ export class Conversations {
         this.#cancelStop(name);
         this.drop(name);
         const kept = this.#store.get(name).work === 'kept';
-        this.#store.remove(name);
-        if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        if (this.#store.get(name).sharedMachine) await this.#leaveShared(name, { erase: false });
+        else {
+            this.#store.remove(name);
+            if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        }
         /* Its work is moved aside on the server, not erased. */
         if (kept) await this.#vms.workAside(name);
+    }
+
+    /* OUT OF A SHARED MACHINE (#221): its programs ended, its work taken out of its place there, the host told;
+       its user and home removed when it is erased (kept when archived). The machine itself goes only with the last
+       conversation that lived in it. The record is removed here, before the machine is looked at. */
+    async #leaveShared(name, { erase }) {
+        const shared = this.#store.get(name).sharedMachine;
+        const others = this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared);
+        const running = (await this.#vms.state(name, { fresh: true }).catch(() => undefined)) === 'Running';
+        if (running) {
+            await this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: 30_000 }).catch(() => {});
+            await this.#vms.workUnmount(name).catch(() => {});
+            if (erase) await this.#vms.execMachine(name, ['sudo', '-n', 'userdel', '--remove', `c-${name}`], { timeoutMs: 60_000 }).catch(() => {});
+            if (erase) await this.#vms.execMachine(name, ['sudo', '-n', 'rm', '-f', `/etc/clavarium/limits/${name}`], { timeoutMs: 30_000 }).catch(() => {});
+        }
+        await this.#vms.unshare(name).catch(() => {});
+        const last = others.length === 0;
+        const state = last ? await this.#vms.state(name, { fresh: true }).catch(() => undefined) : undefined;
+        this.#store.remove(name);
+        /* (Its name gone from the store, the VM manager is still reached through the machine's own name.) */
+        if (last && state !== undefined) await this.#vms.removeVm(`clv-${shared}`);
+    }
+
+    /* DELETED FOR GOOD (01-11, its owner's ask, confirmed by typing its name): as archived, but its work is
+       erased, not put aside. Whatever state its machine is in -- one that never started too. */
+    async erase(name) {
+        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        this.#cancelStop(name);
+        this.drop(name);
+        const kept = this.#store.get(name).work === 'kept';
+        if (this.#store.get(name).sharedMachine) await this.#leaveShared(name, { erase: true });
+        else {
+            this.#store.remove(name);
+            if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        }
+        if (kept) {
+            const r = await this.#vms.workErase(name);
+            if (r?.code) throw new Refusal(500, `Its machine is deleted, but its files could not be erased: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+        }
+    }
+
+    /* ITS TOOL ENDED, ITS MACHINE STOPPED -- unless it is a shared machine (#221) where another conversation still
+       has its tool, a screen or an action: then only this one's programs end, the others go on. */
+    async #stopUnlessShared(name) {
+        const shared = this.#store.get(name)?.sharedMachine;
+        if (!shared) { await this.#trim(name, 60_000); return this.#vms.stop(name); }
+        for (const other of this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared)) {
+            if (this.#watching.has(other.name) || this.#acts.has(other.name) || this.#timers.has(other.name)) return this.#endShared(name);
+            const alive = await this.#vms.exec(other.name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`]).catch(() => ({ code: 1 }));
+            if (alive.code === 0) return this.#endShared(name);
+        }
+        await this.#trim(name, 60_000);
+        return this.#vms.stop(name);
+    }
+    #endShared(name) { return this.#vms.execMachine(name, ['sudo', '-n', 'pkill', '-KILL', '-u', `c-${name}`], { timeoutMs: STEP_MS }).catch(() => undefined); }
+
+    /* ITS SHARE OF A SHARED MACHINE (#221): its memory there is its limit, at most the machine's; set without
+       stopping anything, read by its door when its tool starts again. Cores and disk are the machine's. */
+    async #limitShared(name, c, tool, { memoryMb, diskGb, cpus } = {}) {
+        if ((diskGb !== undefined && diskGb !== null && diskGb !== '' && Number(diskGb) !== (c.diskGb ?? DISK_GB)) || (cpus !== undefined && cpus !== null && cpus !== '' && Number(cpus) !== (c.cpus ?? 1))) throw new Refusal(400, `Cores and disk are those of the shared machine ${c.sharedMachine}.`);
+        const memory = Number(memoryMb);
+        const size = this.#machineMbOf(c.sharedMachine);
+        const least = tool?.memoryMb ?? 512;
+        if (!Number.isInteger(memory) || memory < least || memory > size) throw new Refusal(400, `Its memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${size} MB (its shared machine's).`);
+        if (memory === c.memoryMb) throw new Refusal(409, 'Nothing to change: it already has this.');
+        const r = await this.#vms.execMachine(name, ['sudo', '-n', 'install', '-D', '-m', '0644', '-o', 'root', '-g', 'root', '/dev/stdin', `/etc/clavarium/limits/${name}`], { input: `mem=${memory}\nprocs=${SHARED_PROCS}\n`, timeoutMs: STEP_MS });
+        if (r.code !== 0) throw new Refusal(502, `Its limit could not be set: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+        this.#store.patch(name, { memoryMb: memory, restarted: `Its limit is now ${memory} MB, from its tool's next start.` });
+        return this.#store.get(name);
+    }
+
+    /* A SHARED MACHINE GIVEN MORE OR LESS MEMORY (#221), from the settings of any conversation in it: never less than
+       the largest limit of those in it; stopped cleanly, set, started again -- every conversation in it is
+       interrupted, the page says so before. Each then finds its place again (its work mounted) at its next opening. */
+    async resizeShared(name, { machineMb } = {}) {
+        const c = this.#busyCheck(name);
+        if (!c.sharedMachine) throw new Refusal(400, 'Not in a shared machine.');
+        const all = this.#store.all().filter((x) => x.sharedMachine === c.sharedMachine);
+        const now = this.#machineMbOf(c.sharedMachine);
+        const size = Number(machineMb);
+        const largest = Math.max(...all.map((x) => Number(x.memoryMb) || 0));
+        if (!Number.isInteger(size) || size < Math.max(1024, largest) || size > 16384) throw new Refusal(400, `The machine ${c.sharedMachine} has ${Math.max(1024, largest)} to 16384 MB (no less than the largest of its conversations).`);
+        if (size === now) throw new Refusal(409, 'Nothing to change: it already has this.');
+        for (const x of all) if (this.#acts.has(x.name)) throw this.#busy(x.name);
+        const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
+        if (state === undefined) throw new Refusal(410, 'The shared machine no longer exists.');
+        await this.room({ kind: 'grow', name, memoryMb: state === 'Running' ? Math.max(0, size - now) : 0, diskMb: 0 });
+        for (const x of all) { this.#cancelStop(x.name); this.drop(x.name); }
+        const fail = (what, r) => new Refusal(502, `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`);
+        if (state !== 'Stopped') { const r = await this.#vms.stop(name); if (r.code !== 0) throw fail('The shared machine did not stop', r); }
+        const set = await this.#vms.setMemory(name, size);
+        if (set.code !== 0) { await this.#vms.start(name).catch(() => undefined); throw fail('Its memory could not be set', set); }
+        const started = await this.#vms.start(name);
+        for (const x of all) {
+            this.#store.patch(x.name, { machineMb: size, toolStarted: false, restarted: `Its shared machine was restarted with ${size} MB.` });
+            this.#mountAgain.add(x.name); this.#fresh.add(x.name);
+        }
+        if (started.code !== 0) throw fail('The shared machine did not start again', started);
+        return this.#store.get(name);
     }
 
     #cancelStop(name) {

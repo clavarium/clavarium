@@ -18,6 +18,7 @@
  *   GET  /c/api/<pairing>/voice   POST .../voice
  *   GET  /c/api/<pairing>/files   GET .../files/download   GET .../files/machine   POST .../files/import
  *   GET  .../files/thumb|text   POST .../files/save|make|rename|move|remove|taken   (see files.mjs)
+ *   GET  .../mail/open?ref=   GET .../mail/page?ref=   a mail cited by its reference: only a mailbox it may read (mailref.mjs)
  *   POST /c/api/<pairing>/leave   the device removes this pairing itself
  *   GET  /c/api/<pairing>/talk/words?lang=
  *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}; ?last= ?days= ?before= ?from= ?since=: a part of it
@@ -48,8 +49,9 @@
 import { Refusal } from './conversations.mjs';
 import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
 import { WORK_TAB } from './resources.mjs';
-import { list, download, importFile, page, PAGE_HEADERS, changeRoute, CHANGE_ROUTES, IMAGE_HEADERS } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS, changeRoute, CHANGE_ROUTES, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
+import { mailRoute, deviceMayRead } from './mailref.mjs';
 
 const BODY_MAX = 16 * 1024;
 
@@ -84,7 +86,7 @@ export function devicePairing(devices, headers, pairing) {
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
-export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair }) {
+export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes }) {
     const url = new URL(request.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/c/api/')) return false;
     /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
@@ -151,11 +153,12 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'GET' && route === '/me') {
             /* `conversations`: all this pairing may use. `shared`: what it was given for itself. */
             /* `terminal` and `chat`: the parts it was given, for the page to show only those. */
-            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, chatName: mine.chatName, voiceMark: mine.voiceMark, phase: mine.phase, step: mine.step, progress: mine.progress, error: mine.error, work: mine.work, resources: resources.of(name), ...part } : { name: null, resources: [] };
+            /* Each attached one with its type: the page draws it as the asset it is (assets step 6). */
+            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, chatName: mine.chatName, voiceMark: mine.voiceMark, phase: mine.phase, step: mine.step, progress: mine.progress, error: mine.error, work: mine.work, resources: resources.of(name).map((r) => ({ ...r, type: resources.get(r.name)?.type ?? 'folder' })), ...part } : { name: null, resources: [] };
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
-        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/import' || CHANGE_ROUTES.includes(route) || route === '/leave';
+        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/mail' || route === '/files/import' || CHANGE_ROUTES.includes(route) || route === '/leave' || route === '/mail/open' || route === '/mail/page';
         if (!mine && !forFiles) return send(404, { error: 'This device was given no conversation.' });
         /* Shortcuts are typed into the terminal, or are the ready answers of the chat: one of the two must be its to write in. */
         if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal || part.chat === 'write', 'the terminal or the chat'); return send(200, shortcuts.list()); }
@@ -185,7 +188,7 @@ export async function handleDoor(request, response, { devices, conversations, re
                 if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An attachment is a file.' });
                 return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
             }
-            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via)); }
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
         }
         /* Its terminal does not come: only a device given it asks for it to be repaired. */
         if (request.method === 'POST' && route === '/terminal/repair') { need(part.terminal, 'the terminal'); return send(200, await repair(name)); }
@@ -207,6 +210,17 @@ export async function handleDoor(request, response, { devices, conversations, re
             response.writeHead(200, { ...PAGE_HEADERS, 'content-length': file.size });
             file.stream.pipe(response);
             return true;
+        }
+        if (request.method === 'GET' && route === '/files/mail') {
+            if (mine?.offline === true) throw new Refusal(403, 'This conversation is offline: remote pictures stay blocked.');
+            const shown = mailPage(await mailFile(attached('read', 'open'), url.searchParams.get('p') ?? ''));
+            response.writeHead(200, shown.headers);
+            response.end(shown.body);
+            return true;
+        }
+        /* A mail cited by its reference (mailref.mjs): only a mailbox this device was given to read. */
+        if (request.method === 'GET' && (route === '/mail/open' || route === '/mail/page')) {
+            return await mailRoute(route, url.searchParams, response, { tethers, headers, who: { id: `pairing:${pairing}`, name: 'A device' }, may: (t) => deviceMayRead(t, own, mailboxes), offline: mine?.offline === true });
         }
         if (request.method === 'GET' && route === '/files/download') {
             const file = await download(attached('read', 'open'), url.searchParams.get('p') ?? '');

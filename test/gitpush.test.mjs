@@ -508,6 +508,7 @@ test('the branch diagram: the agent\'s branches and the remote\'s, their last co
     assert.deepEqual(drawn.branches.map((x) => `${x.side}:${x.name}`).sort(), ['agent:dev', 'agent:main', 'remote:main']);
     assert.deepEqual(drawn.commits.map((c) => c.subject), ['Add a <b>page</b>', 'Start the site'], 'newest first; the subject is text, the page escapes it');
     assert.deepEqual(drawn.commits[0].parents, [first]);
+    assert.deepEqual(drawn.commits.map((c) => c.author), ['Tool', 'Tool'], 'each commit says who committed it');
     assert.deepEqual(drawn.commits[0].refs, [{ name: 'dev', side: 'agent' }]);
     assert.deepEqual(drawn.commits[1].refs.map((r) => r.side).sort(), ['agent', 'remote']);
     const one = await b.review.commit('site', second);
@@ -523,4 +524,205 @@ test('the branch diagram: the agent\'s branches and the remote\'s, their last co
     await assert.rejects(b.review.commit('site', second, 'zz'), /7 to 40 hexadecimal/);
     await assert.rejects(b.review.commit('site', 'f'.repeat(40)), /not in the repository/);
     assert.deepEqual(readdirSync(b.workRoot), [], 'each workspace is gone');
+});
+
+test('refused by a hook of the remote: its verdict and what the hook said reach the owner and the agent, cleaned', async (t) => {
+    const b = bench(t);
+    const first = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoing('site'); await b.review.push('site', { head: first });
+    writeFileSync(join(b.remote, 'hooks', 'pre-receive'), '#!/bin/sh\necho "\\033[31mGH006: Protected branch update failed\\033[0m" >&2\necho "- Commit messages must name a ticket (ABC-123)." >&2\nexit 1\n');
+    chmodSync(join(b.remote, 'hooks', 'pre-receive'), 0o755);
+    const mine = b.commit('b.txt', 'b\n', 'two');
+    await b.review.outgoing('site');
+    await assert.rejects(b.review.push('site', { head: mine }), (e) => {
+        assert.equal(e.kind, 'refused');
+        assert.match(e.message, /^The remote refused: \[remote rejected\].*pre-receive hook declined/);
+        assert.match(e.message, /; it said: "GH006: Protected branch update failed \/ - Commit messages must name a ticket \(ABC-123\)\."$/, 'one line: the chat and the page show it as it is');
+        assert.equal(e.detail, 'GH006: Protected branch update failed\n- Commit messages must name a ticket (ABC-123).');
+        assert.doesNotMatch(e.message, /\x1b|failed to push some refs/);
+        assert.match(e.ai, /^the remote refused the sending to main: .*pre-receive hook declined.*; it said: "GH006: Protected branch update failed \/ - Commit messages must name a ticket \(ABC-123\)\."$/);
+        assert.doesNotMatch(e.ai, /\n/);
+        assert.equal(e.full, undefined, 'nothing left out: no file for the agent');
+        return true;
+    });
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), first);
+});
+
+test('what the remote said: remote lines only, no colours, no progress, bounded', async () => {
+    const { remoteSaid, REMOTE_LINES } = await import('../server/gitaccess.mjs');
+    assert.equal(remoteSaid('To x\nremote: Resolving deltas: 100%\nremote: \x1b[1mNo\x1b[0m\x07 way\r\nerror: failed to push some refs'), 'No way');
+    assert.equal(remoteSaid('error: nothing from the remote'), '');
+    const many = Array.from({ length: 50 }, (_, i) => `remote: line ${i}`).join('\n');
+    assert.equal(remoteSaid(many).split('\n').filter((l) => !/left out/.test(l)).length, REMOTE_LINES);
+    assert.match(remoteSaid(many), /^\[30 lines left out\]\nline 30\n/);
+    /* A talkative hook: what says it is wrong is kept, wherever it stood. */
+    const chatty = [...Array.from({ length: 40 }, (_, i) => `remote: checking file ${i}`), 'remote: ERROR: secrets found in config.yml', ...Array.from({ length: 200 }, (_, i) => `remote: scanned ${i}`)].join('\n');
+    const kept = remoteSaid(chatty);
+    assert.match(kept, /^\[40 lines left out\]\nERROR: secrets found in config\.yml\n\[\d+ lines left out\]\nscanned \d+/);
+    assert.match(kept, /scanned 199$/);
+    assert.match(remoteSaid(many), /line 49$/);
+    assert.ok(remoteSaid(`remote: ${'x'.repeat(5000)}`).length <= 1501);
+});
+
+test('a hook that says a lot: the summary for the line, all of it for a file the agent reads', async (t) => {
+    const b = bench(t);
+    const first = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoing('site'); await b.review.push('site', { head: first });
+    writeFileSync(join(b.remote, 'hooks', 'pre-receive'), '#!/bin/sh\nfor i in $(seq 1 100); do echo "scanned file $i" >&2; done\necho "ERROR: a secret in config.yml" >&2\nfor i in $(seq 1 100); do echo "scanned more $i" >&2; done\nexit 1\n');
+    chmodSync(join(b.remote, 'hooks', 'pre-receive'), 0o755);
+    const mine = b.commit('b.txt', 'b\n', 'two');
+    await b.review.outgoing('site');
+    await assert.rejects(b.review.push('site', { head: mine }), (e) => {
+        assert.match(e.ai, /ERROR: a secret in config\.yml/);
+        assert.match(e.ai, /lines left out/);
+        assert.equal(e.full.split('\n').length, 201);
+        assert.match(e.full, /^scanned file 1\n[\s\S]*\nERROR: a secret in config\.yml\n[\s\S]*scanned more 100$/);
+        return true;
+    });
+});
+
+test('several branches of a repository reviewed at once (To send) share one fetch: none is refused as busy and drops out of the list', async (t) => {
+    /* A remote that takes a while to answer, as over a real network. */
+    let slow = false; let fetches = 0;
+    const b = bench(t, { wrap: async (argv, options, real) => {
+        if (argv.includes('fetch') && slow) { fetches += 1; await new Promise((ok) => setTimeout(ok, 1_800)); }
+        return real(argv, options);
+    } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    const names = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7'];
+    for (const n of names) { git(b.work, 'checkout', '--quiet', '-b', n, 'main'); b.commit(`${n}.txt`, `${n}\n`, n); }
+    /* As the page does: the branch that moved last first, then every other one at once. */
+    const first = await b.review.outgoing('site');
+    assert.equal(first.agentBranches.length, 8);
+    slow = true;
+    const others = first.agentBranches.filter((x) => x.name !== first.branch).map((x) => x.name);
+    const settled = await Promise.allSettled(others.map((branch) => b.review.outgoing('site', { branch })));
+    const refused = settled.filter((s) => s.status === 'rejected').map((s) => s.reason?.kind ?? s.reason?.message);
+    assert.deepEqual(refused, [], 'no review refused');
+    assert.deepEqual(settled.map((s) => s.value.state), others.map(() => 'ahead'), 'every branch is listed as something to send');
+    assert.equal(fetches, 1, 'one fetch for them all');
+    /* A refresh asked after the shared one ended fetches again: nothing kept stale. */
+    assert.equal((await b.review.refresh('site')).ok, true);
+    assert.equal(fetches, 2);
+});
+
+test('To send at once: what is known here is listed with no fetch and no read, and says when a branch moved since', async (t) => {
+    let fetches = 0; const reads = [];
+    const b = bench(t, { reads, wrap: async (argv, options, real) => { if (argv.includes('fetch')) fetches += 1; return real(argv, options); } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    /* Never read: nothing known yet, said as such. */
+    assert.deepEqual(await b.review.known('site'), { remote: b.remote, readAt: null, fetchedAt: null, branches: [], rows: [], more: 0 });
+    for (const n of ['b1', 'b2']) { git(b.work, 'checkout', '--quiet', '-b', n, 'main'); b.commit(`${n}.txt`, `${n}\n`, n); }
+    const all = await b.review.outgoingAll('site');
+    assert.equal(all.state, 'read');
+    const f0 = fetches; const r0 = reads.length;
+    const k = await b.review.known('site');
+    assert.deepEqual([fetches - f0, reads.length - r0], [0, 0], 'no fetch, no read');
+    assert.ok(k.readAt && k.fetchedAt, 'as of the last read and the last fetch');
+    assert.deepEqual(k.rows.map((x) => [x.branch, x.state, x.count, x.targetExists]).sort(), [['b1', 'ahead', 2, false], ['b2', 'ahead', 2, false], ['main', 'ahead', 1, false]]);
+    /* main is sent: the reference alone says it is there. */
+    await b.review.push('site', { head: all.rows.find((x) => x.branch === 'main').head });
+    assert.equal((await b.review.known('site')).rows.find((x) => x.branch === 'main').state, 'up-to-date');
+    /* The agent commits again on b2; once a read saw it, its last review no longer stands. */
+    git(b.work, 'checkout', '--quiet', 'b2'); const moved = b.commit('c.txt', 'c\n', 'more');
+    await b.review.readTips('site');
+    const after = (await b.review.known('site')).rows;
+    assert.deepEqual([after[0].branch, after[0].head, after[0].state, after[0].count], ['b2', moved, 'unknown', null], 'the branch that moved: first, and unknown');
+    assert.equal(after.find((x) => x.branch === 'b1').state, 'ahead', 'the others keep their last review');
+    /* Nothing known may be sent: only what was reviewed. */
+    await assert.rejects(b.review.push('site', { head: moved }), (e) => e.kind === 'look');
+});
+
+test('To send, lightly: nothing asked of the remote, the branches listed first, only those that moved compared again -- from a partial read', async (t) => {
+    let fetches = 0; const reads = [];
+    const b = bench(t, { reads, wrap: async (argv, options, real) => { if (argv.includes('fetch')) fetches += 1; return real(argv, options); } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    const names = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9'];
+    for (const n of names) { git(b.work, 'checkout', '--quiet', '-b', n, 'main'); b.commit(`${n}.txt`, `${n}\n`, n); }
+    /* The first time: no reference yet, so it is made (one fetch); listed, then read whole (nothing is had yet). */
+    const all = await b.review.outgoingAll('site');
+    assert.deepEqual([fetches, reads], [1, ['site --tips', 'site']]);
+    assert.equal(all.agentBranches.length, 10);
+    assert.equal(all.rows.length, 8, 'the branch that moved last and 7 others');
+    assert.deepEqual([all.more, all.checked], [2, 8], 'the others are counted, not hidden');
+    assert.ok(all.fetchedAt, 'the page can say when the remote was last asked');
+    assert.ok(all.rows.every((x) => x.state === 'ahead' && x.diff && x.commits.length > 0), 'each row is a whole review');
+    assert.deepEqual(readdirSync(b.workRoot), [], 'the workspace is gone');
+    /* Opened again, nothing moved: listed only -- no fetch, no read, each row its review of before, sendable. */
+    reads.length = 0;
+    const again = await b.review.outgoingAll('site');
+    assert.deepEqual([fetches, reads, again.checked], [1, ['site --tips'], 0]);
+    assert.deepEqual(again.rows.map((x) => [x.branch, x.head, x.state, x.count, x.diff]), all.rows.map((x) => [x.branch, x.head, x.state, x.count, x.diff]));
+    assert.deepEqual(again.agentBranches, all.agentBranches);
+    /* One branch moved: listed, then read partially (what is had is left out), that branch alone compared again. */
+    git(b.work, 'checkout', '--quiet', 'b4');
+    const moved = b.commit('b4-more.txt', 'more\n', 'b4 again');
+    reads.length = 0;
+    const third = await b.review.outgoingAll('site');
+    assert.deepEqual([fetches, reads, third.checked], [1, ['site --tips', 'site --have'], 1]);
+    assert.deepEqual([third.rows[0].branch, third.rows[0].head, third.rows[0].count], ['b4', moved, 3], 'it moved last: first (a new branch: its three commits)');
+    assert.deepEqual(readdirSync(b.workRoot), []);
+    /* A row given again is sendable as its own review was. */
+    const one = again.rows.find((x) => x.branch === 'b2');
+    assert.equal((await b.review.push('site', { head: one.head, target: one.target })).ok, true);
+    /* Sent: the remote's tip moved (Send fetches), so that branch is compared again -- now up to date. */
+    reads.length = 0;
+    const after = await b.review.outgoingAll('site');
+    assert.deepEqual([after.checked, after.rows.find((x) => x.branch === 'b2').state], [1, 'up-to-date']);
+    /* Asked to fetch, a remote that does not answer: said for the repository, nothing read, no workspace left. */
+    b.review.setRemote('site', { url: join(b.dir, 'gone.git') });
+    reads.length = 0;
+    const down = await b.review.outgoingAll('site', { fetch: true });
+    assert.deepEqual([down.state, down.rows, reads], ['unreachable', [], []]);
+    assert.match(down.message, /did not answer/);
+    assert.deepEqual(readdirSync(b.workRoot), []);
+});
+
+test('a review of one branch: the fetch from the remote and the read of the agent\'s repository run at the same time, not one after the other', async (t) => {
+    /* A far remote: each fetch takes a while. The read must have started before it ends. */
+    const reads = []; const seen = [];
+    const b = bench(t, { reads, wrap: async (argv, options, real) => {
+        if (!argv.includes('fetch')) return real(argv, options);
+        await new Promise((resolve) => { setTimeout(resolve, 400); });
+        seen.push(reads.length);
+        return real(argv, options);
+    } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    const out = await b.review.outgoing('site');
+    assert.equal(out.state, 'ahead');
+    assert.deepEqual([seen, reads.length], [[1], 1], 'the read began while the fetch was on its way; still one of each');
+    assert.deepEqual(readdirSync(b.workRoot), []);
+    /* A read that fails while the remote answers: said as before. */
+    rmSync(join(b.work, '.git'), { recursive: true, force: true });
+    mkdirSync(join(b.work, '.git'));
+    await assert.rejects(b.review.outgoing('site'), (e) => e instanceof GitFailure);
+    await assert.rejects(b.review.outgoingAll('site'), (e) => e instanceof GitFailure);
+    assert.deepEqual(readdirSync(b.workRoot), []);
+});
+
+test('the list known at once changes nothing of Send: it fetches afresh and refuses what moved since the review', async (t) => {
+    let fetches = 0;
+    const b = bench(t, { wrap: async (argv, options, real) => { if (argv.includes('fetch')) fetches += 1; return real(argv, options); } });
+    const first = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoingAll('site');
+    await b.review.push('site', { head: first });
+    const mine = b.commit('b.txt', 'b\n', 'two');
+    const reviewed = (await b.review.outgoingAll('site')).rows[0];
+    assert.deepEqual([reviewed.state, reviewed.head], ['ahead', mine]);
+    /* Somebody else pushes after the review; the list known here still shows the old remote tip. */
+    const other = theirs(b, 'main', 'c.txt');
+    assert.equal((await b.review.known('site')).rows[0].state, 'ahead');
+    const before = fetches;
+    await assert.rejects(b.review.push('site', { head: mine }), (e) => e.kind === 'remote-moved');
+    assert.ok(fetches > before, 'Send fetched afresh');
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), other, 'nothing forced');
+    /* Now the reference knows: the known list says the branch must be looked at again. */
+    assert.equal((await b.review.known('site')).rows[0].state, 'unknown');
 });

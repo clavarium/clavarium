@@ -40,6 +40,8 @@ test('away from the screen: the question of the tool is answered when all agree,
     await me.page.locator('#answerer-on button[data-on=true]').click();
     await me.until('it is on', async () => /0 answer\(s\) in a row of 5/.test(await me.page.locator('#answerer-state').innerText()));
     await me.page.goBack();
+    /* Settings folded the list (14-11): opened again, to read what its row says. */
+    await me.unfold();
     /* The tool asks; nobody types the answer. */
     await me.type('read -p "Shall I go on? (y/n) " a; echo "it got: $a"');
     await me.sees('it got: y', 30_000);
@@ -69,13 +71,13 @@ test('away from the screen: the question of the tool is answered when all agree,
     assert.deepEqual(me.errors, []);
 });
 
-test('where no models are named, the page says so and there is nothing to turn on', { skip: SKIP }, async (t) => {
+test('where no models are named, its chapter is hidden (an empty section is hidden) and there is nothing to turn on', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     await me.create('plain');
     await me.page.locator('#folders').click();
-    await me.chapter('answerer');
-    await me.until('it says none is set', async () => /None is set on this installation/.test(await me.page.locator('#answerer-about').innerText()));
+    await me.until('its chapter is hidden', async () => me.page.locator('#chapter-answerer').evaluate((d) => d.hidden));
+    assert.match(await me.page.locator('#answerer-about').textContent(), /None is set on this installation/);
     assert.equal(await me.page.locator('#answerer-fields').isVisible(), false);
     assert.equal((await me.api('/api/conversations/plain/answerer', { on: true, objectives: 'x', charter: 'y' })).status, 503);
 });

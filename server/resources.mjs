@@ -140,6 +140,12 @@ export class Resources {
     }
     get(name) { return this.#store.get(name); }
 
+    /* The conversations a folder is attached to. */
+    attachedTo(name) {
+        const resource = this.#store.get(name);
+        return resource ? Object.keys(this.#attachments(resource)) : [];
+    }
+
     /* What one conversation has attached: [{ name, access }]. */
     of(conversation) {
         return this.#store.all().map((r) => ({ name: r.name, access: this.#attachments(r)[conversation] })).filter((r) => r.access !== undefined);

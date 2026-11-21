@@ -53,6 +53,8 @@ test('the size of the text is one setting of the device: every text and the term
     assert.equal(await me.page.evaluate(() => getComputedStyle(document.documentElement).fontSize), '17.6px');
     assert.equal(await me.page.evaluate(() => getComputedStyle(document.getElementById('settings-close')).fontSize), '14.3px');
     await me.page.locator('#settings-close').click();
+    /* Settings folded the list (14-11), which widened the terminal: opened again, it is as wide as before. */
+    await me.unfold();
     await me.until('the terminal has fewer columns', async () => (await me.page.evaluate(() => window.clavariumTerminal.cols)) < before);
     await me.fullSize('reader');
     /* Ctrl + and Ctrl -, taken by the page: nothing reaches the tool. */
@@ -129,13 +131,17 @@ test('on a phone the terminal has the room: one line of bar, one line of keys, t
     /* Larger text, by its buttons (Settings, Screen) then by two fingers: laid out again, never sideways. */
     await me.page.locator('#back').tap();
     await me.page.locator('#nav-settings').tap();
+    await me.page.locator('#settings-nav button[data-group="device"]').tap();
     const screenChapter = me.page.locator('#settings-ch-screen');
     if (!(await screenChapter.evaluate((d) => d.open))) await screenChapter.locator(':scope > summary').tap();
     for (let i = 0; i < 3; i++) await me.page.locator('#settings-text button[data-text="larger"]').tap();
     assert.equal((await text(me)).scale, 1.4);
     await me.page.locator('#nav-conversations').tap();
     await me.page.locator('#items .item', { hasText: 'pocket' }).tap();
-    await me.until('back in pocket', async () => (await me.state()) === 'live' && me.page.locator('#terminal').isVisible());
+    /* Its chat is on (the default, 02-11): opened again, it shows its chat first; its terminal is one tap away. */
+    await me.until('back in pocket', async () => (await me.state()) === 'live' && me.page.locator('#view-terminal').isVisible());
+    if ((await me.page.locator('#view-terminal').getAttribute('aria-pressed')) !== 'true') await me.page.locator('#view-terminal').tap();
+    await me.until('its terminal', async () => me.page.locator('#terminal').isVisible());
     const client = await me.page.context().newCDPSession(me.page);
     const fingers = (type, spread) => client.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: 195 - spread, y: 300, id: 1 }, { x: 195 + spread, y: 300, id: 2 }] });
     await fingers('touchStart', 40);
@@ -157,16 +163,19 @@ test('the settings of a conversation are chapters that fold, all folded at first
     await me.create('tidy');
     await me.page.locator('#folders').click();
     const open = () => me.page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#panel details.chapter')].map((d) => [d.dataset.chapter, d.open])));
-    assert.deepEqual(await open(), { general: false, machine: false, access: false, wakeups: false, answerer: false, sharing: false, advanced: false });
+    /* Its ⚙, the very first time, opens on its Access (14-11): that one chapter is open, the others folded. */
+    await me.until('its Access opened', async () => (await open()).access === true);
+    assert.deepEqual(await open(), { general: false, machine: false, access: true, sharing: false, chat: false, wakeups: false, answerer: false, health: false, advanced: false });
     await me.chapter('general');
     await me.until('General says what it is', async () => /Identifier\s+tidy[\s\S]*Tool\s+Shell[\s\S]*768 MB of memory, 8 GB disk/.test(await me.page.locator('#general-facts').innerText()));
-    await me.page.locator('#chapter-wakeups > summary').click();
-    assert.equal(await me.page.locator('#sleep').isVisible(), false, 'folded away');
+    await me.chapter('wakeups');
+    assert.equal(await me.page.locator('#sleep').isVisible(), true, 'at hand, whatever is folded');
     await me.page.goBack();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
     await me.page.locator('#folders').click();
-    assert.deepEqual(await open(), { general: true, machine: false, access: false, wakeups: true, answerer: false, sharing: false, advanced: false });
+    /* Kept as left: General and Wake-ups opened by hand, Access by that first time. */
+    assert.deepEqual(await open(), { general: true, machine: false, access: true, sharing: false, chat: false, wakeups: true, answerer: false, health: false, advanced: false });
     await me.chapter('machine');
     assert.equal(await me.page.locator('#sleep').isVisible(), true);
     assert.equal(await me.page.locator('#restart').isVisible(), true);

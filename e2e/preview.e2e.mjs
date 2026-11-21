@@ -104,7 +104,9 @@ test('a file is shown in the page: text as text, a picture as a picture, a PDF d
     await me.page.locator('#preview-close').click();
     /* Anything else: said, and offered for download. */
     await open('data.bin');
-    assert.match(await me.page.locator('#preview-note').innerText(), /not shown here\. Download it/);
+    /* Said in the middle of the viewer now (02-11): its name, why, a Download button. */
+    const cannot = me.page.locator('#preview-body .preview-cannot');
+    await me.until('it says it is not shown, and offers it', async () => /cannot be shown here/.test(await cannot.innerText().catch(() => '')) && await cannot.locator('.preview-cannot-get').isVisible());
     assert.deepEqual(me.errors, []);
 });
 
@@ -131,7 +133,8 @@ test('a path the tool printed is clicked in the terminal and opens in Files, sho
     await click('/resources/reports/brief.txt');
     await me.until('the text is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('for the phone'));
     /* From the window, a way to the folder the file sits in: the Assets tab of the conversation, on it. */
-    assert.equal(await me.page.locator('#preview-where').innerText(), 'Show in Assets');
+    /* An icon now: its word is its name (aria-label). */
+    assert.equal(await me.page.locator('#preview-where').getAttribute('aria-label'), 'Show in Assets');
     await me.page.locator('#preview-where').click();
     await me.until('its folder is listed, in the Assets tab', async () => (await me.page.locator('#cassets-detail').getAttribute('data-asset')) === 'folder:reports' && (await me.page.locator('#cassets-detail #files-rows').innerText()).includes('brief.txt'));
     assert.equal(await me.page.locator('#view-assets').getAttribute('aria-pressed'), 'true');
@@ -169,7 +172,7 @@ test('on a tablet, a finger on the path opens it too -- even a file on the machi
     await me.until('the window is closed', async () => !(await me.page.locator('#viewer').isVisible()));
     /* A path that leads nowhere says so. */
     await tap('/work/never-made.txt');
-    await me.until('it says the file is not there', async () => /not on the machine/.test(await me.page.locator('#preview-note').innerText()));
+    await me.until('it says the file is not there', async () => /not on the machine/.test(await me.page.locator('#preview-body .preview-cannot').innerText().catch(() => '')));
     /* Nothing but /work is ever read from a machine. */
     assert.equal(await me.page.evaluate(async () => (await fetch('/api/files/machine?c=by-finger&p=/etc/hostname')).status), 400);
 });
@@ -180,7 +183,7 @@ test('the screen can be light or dark: the terminal follows, and the choice is k
     await me.create('daylight');
     const look = () => me.page.evaluate(() => ({ theme: document.documentElement.dataset.theme, page: getComputedStyle(document.body).backgroundColor, terminal: window.clavariumTerminal.options.theme.background, button: document.querySelector('#theme [aria-pressed="true"]')?.textContent }));
     assert.deepEqual(await look(), { theme: 'dark', page: 'rgb(15, 20, 26)', terminal: '#0f141a', button: 'Dark' });
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-screen');
     await me.page.locator('#theme [data-theme="light"]').click();
     await me.page.locator('#settings-close').click();
@@ -192,14 +195,14 @@ test('the screen can be light or dark: the terminal follows, and the choice is k
     await me.page.reload();
     await me.until('the page is back', async () => (await me.state()) === 'live');
     assert.equal((await look()).theme, 'light', 'kept across a reload');
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-screen');
     await me.page.locator('#theme [data-theme="dark"]').click();
     await me.page.locator('#settings-close').click();
     assert.equal((await look()).theme, 'dark');
     /* System: as the device says, and as it changes. */
     await me.page.emulateMedia({ colorScheme: 'light' });
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-screen');
     await me.page.locator('#theme [data-theme="system"]').click();
     assert.deepEqual(await look().then((x) => [x.theme, x.button]), ['light', 'System']);
@@ -260,15 +263,16 @@ test('Copy in the window: all the text of a text file, the source of a page, a p
     });
     await me.files('work');
     const open = async (name) => { await me.page.locator('#files-rows .file', { hasText: name }).click(); await me.until(`${name} is shown`, async () => (await me.page.locator('#preview-name').innerText()) === name && (await me.page.locator('#preview-note').innerText().catch(() => '')) !== 'Loading...'); };
+    /* An icon: its word is its name (aria-label, the title on hover), « Copied » a moment after a copy. */
     const copy = me.page.locator('#preview-copy');
     /* Text, exactly as it is: every character, tabs and new lines kept. */
     await open('notes.md');
     await me.until('Copy is offered', () => copy.isVisible());
-    assert.equal(await copy.innerText(), 'Copy');
+    assert.equal(await copy.getAttribute('aria-label'), 'Copy');
     await copy.click();
-    await me.until('it says it copied', async () => (await copy.innerText()) === 'Copied');
+    await me.until('it says it copied', async () => (await copy.getAttribute('aria-label')) === 'Copied');
     assert.equal(await clipboard(), notes);
-    await me.until('and goes back to Copy', async () => (await copy.innerText()) === 'Copy', 5000);
+    await me.until('and goes back to Copy', async () => (await copy.getAttribute('aria-label')) === 'Copy', 5000);
     await me.page.locator('#preview-close').click();
     await open('table.csv');
     await copy.click();
@@ -281,14 +285,14 @@ test('Copy in the window: all the text of a text file, the source of a page, a p
     await me.page.locator('#preview-close').click();
     /* A picture: "Copy image", as PNG; another type drawn as PNG. */
     await open('chart.png');
-    await me.until('Copy image is offered', async () => (await copy.isVisible()) && (await copy.innerText()) === 'Copy image');
+    await me.until('Copy image is offered', async () => (await copy.isVisible()) && (await copy.getAttribute('aria-label')) === 'Copy image');
     await copy.click();
-    await me.until('the picture is copied', async () => (await copy.innerText()) === 'Copied');
+    await me.until('the picture is copied', async () => (await copy.getAttribute('aria-label')) === 'Copied');
     assert.equal(await picture(), 'png 3x2');
     await me.page.locator('#preview-close').click();
     await open('dot.gif');
     await copy.click();
-    await me.until('the GIF is copied', async () => (await copy.innerText()) === 'Copied');
+    await me.until('the GIF is copied', async () => (await copy.getAttribute('aria-label')) === 'Copied');
     assert.equal(await picture(), 'png 1x1');
     await me.page.locator('#preview-close').click();
     /* A PDF has nothing to copy here. */
@@ -302,7 +306,7 @@ test('Copy in the window: all the text of a text file, the source of a page, a p
     await copy.click();
     await me.until('the source is shown and selected', async () => (await me.page.evaluate(() => String(window.getSelection()).trim())) === '<h1>A page</h1>');
     assert.match(await me.page.locator('#preview-note').innerText(), /the text is selected, copy it yourself/);
-    assert.equal(await copy.innerText(), 'Copy');
+    assert.equal(await copy.getAttribute('aria-label'), 'Copy');
     await me.page.locator('#preview-close').click();
     assert.deepEqual(me.errors, []);
     /* On a device the folder is shared with: the same button, the same copy. */

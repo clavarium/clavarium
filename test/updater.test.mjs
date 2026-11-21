@@ -11,28 +11,30 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fakeRegistry } from './fake-registry.mjs';
-import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS } from '../deploy/updater.mjs';
+import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS, ensureQuietSudo, quietLine, sudoSeen, FETCH_AGAIN_MS, FETCH_TRIES, RELEASE_SETTLE_MS, FetchFailed, redact, npmLogTail, runCommand } from '../deploy/updater.mjs';
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 const DOCKET_REPO = 'https://github.com/clavarium/clavarium-docket';
 const BINDER_REPO = 'https://github.com/clavarium/clavarium-binder';
+const TETHER_REPO = 'https://github.com/clavarium/clavarium-tether';
 
-async function setup(t) {
+async function setup(t, extra = {}) {
     const reg = await fakeRegistry();
     const root = mkdtempSync(join(tmpdir(), 'clv-update-'));
     t.after(() => { reg.close(); rmSync(root, { recursive: true, force: true }); });
     const parley = reg.publish('clavarium-parley', '0.9.0', { 'bin/parley.mjs': 'console.log("0.9.0")\n' }, { repo: PARLEY_REPO });
     const docket = reg.publish('clavarium-docket', '0.1.0', { 'bin/docket.mjs': 'console.log("0.1.0")\n' }, { repo: DOCKET_REPO });
     const binder = reg.publish('clavarium-binder', '0.1.0', { 'bin/binder.mjs': 'console.log("0.1.0")\n' }, { repo: BINDER_REPO });
-    const shrink = (version) => JSON.stringify({ name: 'clavarium', version, lockfileVersion: 3, requires: true, packages: { '': { name: 'clavarium', version, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0' } },
-        'node_modules/clavarium-parley': { version: '0.9.0', resolved: parley.tarball, integrity: parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: docket.tarball, integrity: docket.integrity }, 'node_modules/clavarium-binder': { version: '0.1.0', resolved: binder.tarball, integrity: binder.integrity } } });
+    const tether = reg.publish('clavarium-tether', '0.1.0', { 'bin/cli.mjs': 'console.log("0.1.0")\n' }, { repo: TETHER_REPO });
+    const shrink = (version) => JSON.stringify({ name: 'clavarium', version, lockfileVersion: 3, requires: true, packages: { '': { name: 'clavarium', version, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0', 'clavarium-tether': '0.1.0' } },
+        'node_modules/clavarium-parley': { version: '0.9.0', resolved: parley.tarball, integrity: parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: docket.tarball, integrity: docket.integrity }, 'node_modules/clavarium-binder': { version: '0.1.0', resolved: binder.tarball, integrity: binder.integrity }, 'node_modules/clavarium-tether': { version: '0.1.0', resolved: tether.tarball, integrity: tether.integrity } } });
     /* A Clavarium as small as can be: its smoke test passes, or fails on purpose. */
-    const publish = (version, { smoke = true, dataFormat = 1, repo, attest, tag, ref } = {}) => reg.publish('clavarium', version, {
+    const publish = (version, { smoke = true, dataFormat = 1, repo, attest, tag, ref, time } = {}) => reg.publish('clavarium', version, {
         'npm-shrinkwrap.json': shrink(version),
         'server/smoke.mjs': smoke ? 'console.log("smoke: ok")\n' : 'console.error("broken on purpose"); process.exit(1);\n',
         'server/tools.mjs': "export const NODE_VERSION = 'v24.20.0';\n",
         'deploy/clavarium-host': '#!/bin/bash\n',
-    }, { packageJson: { clavarium: { dataFormat }, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0' } }, repo, attest, ...(tag === undefined ? {} : { tag }), ...(ref === undefined ? {} : { ref }) });
+    }, { packageJson: { clavarium: { dataFormat }, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0', 'clavarium-tether': '0.1.0' } }, repo, attest, ...(tag === undefined ? {} : { tag }), ...(ref === undefined ? {} : { ref }), time });
     const dirs = { code: join(root, 'opt'), conf: join(root, 'etc', 'update.conf'), stateDir: join(root, 'state'), data: join(root, 'data') };
     mkdirSync(dirs.data, { recursive: true });
     const calls = []; const broken = new Set();
@@ -57,8 +59,11 @@ async function setup(t) {
         answers: async () => service.answers,
         restarts: async () => service.restarts,
         sleep: (ms) => hooks.sleep(ms),
+        /* Installed at the first turn that sees it, unless a test waits as a real server does (RELEASE_SETTLE_MS). */
+        releaseSettleMs: 0,
+        ...extra,
     });
-    return { reg, u, dirs, calls, broken, publish, parley, docket, binder, service, hooks, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
+    return { reg, u, dirs, calls, broken, publish, parley, docket, binder, tether, service, hooks, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
 }
 
 /* The first installation, as install.sh makes it: a release, then the link. */
@@ -118,12 +123,15 @@ test('refused before anything changes: built elsewhere, no provenance, a smoke t
     await assert.rejects(s.u.apply('1.1.4'), /was built from refs\/heads\/next: a version for everybody comes from refs\/heads\/main/);
     s.publish('1.1.5-next.1', { ref: 'refs/heads/feature' });
     await assert.rejects(s.u.apply('1.1.5-next.1'), /was built from refs\/heads\/feature: a version to try comes from refs\/heads\/next or refs\/heads\/main/);
+    /* A beta version comes from the beta branch, not next. */
+    s.publish('1.1.6-beta.1', { ref: 'refs/heads/next' });
+    await assert.rejects(s.u.apply('1.1.6-beta.1'), /was built from refs\/heads\/next: a version to try comes from refs\/heads\/beta or refs\/heads\/main/);
     s.publish('1.1.2', { smoke: false });
     await assert.rejects(s.u.apply('1.1.2'), /smoke test failed: broken on purpose/);
     assert.equal(s.current(), '1.0.0');
     assert.deepEqual(s.calls.filter((c) => !c.startsWith('signatures')), [], 'no backup, no restart');
     assert.deepEqual(readdirSync(join(s.dirs.code, 'releases')), ['1.0.0'], 'nothing half made is left');
-    assert.deepEqual(s.u.about().history.map((h) => `${h.to} ${h.result}`), ['1.1.2 failed', '1.1.5-next.1 failed', '1.1.4 failed', '1.1.1 failed', '1.1.0 failed']);
+    assert.deepEqual(s.u.about().history.map((h) => `${h.to} ${h.result}`), ['1.1.2 failed', '1.1.6-beta.1 failed', '1.1.5-next.1 failed', '1.1.4 failed', '1.1.1 failed', '1.1.0 failed']);
     /* Not newer, not a version: refused by name. */
     await assert.rejects(s.u.apply('0.9.0'), /not newer than 1\.0\.0/);
     await assert.rejects(s.u.apply('1.0.0; id'), Refused);
@@ -260,10 +268,10 @@ test('for development, a release from a working tree: copied, installed from its
     mkdirSync(join(tree, 'server'), { recursive: true });
     writeFileSync(join(tree, 'server', 'smoke.mjs'), 'console.log("smoke: ok")\n');
     writeFileSync(join(tree, 'server', 'tools.mjs'), "export const NODE_VERSION = 'v24.20.0';\n");
-    const deps = { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0' };
+    const deps = { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0', 'clavarium-tether': '0.1.0' };
     writeFileSync(join(tree, 'package.json'), JSON.stringify({ name: 'clavarium', version: '1.1.0-dev', clavarium: { dataFormat: 1 }, dependencies: deps }));
     writeFileSync(join(tree, 'package-lock.json'), JSON.stringify({ name: 'clavarium', version: '1.1.0-dev', lockfileVersion: 3, requires: true, packages: { '': { name: 'clavarium', version: '1.1.0-dev', dependencies: deps },
-        'node_modules/clavarium-parley': { version: '0.9.0', resolved: s.parley.tarball, integrity: s.parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: s.docket.tarball, integrity: s.docket.integrity }, 'node_modules/clavarium-binder': { version: '0.1.0', resolved: s.binder.tarball, integrity: s.binder.integrity } } }));
+        'node_modules/clavarium-parley': { version: '0.9.0', resolved: s.parley.tarball, integrity: s.parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: s.docket.tarball, integrity: s.docket.integrity }, 'node_modules/clavarium-binder': { version: '0.1.0', resolved: s.binder.tarball, integrity: s.binder.integrity }, 'node_modules/clavarium-tether': { version: '0.1.0', resolved: s.tether.tarball, integrity: s.tether.integrity } } }));
     const r = await s.u.prepare({ fromDir: tree });
     assert.match(r.id, /^local-\d{8}-\d{6}$/);
     assert.equal(r.version, '1.1.0-dev'); assert.equal(r.source, 'local');
@@ -402,7 +410,7 @@ test('health after a switch: it must stay up two minutes; one restart by systemd
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const release = { dir: join(root, 'r') }; mkdirSync(release.dir);
     /* A story in seconds: what systemd says (pid; 0 = down) at each moment. */
-    const run = async (story, answersAtEnd = true) => {
+    const run = async (story, answersAtEnd = true, opts) => {
         let ms = 0;
         const at = () => story.filter(([sec]) => sec * 1000 <= ms).at(-1)[1];
         const u = new Updater({
@@ -414,9 +422,16 @@ test('health after a switch: it must stay up two minutes; one restart by systemd
             mainPid: async () => String(at()),
             pidCwd: () => release.dir,
         });
-        return u.health(release);
+        return u.health(release, opts);
     };
     assert.equal(await run([[0, 0], [3, 100]]), '');
+    /* The moment it answers (the maintenance page gives way) is told once, so the final wait is "Confirming". */
+    let ups = 0;
+    assert.equal(await run([[0, 0], [3, 100]], true, { onUp: () => { ups += 1; } }), '');
+    assert.equal(ups, 1, 'onUp fires once, when the server first answers');
+    ups = 0;
+    await run([[0, 0]], true, { onUp: () => { ups += 1; } });
+    assert.equal(ups, 0, 'onUp does not fire when the server never answers');
     assert.equal(await run([[0, 0], [3, 100], [40, 0], [44, 101]]), '', 'one restart, answering at the end');
     assert.match(await run([[0, 0], [3, 100], [40, 0], [44, 101], [80, 0], [84, 102]]), /more than once/);
     assert.match(await run([[0, 0], [3, 100], [100, 0]]), /stopped soon after it started/);
@@ -484,4 +499,210 @@ test('check: the beta channel sees beta versions and a newer stable, never the d
     assert.equal(await s.u.check(), '1.0.1-beta.1', 'beta sees the beta version');
     s.publish('1.0.1', { tag: 'latest' });
     assert.equal(await s.u.check(), '1.0.1', 'beta jumps forward to the newer stable');
+});
+
+test('sudo is told not to log the host program\'s probes: with what its version takes, checked by visudo, never a file it complains about', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sudoers-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, 'clavarium');
+    const before = '# Clavarium: the server account may run ONE program as root, and nothing else.\nclavarium ALL=(root) NOPASSWD: /usr/local/sbin/clavarium-host\n';
+    const fresh = () => { rmSync(file, { force: true }); writeFileSync(file, before); };
+    const ok = async () => ({ code: 0, stdout: '', stderr: '' });
+    fresh();
+    assert.equal(await ensureQuietSudo({ file, run: ok }), true);
+    assert.ok(readFileSync(file, 'utf8').endsWith(`${quietLine('clavarium')}\n`));
+    assert.equal(await ensureQuietSudo({ file, run: ok }), false, 'once');
+    /* A sudo that does not know syslog (it says so, exit 0): the next setting, and a line it complained of replaced. */
+    const noSyslog = async (argv) => { const text = readFileSync(argv[2], 'utf8'); return { code: 0, stdout: '', stderr: /!syslog/.test(text) ? "unknown setting: 'syslog'" : '' }; };
+    assert.equal(await ensureQuietSudo({ file, run: noSyslog }), true);
+    const after = readFileSync(file, 'utf8');
+    assert.ok(after.endsWith('Defaults:clavarium !pam_session\n') && !after.includes('!syslog'), after);
+    assert.equal((after.match(/Defaults:/g) ?? []).length, 1);
+    /* sudo-rs (18-11, the owner's server): pam_session is refused (exit 1), !syslog alone taken. */
+    fresh();
+    const sudoRs = async (argv) => (/pam_session/.test(readFileSync(argv[2], 'utf8')) ? { code: 1, stdout: '', stderr: 'visudo: invalid sudoers file' } : { code: 0, stdout: '', stderr: '' });
+    assert.equal(await ensureQuietSudo({ file, run: sudoRs }), true);
+    assert.ok(readFileSync(file, 'utf8').endsWith('Defaults:clavarium !syslog\n'), readFileSync(file, 'utf8'));
+    /* Nothing taken: the rule left alone, never a broken file. */
+    fresh();
+    assert.equal(await ensureQuietSudo({ file, run: async () => ({ code: 1, stdout: '', stderr: 'parse error' }) }), false);
+    assert.equal(readFileSync(file, 'utf8'), before);
+    assert.equal(await ensureQuietSudo({ file: join(dir, 'none'), run: ok }), false);
+});
+
+test('what sudo quiet came to is told each turn: the setting in place, or why none (17-11)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sudoers-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, 'clavarium');
+    /* The line install.sh writes, exactly (deploy/install.sh, "the one privileged program"). */
+    const rule = '# Clavarium: the server account may run ONE program as root, and nothing else.\nclavarium ALL=(root) NOPASSWD: /usr/local/sbin/clavarium-host\n';
+    const ok = async () => ({ code: 0, stdout: '', stderr: '' });
+    let told;
+    const quiet = (run, f = file) => ensureQuietSudo({ file: f, run, told: (o) => { told = o; } });
+    writeFileSync(file, rule);
+    await quiet(ok);
+    assert.deepEqual(told, { on: true, setting: '!syslog, !pam_session', account: 'clavarium' });
+    await quiet(ok);
+    assert.deepEqual(told, { on: true, setting: '!syslog, !pam_session', account: 'clavarium' }, 'already in place: said all the same');
+    await quiet(async () => ({ code: 0, stdout: '', stderr: "unknown setting: 'syslog'" }));
+    assert.equal(told.on, false);
+    assert.match(told.why, /^visudo refused !syslog, !pam_session: unknown setting: 'syslog'; !pam_session: unknown setting/);
+    await quiet(ok, join(dir, 'none'));
+    assert.equal(told.on, false); assert.match(told.why, /not readable \(ENOENT\)/);
+    rmSync(file, { force: true }); writeFileSync(file, '%clavarium ALL=(ALL) NOPASSWD: ALL\n');
+    await quiet(ok);
+    assert.equal(told.on, false); assert.match(told.why, /no "<account> ALL=\(root\) NOPASSWD:" line/);
+    /* An account the regex takes as install.sh may write it: a tab, a dash, more spaces. */
+    for (const line of ['clavarium\tALL=(root) NOPASSWD: /x', 'clv-srv   ALL=(root)  NOPASSWD:/x']) {
+        rmSync(file, { force: true }); writeFileSync(file, `${line}\n`);
+        await quiet(ok);
+        assert.equal(told.on, true, line);
+    }
+});
+
+test('which sudo, and how many sudo lines the journal got in ten minutes, read by its indexed field', async () => {
+    const asked = [];
+    const run = async (argv) => { asked.push(argv.join(' ')); return argv[0] === 'sudo' ? { code: 0, stdout: 'Sudo version 1.9.15p5\nSudoers policy plugin version 1.9.15p5\n' } : { code: 0, stdout: 'a\nb\n\nc\n' }; };
+    assert.deepEqual(await sudoSeen({ run }), { sudo: 'Sudo version 1.9.15p5', lines10m: 3 });
+    assert.ok(asked.some((a) => a.startsWith('journalctl SYSLOG_IDENTIFIER=sudo --since -10min')), asked.join('\n'));
+    assert.deepEqual(await sudoSeen({ run: async () => ({ code: 1, stdout: '' }) }), { sudo: null, lines10m: null });
+});
+
+test('a version said out but not served yet (npm could not fetch it): nothing switched, tried again by itself later, a few times at most (16-11)', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.u.set('mode', 'asap');
+    s.publish('1.0.1');
+    const back = s.reg.hold('clavarium', '1.0.1');
+    await assert.rejects(s.u.apply('1.0.1'), /npm could not install/);
+    assert.equal(s.current(), '1.0.0');
+    assert.equal(s.u.about().history[0].fetch, true);
+    /* Too soon: not yet. */
+    assert.equal(await s.u.tick(), '1.0.1 could not be fetched: tried again later');
+    /* Later, and served by then: installed by itself. */
+    back();
+    s.at(new Date(2026, 9, 18, 12, 0, 0, 0 + FETCH_AGAIN_MS + 1000));
+    assert.equal(await s.u.tick(), 'updated to 1.0.1');
+    assert.equal(s.current(), '1.0.1');
+    assert.ok(FETCH_TRIES >= 2);
+});
+
+test('any failure of npm\'s install is a fetch failure: not there at all, its archive not served; tried again by itself, never "failed here" (17-11)', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.u.set('mode', 'asap');
+    /* Not in the registry at all (npm: ETARGET). */
+    await assert.rejects(s.u.apply('1.0.5'), (e) => e instanceof FetchFailed && /npm could not install clavarium@1\.0\.5: code ETARGET/.test(e.message));
+    const h = s.u.about().history[0];
+    assert.equal(h.fetch, true);
+    assert.doesNotMatch(h.why, /A complete log of this run/, 'the why says why, not where a log was');
+    /* What npm said, and the end of its own debug log, kept for "See the log" (its cache, with the log in it, is gone). */
+    assert.match(h.log, /-- what npm said\n[\s\S]*ETARGET/);
+    assert.match(h.log, /-- the end of npm's debug log\n[\s\S]*verbose/);
+    assert.doesNotMatch(h.log, /\d+ silly |A complete log of this run/);
+    assert.equal(existsSync(join(s.dirs.stateDir, 'npm-cache')), false);
+    /* Its archive not served (a mirror behind): the same, and the timer says it waits, not that it failed. */
+    s.publish('1.0.1');
+    const back = s.reg.hold('clavarium', '1.0.1');
+    await assert.rejects(s.u.apply('1.0.1'), FetchFailed);
+    assert.equal(s.u.about().history[0].fetch, true);
+    assert.match(s.u.about().history[0].log, /404/);
+    assert.equal(await s.u.tick(), '1.0.1 could not be fetched: tried again later');
+    back();
+    s.at(new Date(2026, 9, 18, 12, 0, 0, FETCH_AGAIN_MS + 1000));
+    assert.equal(await s.u.tick(), 'updated to 1.0.1');
+});
+
+test('a registry that does not answer about the version while it is checked is a fetch failure too; a release that is not what the registry lists is not', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1');
+    let down = false;
+    const real = s.u.provenance.bind(s.u);
+    s.u.provenance = async (...a) => { if (down) throw new FetchFailed('the registry answered 503 for the attestations'); return real(...a); };
+    down = true;
+    await assert.rejects(s.u.apply('1.0.1'), FetchFailed);
+    assert.equal(s.u.about().history[0].fetch, true);
+    /* No provenance at all: a refusal of the release, not tried again by itself. */
+    down = false;
+    s.publish('1.0.2', { attest: false });
+    await assert.rejects(s.u.apply('1.0.2'), /has no provenance/);
+    assert.equal(s.u.about().history[0].fetch, undefined);
+    s.u.set('mode', 'asap');
+    assert.equal(await s.u.tick(), '1.0.2 failed here before: not tried again by itself');
+});
+
+test('npm\'s log kept for the owner never shows a credential: tokens, Authorization headers, passwords in URLs', async (t) => {
+    const secret = 'npm_abcdefghijklmnopqrstuvwxyz0123456789';
+    const lines = [
+        `0 verbose cli /usr/bin/node /usr/bin/npm`,
+        `1 silly config //registry.example.com/:_authToken=${secret}`,
+        `2 verbose config //registry.example.com/:_authToken=${secret}`,
+        `3 http fetch GET 404 https://registry.example.com/clavarium/-/clavarium-1.0.1.tgz 120ms`,
+        `4 verbose headers {"authorization":"Bearer abc.def.ghi-123","user-agent":"npm/11"}`,
+        `5 verbose proxy https://someone:hunter2pass@example.com:3128/`,
+        `6 error code E404`,
+        `7 error 404 Not Found - GET https://registry.example.com/clavarium/-/clavarium-1.0.1.tgz`,
+    ];
+    const clean = redact(lines.join('\n'));
+    for (const bad of [secret, 'abc.def.ghi-123', 'hunter2pass']) assert.ok(!clean.includes(bad), `${bad} is taken out`);
+    assert.match(clean, /_authToken=\*\*\*/);
+    assert.match(clean, /"authorization":"Bearer \*\*\*"/);
+    assert.match(clean, /https:\/\/\*\*\*@example\.com:3128/);
+    assert.equal(redact('Authorization: Bearer xyz123456'), 'Authorization: Bearer ***');
+    assert.equal(redact('token: ghp_abcdefghijklmnopqrstuvwx'), 'token: ***');
+
+    /* Through the updater, with a stand-in for npm whose install fails and leaves such a debug log. */
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1');
+    const fake = new Updater({
+        code: s.dirs.code, conf: s.dirs.conf, stateDir: s.dirs.stateDir, data: s.dirs.data, registry: s.reg.origin, log: () => {}, minFreeMb: 1,
+        run: async (argv, o) => {
+            if (!argv.includes('install')) return runCommand(argv, o);
+            const cache = argv[argv.indexOf('--cache') + 1];
+            mkdirSync(join(cache, '_logs'), { recursive: true });
+            writeFileSync(join(cache, '_logs', '2026-11-17T19_04_15_198Z-debug-0.log'), `${lines.join('\n')}\n`);
+            return { code: 1, stdout: '', stderr: `npm error code E404\nnpm error 404 Not Found - GET https://registry.example.com/clavarium/-/clavarium-1.0.1.tgz\nnpm error A complete log of this run can be found in: ${cache}/_logs/2026-11-17T19_04_15_198Z-debug-0.log\n` };
+        },
+    });
+    await assert.rejects(fake.apply('1.0.1'), FetchFailed);
+    const h = fake.about().history[0];
+    assert.equal(h.fetch, true);
+    assert.equal(h.why, 'npm could not install clavarium@1.0.1: code E404: 404 Not Found - GET https://registry.example.com/clavarium/-/clavarium-1.0.1.tgz');
+    assert.match(h.log, /3 http fetch GET 404/);
+    assert.match(h.log, /7 error 404 Not Found/);
+    for (const bad of [secret, 'abc.def.ghi-123', 'hunter2pass']) assert.ok(!h.log.includes(bad));
+    assert.doesNotMatch(h.log, /1 silly/);
+    assert.equal(npmLogTail(join(s.dirs.stateDir, 'nothing')), '');
+});
+
+test('a version just out is installed by itself only once it has settled: since the registry\'s time for it, else since first seen; asked by the owner, at once (17-11)', async (t) => {
+    const s = await setup(t, { releaseSettleMs: RELEASE_SETTLE_MS });
+    await installed(s);
+    s.u.set('mode', 'asap');
+    const t0 = new Date(2026, 9, 18, 12, 0).getTime();
+    /* No time in the registry: from the first turn that saw it. */
+    s.publish('1.0.1');
+    assert.match(await s.u.tick(), /^1\.0\.1 is just out: installed by itself from /);
+    s.at(new Date(t0 + RELEASE_SETTLE_MS - 60_000));
+    assert.match(await s.u.tick(), /is just out/, 'first seen is kept, not moved by each turn');
+    assert.equal(s.current(), '1.0.0');
+    s.at(new Date(t0 + RELEASE_SETTLE_MS));
+    assert.equal(await s.u.tick(), 'updated to 1.0.1');
+    /* Published long before it was seen here (its tag moved to it later): at once. */
+    const t1 = t0 + RELEASE_SETTLE_MS;
+    s.publish('1.0.2', { time: new Date(t1 - 3600_000).toISOString() });
+    assert.equal(await s.u.tick(), 'updated to 1.0.2');
+    /* Published two minutes ago: eight more. */
+    s.publish('1.0.3', { time: new Date(t1 - 120_000).toISOString() });
+    assert.match(await s.u.tick(), /is just out/);
+    s.at(new Date(t1 + RELEASE_SETTLE_MS - 120_000));
+    assert.equal(await s.u.tick(), 'updated to 1.0.3');
+    /* Asked by the owner (Update, Try again): not held back. */
+    s.publish('1.0.4');
+    assert.match(await s.u.tick(), /is just out/);
+    writeFileSync(join(s.dirs.stateDir, 'request'), 'apply 1.0.4\n');
+    await s.u.runOnce();
+    assert.equal(s.current(), '1.0.4');
 });

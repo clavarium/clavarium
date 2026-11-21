@@ -10,9 +10,10 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     await me.create('writer');
     await me.type('pwd; echo "the report" > report.txt; mkdir drafts; echo ok');
     await me.sees('\nok');
-    /* Nothing was attached, nothing was asked of the tool: its work is there, the one thing in its Assets. */
+    /* Nothing was attached, nothing was asked of the tool: its work is there, in its Assets beside the USB device
+       of the browser every conversation may ask for (tethers.mjs, given « propose » to each). */
     await me.files('work');
-    assert.deepEqual(await me.page.locator('#cassets-rows .as-row').evaluateAll((l) => l.map((x) => x.dataset.asset)), ['folder:work']);
+    assert.deepEqual(await me.page.locator('#cassets-rows .as-row').evaluateAll((l) => l.map((x) => x.dataset.asset)), ['folder:work', 'connexion:usb-device']);
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('report.txt'));
     assert.equal(await me.page.locator('#files-import').isVisible(), true, 'and a file can be handed to the tool the same way');
     await me.page.locator('#files-rows .file', { hasText: 'report.txt' }).click();
@@ -77,7 +78,7 @@ test('the work of a conversation moves to a kept folder and back, with a warning
     const move = async (button, warning) => {
         const before = (await me.api('/api/conversations')).body[0].work;
         await me.page.locator('#folders').click();
-        await me.page.evaluate(() => { document.getElementById('chapter-machine').open = true; });
+        await me.chapter('machine');
         await me.until('the way to the other place is offered', async () => (await me.page.locator('#work-move').innerText()).startsWith(button));
         await me.page.locator('#work-move').click();
         assert.match(await me.page.locator('#notice-text').innerText(), warning);
@@ -89,7 +90,7 @@ test('the work of a conversation moves to a kept folder and back, with a warning
         await me.until('the tool is back', async () => (await me.state()) === 'live', 30_000);
     };
     /* To a folder kept here: its files are then in Files. */
-    await move('Keep its work here', /less than 1 GB would stay free, or if the work holds symbolic links that a kept folder refuses/);
+    await move('Keep it here', /less than 1 GB would stay free, or if the work holds symbolic links that a kept folder refuses/);
     assert.equal((await me.api('/api/conversations')).body[0].work, 'kept');
     await me.files('work');
     await me.until('what was made before the move is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('early.txt'));
@@ -97,23 +98,23 @@ test('the work of a conversation moves to a kept folder and back, with a warning
     await me.type('cat early.txt sub/deep.txt; echo "made after" > late.txt; echo seen');
     await me.sees('made before the move\ndeep');
     /* And back to the disk of its machine: nothing is shown here any more, nothing is lost. */
-    await move('Move its work to the disk', /less than 1 GB would stay free\./);
+    await move('Move to its machine\'s disk', /less than 1 GB would stay free\./);
     assert.equal((await me.api('/api/conversations')).body[0].work, 'disk');
     await me.type('cat early.txt late.txt; echo both-there');
     await me.sees('made before the move\nmade after');
     await me.page.locator('#view-assets').click();
-    await me.until('no folder is shown', async () => /disk of its machine/.test(await me.page.locator('#cassets-rows').innerText()) && (await me.page.locator('#cassets-rows .as-row').count()) === 0);
+    await me.until('no folder is shown', async () => /disk of its machine/.test(await me.page.locator('#cassets-rows').innerText()) && (await me.page.locator('#cassets-rows .as-row[data-asset^="folder:"]').count()) === 0);
     await me.page.locator('#view-terminal').click();
     /* A link made by the tool travels as a link. */
     await me.type('ln -s early.txt link-to-it; echo linked');
     await me.sees('\nlinked');
-    await move('Keep its work here', /less than 1 GB would stay free, or if the work holds symbolic links that a kept folder refuses/);
+    await move('Keep it here', /less than 1 GB would stay free, or if the work holds symbolic links that a kept folder refuses/);
     await me.type('readlink link-to-it; cat link-to-it; echo read');
     await me.sees('\nearly.txt\nmade before the move');
     /* But a link that points upwards, as installed packages make, is refused
        by a kept folder: the move back is said to be impossible BEFORE the
        tool is stopped. */
-    await move('Move its work to the disk', /less than 1 GB would stay free\./);
+    await move('Move to its machine\'s disk', /less than 1 GB would stay free\./);
     await me.type('mkdir -p node_modules/.bin; ln -s ../../early.txt node_modules/.bin/tool; echo installed');
     await me.sees('\ninstalled');
     const refused = await me.api('/api/conversations/mover/work', { to: 'kept' });

@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../server/store.mjs';
-import { Talk, partOf, WINDOWS, AI_WINDOW, REREAD_AFTER_MS } from '../server/talk.mjs';
+import { Talk, partOf, WINDOWS, AI_WINDOW, REREAD_AFTER_MS, TYPED_AT } from '../server/talk.mjs';
 import { ownText } from '../server/guide.mjs';
 import { REREAD } from 'clavarium-parley/host';
 
@@ -20,7 +20,7 @@ function bench(t) {
     mkdirSync(join(dir, 'work', 'helper'), { recursive: true });
     const typed = [];
     const world = { clock: Date.now(), seen: null };
-    const vms = { exec: async (name, argv) => { typed.push(argv[8] ?? 'Enter'); return { code: 0 }; }, state: async () => 'Running' };
+    const vms = { exec: async (name, argv) => { typed.push(argv[TYPED_AT] ?? 'Enter'); return { code: 0 }; }, state: async () => 'Running' };
     const talk = new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms,
         toolbox: { find: () => ({ name: 'parley' }), installIn: async () => '' }, health: { of: () => world.seen },
         conversations: { list: () => [{ name: 'helper', work: 'kept' }], awake: () => ['helper'] },
@@ -70,7 +70,7 @@ test('the page asks for the end of its chat, the page before it, then only what 
     const plain = b.talk.of('helper');
     assert.equal(plain.messages.length, 200);
     assert.equal('cursor' in plain, false);
-    assert.deepEqual(Object.keys(b.talk.of('helper', new URLSearchParams({ state: '1' }))).sort(), ['on', 'possible', 'tools', 'wake']);
+    assert.deepEqual(Object.keys(b.talk.of('helper', new URLSearchParams({ state: '1' }))).sort(), ['on', 'possible', 'split', 'tools', 'wake'], 'its state alone, and when its thread is archived');
     /* The files on disk are whole. */
     assert.equal(readFileSync(join(b.bridge, 'from-agent.jsonl'), 'utf8').split('\n').filter(Boolean).length, 300);
 });

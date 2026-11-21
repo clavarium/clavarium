@@ -55,6 +55,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fetchToolArchives, REGISTRY } from './parley-archive.mjs';
 import { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM } from './tunnel.mjs';
+import { ensureGenericClientId } from './oidc.mjs';
 /* The updater's run keeps the tunnel up to date: the same functions, from here too. */
 export { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM };
 
@@ -84,6 +85,15 @@ const WATCH_EVERY_MS = 3600_000;
 const WATCH_RECENT_MS = 24 * 3600_000;
 const HISTORY_MAX = 30;
 const ASK_EVERY_MS = 6 * 3600_000;
+/* A VERSION THAT COULD NOT EVEN BE FETCHED (16-11: npm asked one minute after it came out, before every mirror
+   had it): nothing of it ran here, so it is tried again by itself, this long after, this many times at most. */
+export const FETCH_AGAIN_MS = 30 * 60_000;
+export const FETCH_TRIES = 3;
+/* NOT RACING THE REGISTRY (17-11: 0.2.228-beta.1 asked of npm the minute it was tagged, refused; the same
+   install worked 20 minutes later): a version is installed by itself only once it has been out this long --
+   since its time in the registry (`time`), or since this updater first saw it when the registry says none.
+   Asked by the owner (Update, Try again): at once. */
+export const RELEASE_SETTLE_MS = 10 * 60_000;
 /* Between "Switching" said in state.json and the server stopped: the pages ask the server every
    10 seconds at most (app.js), and the server says it in each answer (updates.mjs, notice): each
    gives way to the maintenance page before the server goes. */
@@ -91,6 +101,8 @@ export const NOTICE_MS = 15_000;
 const PROVENANCE = 'https://slsa.dev/provenance/v1';
 /* What the log of a failure keeps, at most (history entry `log`, shown behind "See the log"). */
 const LOG_MAX = 12_000;
+/* Of npm's own debug log (in its cache, which goes with the attempt): the last lines kept in the history. */
+const NPM_LOG_LINES = 40;
 /* Set beside the server's unit by the updater (root): a crash loop never locks the service out, so a
    restart asked later (an update, the watchdog) still starts it. */
 export const DROP_IN = '/etc/systemd/system/clavarium.service.d/restart.conf';
@@ -100,17 +112,104 @@ export const DROP_IN_TEXT = '# Written by the Clavarium updater: a crash loop ne
    during it, the installed app and the browser) shared one CSRF cookie, and the first to come back
    was refused ("Unable to find a valid CSRF token", found 20-10). One cookie per sign-in, and time
    to type a password. Added to a file that lacks them, the proxy restarted; nothing else touched. */
+/* THE DOOR FOR PROGRAMS (server/apikeys.mjs, API keys): /api/ext/ goes through without sign-on, as the
+   devices' /c/ does -- the key in each call is the right, and the server never looks at an identity
+   there (the proxy strips those headers on these routes). Added to the one-line list of routes the
+   proxy skips, beside "^/c/"; a file with no such line, or a list over several lines, is left as it is. */
+export const EXT_ROUTE = '^/api/ext/';
+const EXT_COMMENT = '# /api/ext/: programs with an API key; the server checks the key (added by the Clavarium updater).';
+export function withExtRoute(text) {
+    const lines = text.split('\n');
+    const i = lines.findIndex((l) => /^\s*skip_auth_routes\s*=/.test(l));
+    if (i < 0 || lines[i].includes(`"${EXT_ROUTE}"`)) return text;
+    const m = /^(\s*skip_auth_routes\s*=\s*\[)([^\]]*)\](\s*(#.*)?)$/.exec(lines[i]);
+    if (!m) return text;
+    const inner = m[2].trim().replace(/,\s*$/, '');
+    lines[i] = `${m[1]}${inner ? `${inner}, ` : ''}"${EXT_ROUTE}"]${m[3]}`;
+    if (lines[i - 1] !== EXT_COMMENT) lines.splice(i, 0, EXT_COMMENT);
+    return lines.join('\n');
+}
 export const PROXY_CFG = '/etc/oauth2-proxy/oauth2-proxy.cfg';
 export const PROXY_LINES = ['cookie_csrf_per_request = true', 'cookie_csrf_expire = "30m"'];
 export async function ensureProxySettings({ file = PROXY_CFG, run = runCommand } = {}) {
     let text;
     try { text = readFileSync(file, 'utf8'); } catch { return false; }
     const missing = PROXY_LINES.filter((l) => !text.split('\n').some((x) => x.trim().startsWith(l.split(' =')[0])));
-    if (!missing.length) return false;
-    writeFileSync(`${file}.new`, `${text.replace(/\n*$/, '\n')}# Added by the Clavarium updater: one CSRF cookie per sign-in.\n${missing.join('\n')}\n`, { mode: 0o600 });
+    let next = withExtRoute(text);
+    if (missing.length) next = `${next.replace(/\n*$/, '\n')}# Added by the Clavarium updater: one CSRF cookie per sign-in.\n${missing.join('\n')}\n`;
+    if (next === text) return false;
+    writeFileSync(`${file}.new`, next, { mode: 0o600 });
     renameSync(`${file}.new`, file);
     if (process.getuid?.() === 0) await run(['systemctl', 'try-restart', 'oauth2-proxy.service'], { timeoutMs: 60_000 });
     return true;
+}
+
+/* SUDO, QUIET FOR CLAVARIUM'S ONE PROGRAM, kept by the updater: the server asks the host program every
+   few seconds (machine states, memory, repositories), and sudo wrote three lines to the system log for
+   each call -- some 800 lines in ten minutes, nothing to read in them (found 31-10). The account may run
+   that one program and nothing else; what changes something, the program logs itself (clavarium-host). */
+export const SUDOERS = '/etc/sudoers.d/clavarium';
+/* What sudo is told, tried in this order: the first its version takes without a word wins. Some sudo builds do
+   not know « syslog » (found 01-11 on a real server: « unknown setting: 'syslog' » on every call); they keep
+   the session lines quiet at least. A line of ours their sudo does not take is replaced. */
+export const QUIET_SETTINGS = ['!syslog, !pam_session', '!pam_session', '!syslog'];  /* sudo-rs (Ubuntu 25.10+) refuses pam_session: !syslog alone tried after */
+export const quietLine = (account, setting = QUIET_SETTINGS[0]) => `Defaults:${account} ${setting}`;
+const QUIET_COMMENT = '# Added by the Clavarium updater: its probes every few seconds are not written to the system log.';
+/* `told(outcome)`: what is in place after this turn, for Settings (sudo-quiet.json beside the state, server/updates.mjs):
+   { on: true, setting } or { on: false, why } -- the file missing, no account in it, visudo refusing (its words). */
+export async function ensureQuietSudo({ file = SUDOERS, run = runCommand, told = () => {} } = {}) {
+    let text;
+    try { text = readFileSync(file, 'utf8'); } catch (error) { told({ on: false, why: `${file} not readable (${error.code ?? error.message})` }); return false; }
+    const account = text.match(/^([a-z_][a-z0-9_-]*)\s+ALL=\(root\)\s+NOPASSWD:/m)?.[1];
+    if (!account) { told({ on: false, why: `no "<account> ALL=(root) NOPASSWD:" line in ${file}` }); return false; }
+    let refusal = '';
+    const accepted = async (candidate) => {
+        rmSync(`${file}.new`, { force: true });
+        writeFileSync(`${file}.new`, candidate, { mode: 0o440 });
+        const r = await run(['visudo', '-cf', `${file}.new`], { timeoutMs: 30_000 });
+        const said = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+        const ok = r.code === 0 && !/unknown setting|syntax error|parse error/i.test(said);
+        if (!ok) refusal = said.split('\n').map((l) => l.trim()).filter(Boolean).pop()?.slice(0, 200) || `visudo exit ${r.code}`;
+        return ok;
+    };
+    /* The rule as it is, without any line of ours. */
+    const base = text.split('\n').filter((l) => l !== QUIET_COMMENT && !l.startsWith(`Defaults:${account} `)).join('\n').replace(/\n*$/, '\n');
+    const current = QUIET_SETTINGS.find((q) => text.includes(quietLine(account, q)));
+    try {
+        if (current && await accepted(text)) { told({ on: true, setting: current, account }); return false; }   /* ours, and taken as it is */
+        const refused = [];
+        for (const setting of QUIET_SETTINGS) {
+            const next = `${base}${QUIET_COMMENT}\n${quietLine(account, setting)}\n`;
+            if (await accepted(next)) {
+                try { renameSync(`${file}.new`, file); } catch (error) { told({ on: false, why: `${file} not replaced (${error.code ?? error.message})` }); throw error; }
+                told({ on: true, setting, account }); return true;
+            }
+            refused.push(`${setting}: ${refusal}`);
+        }
+        /* None taken: the rule alone, as install.sh wrote it -- never a file sudo complains about. */
+        told({ on: false, why: `visudo refused ${refused.join('; ')}`.slice(0, 300) });
+        if (current && await accepted(base)) { renameSync(`${file}.new`, file); return true; }
+        return false;
+    } finally { rmSync(`${file}.new`, { force: true }); }
+}
+/* WHETHER IT WORKS, for Settings (17-11: the owner's journal still had a sudo line a second, the rule said to be
+   written): which sudo this is (`sudo --version`, its first line), and how many sudo lines the journal got over
+   the last ten minutes -- read by its own field, which the journal indexes: no long read. */
+export async function sudoSeen({ run = runCommand } = {}) {
+    const v = await run(['sudo', '--version'], { timeoutMs: 10_000 }).catch(() => ({ code: 1, stdout: '' }));
+    const sudo = String(v.stdout ?? '').split('\n')[0].trim().slice(0, 80) || null;
+    const j = await run(['journalctl', 'SYSLOG_IDENTIFIER=sudo', '--since', '-10min', '-o', 'cat', '--no-pager', '-q'], { timeoutMs: 20_000 }).catch(() => ({ code: 1, stdout: '' }));
+    const lines10m = j.code === 0 ? String(j.stdout ?? '').split('\n').filter((l) => l.trim()).length : null;
+    return { sudo, lines10m };
+}
+
+/* FFMPEG, kept by the updater: the voice boxes play a radio, a podcast, a music file through it
+   (server/boxes.mjs, listen). Installed by install.sh; added once to a machine installed before. */
+export async function ensureFfmpeg({ run = runCommand, has = () => ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].some((f) => existsSync(f)) } = {}) {
+    if (has()) return false;
+    if (process.getuid?.() !== 0) return false;
+    await run(['apt-get', 'install', '-y', '-qq', 'ffmpeg'], { timeoutMs: 15 * 60_000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
+    return has();
 }
 
 /* THE MAINTENANCE PAGE, kept by the updater: while the server is down (an update, a restart) the
@@ -139,7 +238,7 @@ export const MAINTENANCE_BLOCK = [
     '\t\t\t\t@api path /api/* /c/api/*',
     '\t\t\t\thandle @api {',
     '\t\t\t\t\theader Content-Type "application/json; charset=utf-8"',
-    '\t\t\t\t\trespond "{\\"error\\":\\"Clavarium is being updated or restarted: it comes back by itself in a moment.\\",\\"down\\":true}" 503',
+    '\t\t\t\t\trespond "{\\"error\\":\\"Clavarium did not answer just now -- it may be busy or restarting. It comes back by itself; try again in a moment.\\",\\"down\\":true}" 503',
     '\t\t\t\t}',
     '\t\t\t\thandle {',
     `\t\t\t\t\troot * ${MAINTENANCE_DIR}`,
@@ -193,6 +292,37 @@ export async function ensureMaintenance({ caddyfile = CADDYFILE, caddy = CADDY, 
 }
 
 export class Refused extends Error {}
+/* NOTHING OF THE VERSION RAN: npm could not install it, or the registry did not answer about it (not there
+   yet, a mirror behind, the network). Said in the history as `fetch: true`, tried again by itself later.
+   `log`: what npm said, for "See the log". */
+export class FetchFailed extends Error {
+    constructor(message, { log } = {}) { super(message); this.log = log; }
+}
+
+/* WHAT A LOG MUST NEVER SHOW: npm's debug log can carry the registry's credentials (an .npmrc token, an
+   Authorization header, a URL with a password). Each is put as ***. */
+export function redact(text) {
+    return String(text ?? '')
+        .replace(/\b(proxy-authorization|authorization)(["']?\s*[:=]\s*["']?)(?:(bearer|basic|token)\s+)?[^\s"',;}]+/gi, (_, k, sep, scheme) => `${k}${sep}${scheme ? `${scheme} ` : ''}***`)
+        .replace(/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{6,}/gi, '$1 ***')
+        .replace(/((?:_authToken|_auth|_password|authToken|token|password|passwd|secret|otp)["']?\s*[=:]\s*["']?)[^\s"',;}]+/gi, '$1***')
+        .replace(/\bnpm_[A-Za-z0-9]{16,}\b/g, 'npm_***')
+        .replace(/\bgh[opsur]_[A-Za-z0-9]{16,}\b/g, 'gh*_***')
+        .replace(/(\/\/)[^\s/@:]+:[^\s/@]+@/g, '$1***@');
+}
+
+/* The end of npm's own debug log, from the cache it was given: the last lines that say something (its
+   `silly` lines, its call stack and its pointer to itself left out), each bounded, credentials taken out. '' when there is none. */
+export function npmLogTail(cache, lines = NPM_LOG_LINES) {
+    const dir = join(cache, '_logs');
+    let name;
+    try { name = readdirSync(dir).filter((f) => f.endsWith('.log')).sort().pop(); } catch { return ''; }
+    if (!name) return '';
+    let text = '';
+    try { text = readFileSync(join(dir, name), 'utf8'); } catch { return ''; }
+    const kept = text.split('\n').filter((l) => l.trim() && !/^\d+\s+silly\b|^\d+\s+verbose stack\s+at |A complete log of this run can be found in/.test(l)).slice(-lines).map((l) => (l.length > 500 ? `${l.slice(0, 500)}...` : l));
+    return redact(kept.join('\n'));
+}
 
 /* SEMANTIC VERSIONS, compared as npm does: a pre-release comes before its release. */
 export function compareVersions(a, b) {
@@ -258,7 +388,19 @@ export function runCommand(argv, { cwd, env = process.env, timeoutMs = 900_000 }
     });
 }
 
-const lastLine = (r) => String(r.stderr || r.stdout || '').trim().split('\n').filter((l) => l.trim() && !/^npm (notice|warn)/.test(l)).pop()?.slice(0, 300) ?? `exit ${r.code}`;
+/* npm's lines that say nothing of why: its notices, its warnings, its pointer to a log that is gone with
+   its cache, its empty error lines. */
+const NPM_NOISE = /^npm (notice|warn)|A complete log of this run can be found in|^npm (error|ERR!)\s*$/;
+const lastLine = (r) => redact(String(r.stderr || r.stdout || '').trim().split('\n').filter((l) => l.trim() && !NPM_NOISE.test(l)).pop()?.slice(0, 300) ?? `exit ${r.code}`);
+/* Why npm failed, in one line: its error code and its first words of explanation ("code ETARGET: notarget
+   No matching version found for ..."), else its last line that says something. */
+function npmWhy(r) {
+    const errors = String(r.stderr || r.stdout || '').split('\n').map((l) => /^npm (?:error|ERR!) (.+)$/.exec(l.trim())?.[1]?.trim()).filter((l) => l && !NPM_NOISE.test(`npm error ${l}`));
+    const code = errors.find((l) => /^code \S+$/.test(l));
+    const said = errors.find((l) => !/^(code|errno|syscall|path|dest|signal|command|cwd) /.test(l));
+    if (!code && !said) return lastLine(r);
+    return redact([code, said].filter(Boolean).join(': ').slice(0, 300));
+}
 const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
 const toHex = (integrity) => Buffer.from(String(integrity).replace(/^sha512-/, ''), 'base64').toString('hex');
 
@@ -266,14 +408,14 @@ export class Updater {
     #o; #run; #fetch;
     constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, tunnelTarget = PATHS.tunnel, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
         verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, serviceState, answers, restarts, mainPid, pidCwd, diagnose, dropIn = DROP_IN,
-        clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000, noticeMs = NOTICE_MS } = {}) {
-        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, tunnelTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, noticeMs, clock, sleep, dropIn };
+        clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000, noticeMs = NOTICE_MS, releaseSettleMs = RELEASE_SETTLE_MS } = {}) {
+        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, tunnelTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, noticeMs, releaseSettleMs, clock, sleep, dropIn };
         this.#run = run; this.#fetch = fetcher;
         this.verifySignatures = verifySignatures ?? ((dir) => this.#npm(['audit', 'signatures'], { cwd: dir, timeoutMs: 300_000 }));
         this.restart = restart ?? (() => this.#restart());
         /* What was seen when the server did not come up: its journal, its unit, who holds its port. */
         this.diagnose = diagnose ?? (() => this.#diagnose());
-        this.health = health ?? ((release) => this.#health(release));
+        this.health = health ?? ((release, opts) => this.#health(release, opts));
         this.backup = backup ?? ((app) => this.#backup(app));
         this.restoreData = restoreData ?? ((app, archive) => this.#restoreData(app, archive));
         this.installPrivileged = installPrivileged ?? ((app) => this.#installPrivileged(app));
@@ -333,10 +475,12 @@ export class Updater {
 
     set(key, value) { writeConf(this.#o.conf, key, value); return this.about(); }
 
+    /* The registry not answering, or not with what was asked: a fetch failure (FetchFailed), not the release's fault. */
     async #json(url) {
-        const answer = await this.#fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(60_000) });
-        if (!answer.ok) throw new Error(`the registry answered ${answer.status} for ${url}`);
-        return answer.json();
+        let answer;
+        try { answer = await this.#fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(60_000) }); } catch (error) { throw new FetchFailed(`the registry could not be reached for ${url}: ${error.cause?.code ?? error.message}`); }
+        if (!answer.ok) throw new FetchFailed(`the registry answered ${answer.status} for ${url}`);
+        try { return await answer.json(); } catch (error) { throw new FetchFailed(`the registry's answer for ${url} was cut: ${error.message}`); }
     }
     #packument(name) { return this.#json(`${this.#o.registry}/${name}`); }
 
@@ -354,7 +498,11 @@ export class Updater {
             if (conf.CHANNEL === 'beta' && tags.beta && (!candidate || compareVersions(tags.beta, candidate) > 0)) candidate = tags.beta;
             if (candidate && (!VERSION.test(candidate) || !p.versions?.[candidate])) candidate = undefined;
             const available = candidate && (!current || compareVersions(candidate, current.version) > 0) ? candidate : null;
-            this.#save({ checkedAt: this.#o.now().toISOString(), available, checkError: null });
+            /* Since when it is out (RELEASE_SETTLE_MS): the registry's time for it, and when it was first seen here. */
+            const was = this.#state().outSince;
+            const published = Date.parse(p.time?.[available] ?? '');
+            const outSince = available ? { version: available, seenAt: was?.version === available && was.seenAt ? was.seenAt : this.#o.now().toISOString(), publishedAt: Number.isFinite(published) ? new Date(published).toISOString() : null } : null;
+            this.#save({ checkedAt: this.#o.now().toISOString(), available, checkError: null, outSince });
             return available;
         } catch (error) {
             this.#save({ checkedAt: this.#o.now().toISOString(), checkError: `The registry could not be asked: ${error.message}` });
@@ -372,6 +520,12 @@ export class Updater {
     }
 
     #npmEnv(nodeDir) { return { ...process.env, PATH: `${nodeDir ? `${nodeDir}/bin:` : ''}${dirname(process.execPath)}:${process.env.PATH ?? '/usr/bin:/bin'}`, npm_config_update_notifier: 'false', npm_config_fund: 'false', npm_config_audit: 'false' }; }
+    /* What npm said when it failed, for "See the log": its own words, then the end of its debug log. */
+    #npmFailure(r, what) {
+        const said = redact(String(r.stderr || r.stdout || '').trim().split('\n').filter((l) => !/A complete log of this run can be found in/.test(l)).slice(-20).join('\n'));
+        const tail = npmLogTail(join(this.#o.stateDir, 'npm-cache'));
+        return [`== ${this.#o.now().toISOString()} ${what} failed (exit ${r.code})`, `-- what npm said\n${said || '(nothing)'}`, ...(tail ? [`-- the end of npm's debug log\n${tail}`] : [])].join('\n').slice(-LOG_MAX);
+    }
     #npm(args, { cwd, nodeDir, timeoutMs = 900_000 } = {}) {
         const npm = nodeDir ? join(nodeDir, 'bin', 'npm') : join(dirname(process.execPath), 'npm');
         return this.#run([npm, ...args, '--registry', `${this.#o.registry}/`, '--cache', join(this.#o.stateDir, 'npm-cache'), '--loglevel=error'], { cwd, env: this.#npmEnv(nodeDir), timeoutMs });
@@ -395,9 +549,12 @@ export class Updater {
                 this.#step(action, id, 'Fetching');
                 writeFileSync(join(tmp, 'package.json'), `${JSON.stringify({ name: 'clavarium-release', private: true, dependencies: { [NAME]: version } }, null, 2)}\n`);
                 const got = await this.#npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact'], { cwd: tmp });
-                if (got.code !== 0) throw new Error(`npm could not install ${NAME}@${version}: ${lastLine(got)}`);
+                /* Whatever made it fail (not there yet, a mirror behind, the network, a cut archive), nothing of it ran:
+                   a fetch failure, with what npm said kept (its debug log goes with its cache, below). */
+                if (got.code !== 0) throw new FetchFailed(`npm could not install ${NAME}@${version}: ${npmWhy(got)}`, { log: this.#npmFailure(got, `npm install ${NAME}@${version}`) });
                 app = join(tmp, 'node_modules', NAME);
-                const manifest = JSON.parse(readFileSync(join(app, 'package.json'), 'utf8'));
+                let manifest;
+                try { manifest = JSON.parse(readFileSync(join(app, 'package.json'), 'utf8')); } catch (error) { throw new FetchFailed(`npm could not install ${NAME}@${version}: it left no package (${error.code ?? error.message})`, { log: this.#npmFailure(got, `npm install ${NAME}@${version}`) }); }
                 if (manifest.name !== NAME || manifest.version !== version) throw new Error(`npm installed ${manifest.name}@${manifest.version}, not ${NAME}@${version}`);
                 this.#step(action, id, 'Checking');
                 await this.verify(tmp, version);
@@ -444,6 +601,8 @@ export class Updater {
         const own = entry(NAME);
         const p = await this.#packument(NAME);
         const dist = p.versions?.[version]?.dist;
+        /* Installed, but not listed by the registry that was asked next (a mirror behind): fetched again later. */
+        if (own && !dist) throw new FetchFailed(`the registry does not list ${NAME}@${version} yet`);
         if (!own || !dist || own.version !== version || own.integrity !== dist.integrity) throw new Error(`${NAME}@${version} as installed is not the archive the registry lists`);
         for (const name of Object.keys(REPOS)) {
             const e = name === NAME ? own : entry(name);
@@ -468,9 +627,11 @@ export class Updater {
         const repository = statement.predicate?.buildDefinition?.externalParameters?.workflow?.repository;
         if (repository !== REPOS[name]) throw new Error(`${name}@${version} was built from ${repository ?? 'an unknown place'}, not ${REPOS[name]}`);
         /* And from the branch its kind of version comes from (publish.yml): a version for everybody
-           from main only; one to try from next (or main, as before there was a next). */
+           from main only; a -beta.N from beta; any other version to try from next (or main). */
         const ref = statement.predicate?.buildDefinition?.externalParameters?.workflow?.ref;
-        const branches = version.includes('-') ? ['refs/heads/next', 'refs/heads/main'] : ['refs/heads/main'];
+        const branches = /-beta\.\d/.test(version) ? ['refs/heads/beta', 'refs/heads/main']
+            : version.includes('-') ? ['refs/heads/next', 'refs/heads/main']
+            : ['refs/heads/main'];
         if (!branches.includes(ref)) throw new Error(`${name}@${version} was built from ${ref ?? 'an unknown branch'}: a version ${version.includes('-') ? 'to try' : 'for everybody'} comes from ${branches.join(' or ')}`);
     }
 
@@ -534,7 +695,11 @@ export class Updater {
         const unlock = this.#lock();
         try {
             let release;
-            try { release = await this.prepare({ version }); } catch (error) { this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: error.message }); throw error; }
+            try { release = await this.prepare({ version }); } catch (error) {
+                const fetched = error instanceof FetchFailed || /^npm could not install /.test(error.message);
+                this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: error.message, ...(fetched ? { fetch: true } : {}), ...(typeof error.log === 'string' && error.log ? { log: error.log.slice(-LOG_MAX) } : {}) });
+                throw error;
+            }
             const before = this.#dataFormat();
             let archive;
             try {
@@ -603,13 +768,16 @@ export class Updater {
             await this.installPrivileged(release.app);
         } catch (error) { return `it could not be put in place: ${error.message}`; }
         this.#step(action, version, 'Restarting');
-        return this.#restartAndCheck(release);
+        /* Once the new server answers, the maintenance page is gone but a minute or two of
+           watching that it stays up is left: said as "Confirming", not "Restarting", so a page
+           back up does not look stuck restarting (deploy/updater.mjs, #health onUp). */
+        return this.#restartAndCheck(release, () => this.#step(action, version, 'Confirming'));
     }
     /* '' when it came up, or why not. */
-    async #restartAndCheck(release) {
+    async #restartAndCheck(release, onUp) {
         const r = await this.restart().catch((e) => ({ code: 1, stderr: e.message }));
         if (r?.code) return `the server did not restart: ${lastLine(r)}`;
-        const h = await this.health(release).catch((e) => e.message || 'no answer');
+        const h = await this.health(release, { onUp }).catch((e) => e.message || 'no answer');
         return h || '';
     }
 
@@ -643,8 +811,17 @@ export class Updater {
         const available = await this.check();
         if (!available) return 'up to date';
         if (conf.MODE === 'ask') return `${available} is out: waiting for the owner`;
-        /* A version that failed here is not tried again by itself: the owner can, from Settings. */
-        if ((state.history ?? []).some((h) => h.to === available && h.action === 'update' && h.result !== 'done')) return `${available} failed here before: not tried again by itself`;
+        /* A version that failed here is not tried again by itself: the owner can, from Settings. One that only
+           could not be fetched (nothing of it ran) is, later, a few times. */
+        const failed = (state.history ?? []).filter((h) => h.to === available && h.action === 'update' && h.result !== 'done');
+        if (failed.some((h) => h.fetch !== true)) return `${available} failed here before: not tried again by itself`;
+        if (failed.length >= FETCH_TRIES) return `${available} could not be fetched ${failed.length} times: not tried again by itself`;
+        const lastAt = Math.max(...failed.map((h) => new Date(h.at ?? 0).getTime()), -Infinity);
+        if (failed.length && now - lastAt < FETCH_AGAIN_MS) return `${available} could not be fetched: tried again later`;
+        /* Just out: every mirror given time to have it (RELEASE_SETTLE_MS). */
+        const out = this.#state().outSince;
+        const outAt = Math.min(...[out?.version === available ? out.seenAt : null, out?.version === available ? out.publishedAt : null].map((t) => Date.parse(t ?? '')).filter(Number.isFinite), now.getTime());
+        if (now - outAt < this.#o.releaseSettleMs) return `${available} is just out: installed by itself from ${new Date(outAt + this.#o.releaseSettleMs).toISOString()}`;
         const why = await this.busy(); if (why) return why;
         await this.apply(available);
         /* What the history says, not what was hoped: a version that did not start was undone. */
@@ -789,17 +966,25 @@ export class Updater {
         const port = readConf(this.#o.conf).PORT;
         const part = async (title, argv) => { const r = await this.#run(argv, { timeoutMs: 20_000 }); return `-- ${title}\n${String(r.stdout || r.stderr || `exit ${r.code}`).trim()}`; };
         const left = await this.#leftovers().catch(() => []);
+        /* WHAT THE SERVER ITSELF SAID (17-11): the unit's journal is mostly the sudo lines of the host program it
+           runs (a hundred a minute), its own words lost among them -- the owner saw only those, and no reason.
+           Read further back, the sudo and PAM lines left out, the last of the rest kept. */
+        const serverSaid = async () => {
+            const r = await this.#run(['journalctl', '-u', 'clavarium.service', '-n', '4000', '--no-pager', '-o', 'short-iso'], { timeoutMs: 20_000 });
+            const lines = String(r.stdout || '').split('\n').filter((l) => l.trim() && !/ (sudo|pkexec)\[\d+\]: | pam_unix\(/.test(l));
+            return `-- what the server said (journalctl -u clavarium, sudo lines left out)\n${lines.slice(-80).join('\n').trim() || String(r.stderr || `exit ${r.code}`).trim()}`;
+        };
         return [
             await part('systemctl status clavarium', ['systemctl', 'status', 'clavarium.service', '--no-pager', '-n', '0']),
             await part(`who listens on ${port}`, ['ss', '-Hltnp', `sport = :${port}`]),
             `-- processes of the server's unit or on its port\n${left.map((p) => `pid ${p.pid} state ${p.state}${p.port ? ' (holds the port)' : ''}`).join('\n') || 'none'}`,
-            await part('journalctl -u clavarium -n 80', ['journalctl', '-u', 'clavarium.service', '-n', '80', '--no-pager', '-o', 'short-iso']),
+            await serverSaid(),
         ].join('\n');
     }
 
     /* Comes up (answers, from this release) within healthMs, then STAYS up: watched until watchMs after
        the restart; one restart by systemd is forgiven if it answers at the end, not two. */
-    async #health(release) {
+    async #health(release, { onUp } = {}) {
         const { clock, sleep } = this.#o;
         const start = clock();
         const target = realpathSync(release.dir);
@@ -817,7 +1002,8 @@ export class Updater {
             if (clock() - start > this.#o.healthMs) return said;
             await sleep(1000);
         }
-        /* And it stays up. */
+        /* It answers, from this release: the maintenance page gives way. Now it must stay up. */
+        onUp?.();
         const until = Math.max(start + this.#o.watchMs, clock() + this.#o.settleMs);
         let restarts = 0;
         while (clock() < until) {
@@ -906,7 +1092,20 @@ async function main(argv) {
                update that brought it ran the PREVIOUS release's code. Idempotent; never stops the turn. */
             try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
-            try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy takes one CSRF cookie per sign-in'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
+            try { if (await ensureFfmpeg()) console.error('updater: ffmpeg installed, for the sounds the voice boxes play'); } catch (error) { console.error(`updater: ffmpeg could not be installed: ${error.message}`); }
+            /* What became of it is kept beside the state, for Settings (server/updates.mjs: sudoQuiet). */
+            {
+                let outcome = { on: false, why: 'not looked at' };
+                try { if (await ensureQuietSudo({ told: (o) => { outcome = o; } })) console.error('updater: sudo no longer logs the host program\'s probes'); } catch (error) { console.error(`updater: sudo could not be made quiet: ${error.message}`); if (outcome.on) outcome = { on: false, why: error.message.slice(0, 200) }; }
+                if (!outcome.on) console.error(`updater: sudo quiet: not applied: ${outcome.why}`);
+                try {
+                    const seen = await sudoSeen();
+                    writeFileSync(join(PATHS.stateDir, 'sudo-quiet.json.new'), `${JSON.stringify({ ...outcome, ...seen, at: new Date().toISOString() })}\n`, { mode: 0o644 });
+                    renameSync(join(PATHS.stateDir, 'sudo-quiet.json.new'), join(PATHS.stateDir, 'sudo-quiet.json'));
+                } catch (error) { console.error(`updater: the sudo quiet state could not be kept: ${error.message}`); }
+            }
+            try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy set (one CSRF cookie per sign-in; /api/ext/ for API keys)'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
+            try { const c = await ensureGenericClientId({ run: runCommand }); if (c.changed.length) console.error('updater: the sign-in client id was made generic (nothing names the product in the open)'); } catch (error) { console.error(`updater: the sign-in client id could not be made generic: ${error.message}`); }
             try { if (await ensureTunnel({ run: runCommand })) console.error('updater: the tunnel to the relay notices a cut sooner'); } catch (error) { console.error(`updater: the tunnel could not be set: ${error.message}`); }
             /* What became of the relay is kept beside the state, for Settings (server/updates.mjs: relay). */
             try {

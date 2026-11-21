@@ -65,6 +65,16 @@ import { GitFailure, waiversProblem } from './gitrunner.mjs';
 import { SECONDS_MIN, SECONDS_MAX, COMMAND_MAX } from './gitchecks.mjs';
 
 export const TICK_MS = 30_000;
+/* Each repository's refresh comes up to this much after its period, the same for a
+   repository every time (from its name): fifteen repositories do not all reach their
+   remote, and then every machine, at the same tick. */
+export const SPREAD_MS = 60_000;
+export function spread(name, within = SPREAD_MS) {
+    if (!(within > 0)) return 0;
+    let h = 0;
+    for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return h % within;
+}
 /* A read waits this long after the last change of the marks. */
 export const READ_DELAY_MS = 5_000;
 /* And happens at least this often while a machine uses the repository. */
@@ -190,7 +200,8 @@ export function withoutOldSetting(record) {
 /* WHAT TO DO about a refused automatic sending, said after it in the chat;
    by the reason #once is given (its first word when not listed whole). */
 const TODO = Object.freeze({
-    cap: 'Raise the cap of this conversation, or send it from the review.',
+    /* 07-11: where it is set, said (the owner asked « on configure ça où ? »). */
+    cap: 'Raise the cap in this conversation: Assets, the repository, Automatic sending, « Sendings an hour ». Or send it from the review.',
     create: 'Make the branch on the remote, send it from the review, or let this conversation create branches.',
     'checks-failed': 'The agent was told; see the checks in the review.',
     'checks-none': 'Set a check command or a pre-push hook, or stop asking for checks for this conversation.',
@@ -211,9 +222,22 @@ const seeCommits = (name, head, base, n) => (short(head) && short(base) && Numbe
    long a finished run is kept for the request that asks again just after. */
 export const CHECK_WAIT_MS = 20_000;
 export const CHECK_KEEP_MS = 60_000;
+/* A send (the push to the remote) runs in the background, like a check: one
+   request waits at most this long, then hears { status: 'sending' } and asks
+   again (join), so a long push never outruns the proxy. The push itself is
+   already bounded (PUSH_MS); a finished send is kept this long for the asking. */
+export const SENDING_WAIT_MS = 20_000;
+export const SENDING_KEEP_MS = 60_000;
 
 export class GitKeeper {
-    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #last; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map(); #inFlight = new Map();
+    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #last; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map(); #inFlight = new Map(); #sending = new Map();
+    /* The reference's branches after its last refresh that worked (its `mark`), by repository; and,
+       by "conversation repository", the mark its machine was last fetched at (see #fetchInMachines). */
+    #marks = new Map(); #fetchedAt = new Map();
+    /* Set by start: no refresh before this (the keeper's clock), each repository a little after it (spread). */
+    #since = 0;
+    /* Set by start: how far the refreshes are spread (two ticks at most; none before a start). */
+    #spreadMs = 0;
 
     /* `review`: GitReview (reads, the reference, Send). `checks`: GitChecks.
        `alerts`: what tells the owner's phone. `tellAgent(repository, line,
@@ -390,10 +414,11 @@ export class GitKeeper {
     #attached(name) { try { return Object.entries(this.#resources.list().find((x) => x.name === name)?.attachments ?? {}).filter(([, access]) => access && access !== 'none').map(([c]) => c).sort(); } catch { return []; } }
     /* Marked as told only once somebody was: a line typed to no machine
        (all asleep, a terminal that failed) is said again the next time. */
-    #toAgent(name, line, conversation) {
+    /* `full`: a longer text the line stands for (all a remote said), that the agent can be given to read. */
+    #toAgent(name, line, conversation, full) {
         if (this.#record(name).toldAgent === line || this.#telling.get(name) === line) return;
         this.#telling.set(name, line);
-        void Promise.resolve(this.#tellAgent(name, `Clavarium, repository ${name}: ${line}.`, conversation))
+        void Promise.resolve(this.#tellAgent(name, `Clavarium, repository ${name}: ${line}.`, conversation, full))
             .then((heard) => { if (heard !== false) this.#patch(name, { toldAgent: line }); }, () => {})
             .finally(() => { if (this.#telling.get(name) === line) this.#telling.delete(name); });
     }
@@ -412,7 +437,8 @@ export class GitKeeper {
         const message = failure.message ?? 'The repository could not be read.';
         const kind = failure.kind ?? 'error';
         const record = this.#record(name);
-        const count = (record.readFailures ?? 0) + 1;
+        /* A read refused because another one runs ("busy") is no failure of the repository: it counts for nothing. */
+        const count = kind === 'busy' ? (record.readFailures ?? 0) : (record.readFailures ?? 0) + 1;
         /* The same failure as the last read's: the same kind, and the same
            words unless the words carry a number that moves at every read. */
         const same = record.lastRead?.ok === false && record.lastRead.kind === kind && (VARYING.has(kind) || record.lastRead.what === message);
@@ -426,7 +452,8 @@ export class GitKeeper {
         else if (count === 2) this.#tell(`${name}: could not be read`, message);
         /* The agent is told where it can act; a git failure, or refs that may
            only have been changing during the read, only after two in a row. */
-        if (failure.ai && (!['git', 'refs'].includes(kind) || count >= 2)) this.#toAgent(name, failure.ai);
+        /* Two in a row OF THAT KIND: refs caught changing once, after a failure of another kind, are not "broken". */
+        if (failure.ai && (!['git', 'refs'].includes(kind) || (count >= 2 && record.lastRead?.ok === false && record.lastRead.kind === kind))) this.#toAgent(name, failure.ai);
     }
 
     #refreshOutcome(name, result) {
@@ -434,6 +461,7 @@ export class GitKeeper {
         const record = this.#record(name);
         const failures = result.ok ? 0 : (record.refreshFailures ?? 0) + 1;
         this.#patch(name, { mirror: { at, ok: result.ok, message: result.ok ? 'Up to date with the origin.' : result.message }, refreshFailures: failures });
+        if (result.ok && typeof result.mark === 'string') this.#marks.set(name, result.mark);
         if (!result.ok && failures === 3) this.#tell(`${name}: the remote does not answer`, result.message);
         if (result.stale?.length) this.#log(name, { ok: false, what: `A refresh was stopped by its time limit; stale lock files removed: ${result.stale.join(', ')}.` });
         for (const w of result.rewritten ?? []) {
@@ -556,7 +584,30 @@ export class GitKeeper {
 
     /* Send, from the page: as GitReview.push, and refused when the owner
        requires passing checks and none passed for this commit and branch. */
+    /* The push runs in the background; the request waits at most SENDING_WAIT_MS,
+       then returns { status: 'sending' } and the page asks again with `join: true`
+       until it ends -- so a slow push never blocks the request past the proxy's
+       patience. The push itself is still bounded (PUSH_MS), so it cannot run on
+       for hours. A send already going is joined; one just ended is re-run only
+       on a fresh click (no `join`), and re-sending the same commit is a no-op. */
     async send(name, body) {
+        const r = this.#repository(name);
+        const key = `${r.name}\n${body?.head ?? ''}\n${body?.target ?? ''}`;
+        let entry = this.#sending.get(key);
+        if (!entry || (entry.done && body?.join !== true)) {
+            const made = { done: false, result: undefined, error: undefined };
+            made.run = this.#doSend(r.name, body)
+                .then((result) => { made.result = result; }, (error) => { made.error = error; })
+                .finally(() => { made.done = true; setTimeout(() => { if (this.#sending.get(key) === made) this.#sending.delete(key); }, SENDING_KEEP_MS).unref?.(); });
+            entry = made; this.#sending.set(key, made);
+        }
+        const ms = Number.isFinite(body?.wait) ? Math.max(0, Math.min(body.wait, SENDING_WAIT_MS)) : SENDING_WAIT_MS;
+        await Promise.race([entry.run, new Promise((res) => { setTimeout(res, ms).unref?.(); })]);
+        if (!entry.done) return { status: 'sending' };
+        if (entry.error) throw entry.error;
+        return entry.result;
+    }
+    async #doSend(name, body) {
         const r = this.#repository(name);
         if (this.settings(r.name).requireForSend) {
             const target = body?.target || undefined;
@@ -579,6 +630,8 @@ export class GitKeeper {
         if (['look', 'confirm', 'busy'].includes(error.kind)) return;
         this.#log(name, { ok: false, branch: branch ?? null, head: head ?? null, what: error.message });
         if (error.alert) this.#tell(`${name}: sending needs a look`, error.message);
+        /* Refused by the remote, sent by hand: what it said is the agent's to act on too. */
+        if (error.kind === 'refused' && error.ai) this.#toAgent(name, error.ai, undefined, error.full);
         if (error.kind === 'unknown-unreachable' && branch) this.#patch(name, { blocked: { ...(this.#record(name).blocked ?? {}), [branch]: { head, at: this.#now().toISOString() } } });
     }
 
@@ -609,10 +662,10 @@ export class GitKeeper {
         const said = held.said.get(b) ?? new Map();
         if (said.get(conversation) === key) return;
         said.set(conversation, key); held.said.set(b, said);
-        const { tell, ai, ...rest } = entry;
+        const { tell, ai, full, ...rest } = entry;
         this.#log(name, { branch: b, head: tip.id, ok: false, ...(conversation ? { conversation } : {}), ...rest });
         if (tell && this.settings(name).alert) this.#tell(`${name}: not sent`, entry.what);
-        if (ai) this.#toAgent(name, ai, conversation || undefined);
+        if (ai) this.#toAgent(name, ai, conversation || undefined, full);
         /* A sending that the owner asked for, refused: said in that
            conversation's chat with what to do. Not a branch outside every
            list -- nothing was asked for it -- nor what is the repository's
@@ -667,7 +720,11 @@ export class GitKeeper {
                 /* Its machine did not run them: tried again later, when it may. */
                 if (checks.status !== 'unavailable') held.done.set(b, tip.id);
                 const why = checks.status === 'failed' ? `the checks failed in the machine of ${conversation}` : checks.status === 'none' ? 'automatic sending needs passing checks, and none is set (no pre-push hook, no check command)' : `the checks could not run: the machine of ${conversation} does not run`;
-                return once(`checks-${checks.status}`, { what: `Not sent: ${why}.`, tell: true, ...(checks.status === 'failed' ? { ai: `the checks failed for ${plain(b)}, it was not sent` } : {}) }), false;
+                /* On a failure the agent is given the END OF THE CHECK OUTPUT, not only
+                   that it failed: it is the one that can fix it, and guessing without the
+                   output wastes its time. */
+                const tail = String(checks.output ?? '').trim();
+                return once(`checks-${checks.status}`, { what: `Not sent: ${why}.`, tell: true, ...(checks.status === 'failed' ? { ai: `the checks failed for ${plain(b)}, it was not sent${tail ? `. The end of the output:\n\n${tail}` : ''}` } : {}) }), false;
             }
         }
         const checked = s.checks ? 'checks passed' : 'no checks asked for';
@@ -699,7 +756,7 @@ export class GitKeeper {
                routine notices says -- once, and once only. */
             const grave = error instanceof GitFailure && error.alert;
             if (grave && held.said.get(b)?.get(conversation) !== `${tip.id}:${why}`) this.#tell(`${name}: sending needs a look`, error.message);
-            once(why, { what: error instanceof Refusal ? error.message : 'Not sent: the sending failed.', tell: !grave, ...(error.ai ? { ai: error.ai.replace(/origin\/(\S+)/g, (m, x) => `origin/${plain(x)}`) } : {}) });
+            once(why, { what: error instanceof Refusal ? error.message : 'Not sent: the sending failed.', tell: !grave, ...(error.ai ? { ai: error.ai.replace(/origin\/(\S+)/g, (m, x) => `origin/${plain(x)}`) } : {}), ...(error.full ? { full: error.full } : {}) });
             return false;
         }
     }
@@ -748,7 +805,7 @@ export class GitKeeper {
         if (!await this.#inUse(r.name)) return;
         /* The reference, when due; its upkeep once a day. */
         const last = this.#record(r.name).mirror?.at;
-        if (s.refreshMinutes > 0 && (!last || now - new Date(last).getTime() >= s.refreshMinutes * 60_000)) {
+        if (s.refreshMinutes > 0 && now >= this.#since + spread(r.name, this.#spreadMs) && (!last || now - new Date(last).getTime() >= s.refreshMinutes * 60_000 + spread(r.name, this.#spreadMs))) {
             await this.#review.refresh(r.name).catch(() => {});
             await this.#fetchInMachines(r.name, s).catch(() => {});
             const upkeep = this.#record(r.name).upkeepAt;
@@ -772,11 +829,19 @@ export class GitKeeper {
     /* THE AGENTS' OWN COPIES, after each refresh of the reference: brought up to date in each machine
        that runs with the repository attached for writing (gitchecks.mjs, fetchIn), origin/* only.
        A branch it follows that moved is said to its agent, once per move, unless the owner turned
-       that line off (tellMoves). */
+       that line off (tellMoves).
+       Only when there is something new for it: a machine already fetched at the reference's
+       current branches (its mark) is not asked again -- each fetch is a command to the host,
+       for every machine, every few minutes. Unknown (no refresh has worked since the server
+       started), or a machine that stopped since: fetched, as before. */
     async #fetchInMachines(name, s) {
+        const mark = this.#marks.get(name);
         for (const c of this.#writers(name)) {
-            if (!await this.#runs(c, name)) continue;
+            const key = `${c} ${name}`;
+            if (!await this.#runs(c, name)) { this.#fetchedAt.delete(key); continue; }
+            if (mark !== undefined && this.#fetchedAt.get(key) === mark) continue;
             const got = await this.#checks.fetchIn?.(c, name).catch(() => undefined);
+            if (got?.ok && mark !== undefined) this.#fetchedAt.set(key, mark); else this.#fetchedAt.delete(key);
             if (!got?.ok || !s.tellMoves || got.moved.length === 0) continue;
             const said = got.moved.slice(0, 3).map((m) => `${plain(m.upstream)} moved (${m.from.slice(0, 7)} -> ${m.to.slice(0, 7)}), your branch ${plain(m.branch)} follows it`).join('; ');
             this.#toAgent(name, `${said}; fetched for you into origin/*, nothing of yours changed`, c);
@@ -794,7 +859,10 @@ export class GitKeeper {
         return removed;
     }
 
-    start(everyMs = TICK_MS) {
+    /* `quietMs`: how long after a start of the server nothing is looked at (main.mjs, quietStartMs):
+       the machines starting again come first. The refreshes then come one repository after
+       another over SPREAD_MS, not all at the first tick. */
+    start(everyMs = TICK_MS, { quietMs = 0 } = {}) {
         /* A read the server gave up on when it stopped is stopped on the host;
            a fetch it killed may have left lock files in the reference, which
            would refuse every later refresh. No git of ours runs there yet:
@@ -803,10 +871,13 @@ export class GitKeeper {
             void this.#review.runner?.stopReads(r.name);
             void this.#staleLocks(r.name).catch(() => {});
         }
-        const timer = setInterval(() => { void this.tick(); }, everyMs);
+        this.#since = this.#now().getTime() + quietMs;
+        this.#spreadMs = Math.min(SPREAD_MS, everyMs * 2);
+        const quietUntil = Date.now() + quietMs;
+        const timer = setInterval(() => { if (Date.now() >= quietUntil) void this.tick(); }, everyMs);
         timer.unref?.();
-        /* Looked at soon after a start, not a whole period later. */
-        setTimeout(() => { void this.tick(); }, Math.min(everyMs, 5000)).unref?.();
+        /* Looked at soon after a start (once it is quiet no more), not a whole period later. */
+        setTimeout(() => { void this.tick(); }, Math.max(quietMs, Math.min(everyMs, 5000))).unref?.();
         return timer;
     }
 }

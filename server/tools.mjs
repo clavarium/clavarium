@@ -11,6 +11,7 @@
  * and the checksum comes from this repository, never from the network. */
 import { readFileSync } from 'node:fs';
 import { VM_USER } from './vm.mjs';
+import { rulesOf } from '../config/launch/screen-watch.mjs';
 
 export const NODE_VERSION = 'v24.20.0';
 export const NODE_SHA256 = '2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2';
@@ -18,14 +19,16 @@ const ARCHIVE = `node-${NODE_VERSION}-linux-x64.tar.xz`;
 const TMP = `/tmp/${ARCHIVE}`;
 const APT = ['sudo', '-n', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get'];
 
-/* A step is { argv, input? }: `input` goes to standard input. */
+/* A step is { argv, input? }: `input` goes to standard input. Every one as root (sudo): in a shared machine a
+   step without sudo runs as the conversation's own user, behind its door, with its own /tmp -- the archive
+   fetched there would not be the one root unpacks (#221, 13-11: "tar: Error is not recoverable"). */
 export const NODE_STEPS = [
     { argv: [...APT, 'update', '-q'] },
     { argv: [...APT, 'install', '-y', '-q', '--no-install-recommends', 'curl', 'xz-utils', 'ca-certificates'] },
-    { argv: ['curl', '--proto', '=https', '--tlsv1.2', '-fsSL', '--max-time', '600', '-o', TMP, `https://nodejs.org/dist/${NODE_VERSION}/${ARCHIVE}`] },
-    { argv: ['sha256sum', '-c', '-'], input: `${NODE_SHA256}  ${TMP}\n` },
+    { argv: ['sudo', '-n', 'curl', '--proto', '=https', '--tlsv1.2', '-fsSL', '--max-time', '600', '-o', TMP, `https://nodejs.org/dist/${NODE_VERSION}/${ARCHIVE}`] },
+    { argv: ['sudo', '-n', 'sha256sum', '-c', '-'], input: `${NODE_SHA256}  ${TMP}\n` },
     { argv: ['sudo', '-n', 'tar', '-xJf', TMP, '-C', '/usr/local', '--strip-components=1', '--no-same-owner'] },
-    { argv: ['rm', '-f', TMP] },
+    { argv: ['sudo', '-n', 'rm', '-f', TMP] },
 ];
 
 /* "npm-writable": what npm installs globally becomes the machine user's, so
@@ -43,6 +46,11 @@ export const NPM_WRITABLE = [
 
 const isArgv = (x) => Array.isArray(x) && x.length > 0 && x.every((a) => typeof a === 'string' && a !== '');
 const ID = /^[a-z][a-z0-9-]{0,30}$/;
+/* The sign-in rules of a tool's screen (signin.screen, 15-11): how many, how long, of which kinds. */
+const SCREEN_RULES_MAX = 20; const SCREEN_RULE_MAX = 400;
+const SCREEN_KINDS = new Set(['link', 'keys', 'type', 'code']);
+/* What the machine is given of them: { toolId: [rule, ...] }, written to /tools/launch/screen-rules.json (toolbox.mjs). */
+export const screenRules = (tools) => Object.fromEntries(tools.filter((t) => t.signin?.screen).map((t) => [t.id, [...t.signin.screen]]));
 const INSTRUCTIONS = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+){0,7}$/;
 
 export function readTools(text) {
@@ -75,7 +83,20 @@ export function readTools(text) {
         if (t.signin !== undefined) {
             const domains = (list) => Array.isArray(list) && list.length > 0 && list.every((d) => typeof d === 'string' && /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(d));
             if (!domains(t.signin.senders) || !domains(t.signin.links)) throw new Error(`${t.id}: signin needs "senders" and "links", lists of domain names`);
-            signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]) });
+            /* Optional (15-11, #362): WHAT ITS SCREEN SAYS when it must sign in -- the rules of screen-watch
+               (config/launch/screen-watch.mjs), "KIND:PATTERN[=VALUE]" with KIND link, keys, type or code, each one
+               rule as screen-watch reads it. Given to the machine in /tools/launch/screen-rules.json: a tool that
+               changes its words is followed here, its launcher unchanged. `link` patterns are also checked, by the
+               server, against "links" before a link is handed to another conversation (signinhelp.mjs). */
+            let screen;
+            if (t.signin.screen !== undefined) {
+                const rules = t.signin.screen;
+                if (!Array.isArray(rules) || rules.length === 0 || rules.length > SCREEN_RULES_MAX || rules.some((r) => typeof r !== 'string' || r.length > SCREEN_RULE_MAX || rulesOf([r]).length !== 1 || !SCREEN_KINDS.has(rulesOf([r])[0].kind))) {
+                    throw new Error(`${t.id}: signin "screen" is a list of screen-watch rules, "link:", "keys:", "type:" or "code:" each`);
+                }
+                screen = Object.freeze([...rules]);
+            }
+            signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]), ...(screen ? { screen } : {}) });
         }
         /* Optional: the command that starts it taking up its last session
            ("claude --continue"); used instead of `command` once it has run on
@@ -98,13 +119,26 @@ export function readTools(text) {
            machine's user (".claude/CLAUDE.md"): a marked block in it points
            the tool to its guide (see guide.mjs). A plain relative path. */
         if (t.instructions !== undefined && !INSTRUCTIONS.test(t.instructions)) throw new Error(`${t.id}: instructions is a relative path in the home, without ".."`);
+        /* Where the tool keeps its own log, read when it ends (why it stopped): folders relative to the home. */
+        if (t.logs !== undefined && (!Array.isArray(t.logs) || t.logs.some((d) => typeof d !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(d) || d.startsWith('/') || d.split('/').includes('..')))) throw new Error(`${t.id}: logs is a list of folders relative to the home, without ".."`);
+        /* Optional: WHERE IT KEEPS ITS STATE (11-11, #351), relative to the home -- its memory, its sessions, its
+           settings, what a conversation is beyond /work: `keep`, the paths to carry when the conversation is
+           exported, imported or moved; `skip`, paths inside them that are only cache. Clavarium carries them for
+           any tool, with no case of its own. */
+        let state;
+        if (t.state !== undefined) {
+            const rel = (list) => Array.isArray(list) && list.every((d) => typeof d === 'string' && /^[A-Za-z0-9._/-]+$/.test(d) && !d.startsWith('/') && !d.split('/').includes('..') && d !== '.');
+            if (!t.state || typeof t.state !== 'object' || !rel(t.state.keep) || t.state.keep.length === 0 || (t.state.skip !== undefined && !rel(t.state.skip))) throw new Error(`${t.id}: state needs "keep", paths relative to the home without "..", and may have "skip"`);
+            if ((t.state.skip ?? []).some((d) => !t.state.keep.some((k) => d === k || d.startsWith(`${k}/`)))) throw new Error(`${t.id}: state "skip" names paths inside "keep"`);
+            state = Object.freeze({ keep: Object.freeze([...t.state.keep]), skip: Object.freeze([...(t.state.skip ?? [])]) });
+        }
         /* Optional: ITS LAUNCHER, a script of config/launch shown at /tools/launch: run at each start,
            given the rights chosen (full, ask) then the command; it sets what the tool needs,
            then runs it. Clavarium knows nothing more of the tool. */
         if (t.launch !== undefined && !/^[a-z][a-z0-9-]{0,40}\.sh$/.test(t.launch)) throw new Error(`${t.id}: launch is the name of a script of config/launch, such as "${t.id}.sh"`);
         /* Repairs an existing machine is given once (see FIXES in conversations.mjs). */
         const fixups = t.install.includes('npm-writable') ? NPM_WRITABLE : [];
-        return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), command: Object.freeze([...t.command]), ...(t.launch ? { launch: t.launch } : {}), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, ...(rights ? { rights } : {}), steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
+        return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), ...(t.logs ? { logs: Object.freeze([...t.logs]) } : {}), ...(state ? { state } : {}), command: Object.freeze([...t.command]), ...(t.launch ? { launch: t.launch } : {}), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, ...(rights ? { rights } : {}), steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
     });
 }
 

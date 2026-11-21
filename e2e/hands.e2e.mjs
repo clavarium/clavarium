@@ -43,10 +43,12 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     /* The "microphone" is a recording: two seconds of room, one second of
        voice-like sound, silence. The speech-to-text engine of the bench hears
        "said out loud" whatever it is given: what is tested is everything
-       around it -- finding the phrase, sending it, typing the answer. */
+       around it -- finding the phrase, sending it, typing the answer. The silence after the voice is longer
+       than the chat's « send when I stop » waits after a phrase with no final mark (Parley: 3 s, 2 s more,
+       04-11), or the recording, played in a loop, speaks again before it is sent. */
     const second = (level) => { const s = new Float32Array(RATE); for (let i = 0; i < RATE; i++) s[i] = level * Math.sin((2 * Math.PI * 220 * i) / RATE); return s; };
     const microphone = join(mkdtempSync(join(tmpdir(), 'clv-mic-')), 'voice.wav');
-    writeFileSync(microphone, toWav([second(0.004), second(0.004), second(0.5), second(0.004), second(0.004), second(0.004)]));
+    writeFileSync(microphone, toWav([second(0.004), second(0.004), second(0.5), ...Array.from({ length: 7 }, () => second(0.004))]));
     const b = await bench(t, { microphone });
     const me = await b.person();
     await me.create('by-voice');
@@ -72,6 +74,8 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     const mic = me.page.locator('#simple-thread .parley-mic');
     const box = me.page.locator('#simple-thread .parley-box');
     await me.until('the chat has its microphone', async () => mic.isVisible());
+    /* Counted once the terminal behind is drawn again after the reload (else: an empty screen, counted too soon). */
+    await me.sees('command not found');
     const typed = (await me.screen()).split('said out loud').length;
     await mic.click();
     await me.until('what is said fills the box', async () => (await box.inputValue()).includes('said out loud'), 25_000);
@@ -124,15 +128,79 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     const asset = await me.openAsset('folder', 'reports');
     await me.until('it says which conversation uses it', async () => (await asset.locator('.as-users .given-row[data-conversation="with-folders"]').count()) === 1);
     assert.equal(await asset.locator('.danger-link').isDisabled(), true);
-    assert.match(await asset.innerText(), /used by 1 conversation: set it to Off first/);
-    /* Set to Off from there, for that conversation. */
-    await asset.locator('.given-row[data-conversation="with-folders"] .levels button', { hasText: 'Off' }).click();
+    assert.match(await asset.innerText(), /used by 1 conversation: set it to None first/);
+    /* Set to None from there, for that conversation. */
+    await asset.locator('.given-row[data-conversation="with-folders"] .kit-rights-pick button', { hasText: 'None' }).click();
     await me.until('it is not used any more', async () => /No conversation uses it/.test(await asset.innerText().catch(() => '')));
     await asset.locator('.danger-link').click();
     await asset.locator('button.danger').click();
     await me.until('the folder is gone from the list', async () => (await me.page.locator('#assets-rows .as-row[data-asset^="folder:"]').count()) === 0);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     assert.equal((await me.api('/api/resources')).body.length, 0);
+});
+
+test('one Give… in a conversation\'s tab: what it has not yet, its right, then Give; or a new one made below and given at the end', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    const page = me.page;
+    await me.create('coder');
+    await me.newFolder('seeds');
+    /* Settings › Access: one line, to its tab. */
+    await page.locator('#folders').click();
+    await me.chapter('access');
+    await me.until('its line', async () => /assets? · see/.test(await page.locator('#access-assets').innerText()));
+    await page.locator('#access-assets').click();
+    await me.until('its Assets tab', async () => page.locator('#cassets').isVisible());
+    await page.locator('#cassets-attach').click();
+    const give = page.locator('#cassets-detail .kit-aspick');
+    await me.until('the picker', async () => give.isVisible());
+    /* What is there already, by type; nothing chosen, no right yet. */
+    const seeds = give.locator('.kit-aspick-row[data-name="seeds"]');
+    assert.equal(await seeds.count(), 1);
+    assert.equal(await give.locator('.kit-aspick-give').count(), 0);
+    await seeds.click();
+    const bar = give.locator('.kit-aspick-give');
+    assert.deepEqual(await bar.locator('.kit-rights-pick button').allInnerTexts(), ['Read', 'Write'], 'no None to give');
+    await bar.locator('.kit-rights-pick button', { hasText: 'Write' }).click();
+    await bar.locator('.kit-aspick-go').click();
+    await me.until('given, listed with its right', async () => (await page.locator('#cassets-rows .as-row[data-name="seeds"] .kit-rights').innerText().catch(() => '')) === 'Writes');
+    assert.ok((await me.api('/api/conversations')).body.find((c) => c.name === 'coder').resources.some((r) => r.name === 'seeds' && r.access === 'write'));
+    assert.equal(await give.locator('.kit-aspick-row[data-name="seeds"]').count(), 0, 'no longer offered');
+    /* Or a new one, of every kind, below the list. */
+    const box = give.locator('.kit-newasset');
+    assert.equal(await box.locator('.as-kinds button').count(), 12, 'every kind, a voice box, a device, an MCP server, a machine, a browser too');
+    assert.equal(await box.locator('[aria-current="step"]').innerText().then((x) => x.replace(/\s+/g, ' ').trim()), '1 Kind');
+    /* A folder, to read: made, then given by itself. */
+    await box.locator('.as-kinds button[data-kind="folder"]').click();
+    const made = page.locator('#cassets-detail .kit-newasset');
+    assert.match(await made.locator('.kit-na-context').innerText(), /Will be given to coder/);
+    await made.locator('.kit-na-context .kit-seg button[data-value="read"]').click();
+    await page.fill('#folder-name', 'notes');
+    await page.locator('#folder-new button[type=submit]').click();
+    await me.until('the ending', async () => /notes created and given to coder/.test(await made.locator('.kit-na-made').innerText().catch(() => '')));
+    assert.ok((await me.api('/api/conversations')).body.find((c) => c.name === 'coder').resources.some((r) => r.name === 'notes' && r.access === 'read'));
+    assert.equal(await page.locator('#cassets-rows .as-row[data-name="notes"]').count(), 1, 'listed with what it has');
+    /* Create another: the same kind's form again; Back, the kinds. A secret, used by its tool. */
+    await made.locator('button[data-act="another"]').click();
+    await me.until('the form again', async () => page.locator('#cassets-detail #folder-box').isVisible());
+    await made.locator('.kit-na-back').click();
+    await page.locator('#cassets-detail .as-kinds button[data-kind="secret"]').click();
+    assert.equal(await made.locator('.kit-na-context .kit-seg').count(), 0, 'a secret is used or not');
+    await page.fill('#secret-name', 'NOTES_KEY');
+    await page.fill('#secret-value', 'not-shown-again');
+    await page.locator('#secret-new button[type=submit]').click();
+    await me.until('the secret, made and handed', async () => /NOTES_KEY created and given to coder/.test(await made.locator('.kit-na-made').innerText().catch(() => '')));
+    assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'NOTES_KEY').conversations, ['coder']);
+    assert.match(await page.locator('#cassets-note').innerText(), /NOTES_KEY: handed to its tool at its next start/);
+    /* Done: the picker goes; its forms wait where they wait. */
+    await made.locator('button[data-act="done"]').click();
+    await me.until('closed', async () => (await page.locator('#cassets-detail .kit-newasset').count()) === 0);
+    assert.equal(await page.locator('#assets-forms #secret-box').count(), 1);
+    /* « None » in its own panel takes it back; it stays in Assets. */
+    await page.locator('#cassets-rows .as-row[data-name="seeds"]').click();
+    await page.locator('#cassets-detail .kit-access-here .kit-rights-pick button', { hasText: 'None' }).click();
+    await me.until('taken back', async () => (await page.locator('#cassets-rows .as-row[data-name="seeds"]').count()) === 0);
+    assert.ok((await me.api('/api/resources')).body.some((r) => r.name === 'seeds'));
 });
 
 test('a git repository is added from the page, attached like a folder, and is a repository for the tool', { skip: SKIP }, async (t) => {
@@ -150,7 +218,7 @@ test('a git repository is added from the page, attached like a folder, and is a 
        attached: under load they ended after, and that line was typed into
        the command below, which never ran. */
     await me.until('it is read, and said empty', async () => /Nothing has been committed on a branch in this repository yet/.test(await me.page.locator('#assets-detail').innerText().catch(() => '')), 30_000);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.access('site', 'Write');
     assert.match(await me.page.locator('#view-assets').getAttribute('title'), /site - write/);
     await me.type('cd ../resources/site && git status --short --branch && echo "# site" > README.md && git add README.md && git -c user.name=t -c user.email=t@example.com commit -q -m first && git log --oneline | wc -l; cd - >/dev/null');
@@ -168,9 +236,9 @@ test('a git repository is added from the page, attached like a folder, and is a 
     await me.page.locator('#share').click();
     const offered = me.page.locator('#share-add .folder', { hasText: 'site' });
     await me.until('the repository is offered', async () => (await offered.count()) === 1);
-    assert.match(await offered.innerText(), /site repository, attached here/);
+    assert.match(await offered.innerText(), /site\s+repository, attached here/);
     await offered.locator('button').click();
-    assert.deepEqual(await me.page.locator('#share-basket .folder', { hasText: 'site' }).locator('.levels button').allInnerTexts(), ['Read', 'Write']);
+    assert.deepEqual(await me.page.locator('#share-basket .folder', { hasText: 'site' }).locator('.kit-rights-pick button').allInnerTexts(), ['Read', 'Write']);
     await me.page.locator('#sharing-close').click();
     /* An address that is not one is refused before git is run; ssh asks for a key. */
     assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'file:///etc' })).body.error, /repository address is https/);
@@ -189,8 +257,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     await me.api('/api/conversations/pusher/resources', { resource: 'site', access: 'write' });
     await me.type('cd ../resources/site && echo "<h1>hello</h1>" > index.html && git add index.html && git -c user.name=Tool -c user.email=tool@example.com commit -q -m "Add the home page" && echo committed; cd - >/dev/null');
     await me.sees('\ncommitted');
-    await me.page.locator('#folders').click();
-    await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
+    await me.review('site');
     /* No address yet: said, and the form is open. */
     await me.until('it says where nothing is set', async () => /No address is set/.test(await me.page.locator('#gitview-state').innerText()));
     assert.equal(await me.page.locator('#gitview-push').isVisible(), false);
@@ -219,7 +286,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     /* The key: kept, sealed, and in nothing the tool can read. */
     assert.deepEqual((await me.api('/api/git/site')).body, { remote, user: null, hasKey: true, sshKey: null });
     await me.page.locator('#gitview-close').click();
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     /* The page closed: its Assets tab is there again, as it was left; the terminal is one tab away. */
     await me.page.locator('#view-terminal').click();
     await me.type('grep -r "a-token-the-tool-never-sees" ../resources/site /work 2>/dev/null | wc -l');
@@ -234,14 +301,17 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     const b = await bench(t, { microphone });
     const me = await b.person();
     assert.equal((await me.api('/api/secrets', { name: 'STT_KEY', value: 'a-key-never-shown' })).status, 201);
-    await me.page.locator('#nav-settings').click();
-    /* EVERY CHAPTER HAS SOMETHING TO ACT ON, but About, where the facts are, one line each. */
+    await me.nav('settings');
+    /* EVERY CHAPTER HAS SOMETHING TO ACT ON, but About, where the facts are, one line each, and Jobs
+       (Diagnostics, 14-11): what ran, to be read, nothing to do while none ran. */
     await me.chapter('s-about');
     await me.until('the facts', async () => /^Clavarium \S+/.test(await me.page.locator('#settings-about').innerText()));
     assert.match(await me.page.locator('#settings-people').innerText(), /Development mode|Administrators: /);
     assert.match(await me.page.locator('#settings-address').innerText(), /^Address: /);
     assert.equal(await me.page.locator('#settings-ch-people').count(), 0, 'People & address: merged into About');
-    const idle = await me.page.locator('#settings details.chapter').evaluateAll((all) => all.filter((d) => !['s-about', 's-shortcuts'].includes(d.dataset.chapter) && !d.querySelector('.chapter-body button, .chapter-body select, .chapter-body input, .chapter-body textarea')).map((d) => d.dataset.chapter));
+    /* Features (atop General) is drawn once its facts are read: waited for, not taken for a chapter with nothing to do. */
+    await me.until('the features are drawn', async () => (await me.page.locator('#settings-features button').count()) > 0);
+    const idle = await me.page.locator('#settings details.chapter').evaluateAll((all) => all.filter((d) => !['s-about', 's-shortcuts', 's-jobs'].includes(d.dataset.chapter) && !d.querySelector('.chapter-body button, .chapter-body select, .chapter-body input, .chapter-body textarea')).map((d) => d.dataset.chapter));
     assert.deepEqual(idle, [], 'a chapter that only ever shows text');
     /* No shortcut: one line, how to add one. */
     if ((await me.api('/api/shortcuts')).body.length === 0) { await me.chapter('s-shortcuts'); assert.match(await me.page.locator('#settings-shortcuts-hint').innerText(), /No shortcut yet/); }
@@ -253,10 +323,9 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     assert.equal(await me.page.inputValue('#dictation-model'), 'voxtral-mini-latest');
     await me.page.selectOption('#dictation-provider', 'groq');
     assert.equal(await me.page.inputValue('#dictation-model'), 'whisper-large-v3-turbo');
-    /* An address of this server's own network with a named provider: refused, and why. */
-    await me.page.fill('#dictation-url', b.engineUrl);
-    await me.page.locator('#dictation-save').click();
-    await me.until('refused', async () => /only with "Other/.test(await me.page.locator('#dictation-error').innerText()));
+    /* A named provider: its address is not shown (an address of this server's own network: test/voice.test.mjs). */
+    assert.equal(await me.page.locator('#dictation-url').isVisible(), false);
+    assert.equal(await me.page.locator('#dictation-backup-provider').inputValue(), 'none', 'no backup unless chosen');
     /* "Other (compatible)": an engine of one's own, here the bench's. */
     await me.page.selectOption('#dictation-provider', 'other');
     assert.equal(await me.page.inputValue('#dictation-url'), '');
@@ -278,7 +347,7 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     /* Its key past its expiry day: not sent; said in red, with a dot on the chapter. */
     assert.equal((await me.api('/api/secrets/STT_KEY/replace', { expires: '2020-01-01' })).status, 200);
     await me.page.reload();
-    await me.page.locator('#nav-settings').click();
+    await me.nav('settings');
     await me.chapter('s-dictation');
     await me.until('said expired', async () => (await me.page.locator('#settings-dictation').innerText()) === 'Key expired: replace it in Assets > Secrets');
     assert.equal(await me.page.locator('#settings-dictation').getAttribute('data-tone'), 'bad');

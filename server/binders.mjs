@@ -45,7 +45,7 @@ export class Binders {
        the owner's devices (optional), told of a card a person owns that came due. */
     constructor({ dataDir, resources, conversations, dockets = null, team = null, alert = null, now = () => Date.now() }) {
         this.#resources = resources; this.#conversations = conversations; this.#dockets = dockets; this.#team = team; this.#alert = alert;
-        this.#keeper = keeper(`${dataDir}/binder`, { sides: () => this.#sides(), now });
+        this.#keeper = keeper(`${dataDir}/binder`, { sides: () => this.#sides(), now, people: () => this.people() });
         this.#keeper.store.onChange((line) => { this.#changes++; this.#heard(line); });
     }
 
@@ -110,9 +110,12 @@ export class Binders {
     }
     /* Who may own a record, or be given a list. */
     people(identity = '') {
+        /* Who signed in, as the store names their ownership ('me' resolves to this). The matrix
+           colours a card "à moi" by matching this, so the page is told which entry is the viewer. */
+        const meId = `person:${identity || 'owner'}`;
         const persons = (this.#team?.list?.() ?? []).map((o) => ({ id: `person:${String(o.email ?? o.id ?? '').toLowerCase()}`, kind: 'person', name: String(o.email ?? o.id ?? '') })).filter((p) => p.name);
-        if (!persons.length) persons.push({ id: `person:${identity || 'owner'}`, kind: 'person', name: identity || 'Owner' });
-        return [...persons, ...this.#conversations().map((name) => ({ id: `${AGENT}${name}`, kind: 'agent', name }))];
+        if (!persons.length) persons.push({ id: meId, kind: 'person', name: identity || 'Owner' });
+        return [...persons.map((p) => (p.id === meId ? { ...p, me: true } : p)), ...this.#conversations().map((name) => ({ id: `${AGENT}${name}`, kind: 'agent', name }))];
     }
     /* What each conversation was given: { name: { lists, waiting } }, waiting being the
        records of those lists that wait for a person's tick (a list with a gate, not approved). */
@@ -126,6 +129,48 @@ export class Binders {
             for (const id of to) { const one = (out[id.slice(AGENT.length)] ??= { lists: 0, waiting: 0 }); one.lists++; one.waiting += waiting; }
         }
         return out;
+    }
+    /* A COPY of a conversation (#221) is given the lists its original was given, with the same access. */
+    copyGrants(from, to) {
+        const keeper = { id: 'person:keeper', kind: 'person', name: 'keeper' };
+        for (const l of this.#keeper.store.lists(keeper)) {
+            const given = l.grants?.[`${AGENT}${from}`];
+            const level = typeof given === 'string' ? given : given?.access ?? given?.level;
+            if (level === 'read' || level === 'write') this.#keeper.store.grant(l.id, `${AGENT}${to}`, level, keeper);
+        }
+    }
+    /* WHAT IT WAS GIVEN, for a whole export (carry.mjs): each list by its id, with its access; and the same given
+       again, on an import, where the list exists here -> the ids not found. */
+    grantsOf(name) {
+        const keeper = { id: 'person:keeper', kind: 'person', name: 'keeper' };
+        const out = [];
+        for (const l of this.#keeper.store.lists(keeper)) {
+            const given = l.grants?.[`${AGENT}${name}`];
+            const level = typeof given === 'string' ? given : given?.access ?? given?.level;
+            if (level === 'read' || level === 'write') out.push({ id: l.id, level });
+        }
+        return out;
+    }
+    regrant(name, given = []) {
+        const keeper = { id: 'person:keeper', kind: 'person', name: 'keeper' };
+        const here = new Set(this.#keeper.store.lists(keeper).map((l) => l.id));
+        const missing = [];
+        for (const g of given) {
+            if (here.has(g?.id) && (g.level === 'read' || g.level === 'write')) this.#keeper.store.grant(g.id, `${AGENT}${name}`, g.level, keeper); else missing.push(g?.id);
+        }
+        return missing;
+    }
+    /* FOR API KEYS (apikeys.mjs): every list with who was given it, as a person sees them; a key given a list, or
+       taken back, on the list's own access -- as a conversation is. `identity`: the person, as its history says. */
+    lists() { return this.#keeper.store.lists({ id: 'person:keeper', kind: 'person', name: 'keeper' }).map((l) => ({ id: l.id, title: l.title, archived: Boolean(l.archived), grants: { ...(l.grants ?? {}) } })); }
+    grant(list, subject, level, identity = '') {
+        if (!/^apikey:[0-9a-f-]{36}$/.test(String(subject))) throw new Error('A list is given here to an API key only.');
+        this.#keeper.store.grant(list, subject, level, { id: `person:${identity || 'owner'}`, kind: 'person', name: identity || 'Owner' });
+    }
+    /* An API key asks, as an agent (never a person: Binder's gates hold). */
+    asKey(op, args, who) {
+        if (!who || who.kind !== 'agent' || !/^apikey:/.test(String(who.id))) throw new Error('Not an API key.');
+        return this.#keeper.act(String(op ?? ''), args && typeof args === 'object' ? args : {}, who);
     }
     /* A number that moves with every change: the page reads again when it moved. */
     changes() { return this.#changes; }

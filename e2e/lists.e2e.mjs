@@ -20,9 +20,12 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     assert.equal(await page.locator('#nav-lists').count(), 0);
     assert.equal(await page.locator('#view-lists').isVisible(), false, 'no Lists tab before it was given one');
     await page.locator('#nav-assets').click();
-    const kind = page.locator('#assets-rows .as-kind[data-kind="list"]');
-    await me.until('Lists, among the assets', async () => /None yet/.test(await kind.innerText().catch(() => '')));
-    await kind.locator('.as-add').click();
+    const kind = page.locator('#assets-rows .kit-aslist-sec[data-kind="list"]');
+    /* None yet: no empty section for them; the one "+ New", then the kind. */
+    await me.until('the Assets list', async () => await page.locator('#assets-new').isVisible());
+    assert.equal(await kind.count(), 0, 'an empty kind is not shown');
+    await page.locator('#assets-new').click();
+    await page.locator('#assets-detail .as-kinds button[data-kind="list"]').click();
     await me.until('the templates', async () => (await page.locator('#listnew-template option').count()) > 1);
     await page.locator('#listnew-template').selectOption('batches');
     await page.locator('#list-new button[type=submit]').click();
@@ -33,7 +36,7 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     await page.locator('#assets-detail .as-picker .given-row[data-conversation="coder"] button', { hasText: 'Write' }).click();
     await me.until('given', async () => (await me.api('/api/binder', { op: 'lists', args: {} })).body.data[0].grants['conversation:coder'] === 'write');
     await me.until('used by it', async () => /coder/.test(await page.locator('#assets-detail .as-users:not(.as-picker)').innerText()));
-    await page.locator('#assets-close').click();
+    await me.leaveAssets();
 
     /* In the conversation, a Lists tab: its lists alone. */
     await me.until('the Lists tab', async () => page.locator('#view-lists').isVisible(), 15_000);
@@ -78,11 +81,11 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     assert.deepEqual(await lists.locator('.binder-tabs [role="tab"]').evaluateAll((tabs) => tabs.map((x) => x.dataset.list)), ['batches']);
 
     /* Taken back, in Assets: the tab goes. */
-    await page.locator('#nav-assets').click();
+    await me.nav('assets');
     await kind.locator('.as-row', { hasText: 'Batches' }).click();
-    await page.locator('#assets-detail .as-users:not(.as-picker) .given-row[data-conversation="coder"] button', { hasText: 'Off' }).click();
+    await page.locator('#assets-detail .as-users:not(.as-picker) .given-row[data-conversation="coder"] button', { hasText: 'None' }).click();
     await me.until('taken back', async () => !(await me.api('/api/binder', { op: 'lists', args: {} })).body.data.find((l) => l.id === 'batches').grants['conversation:coder']);
-    await page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.until('no Lists tab', async () => !(await page.locator('#view-lists').isVisible()), 15_000);
     assert.equal(await page.locator('#assets').isVisible(), false);
     assert.deepEqual(me.errors, [], 'no error in the page');

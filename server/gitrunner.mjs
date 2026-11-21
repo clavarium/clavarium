@@ -8,8 +8,10 @@
  * server would obey all of it. So:
  *
  *   1. the host program reads the folder in a throw-away sandbox (`git read`,
- *      see deploy/clavarium-host and deploy/git-read) and writes ONE FULL
- *      BUNDLE of its branches to stdout;
+ *      see deploy/clavarium-host and deploy/git-read) and writes ONE BUNDLE
+ *      of its branches to stdout -- whole, or without what this server
+ *      already has and checked (a partial read, see read()), or the list of
+ *      branches alone (tips());
  *   2. this file treats those bytes as hostile: every byte counted against a
  *      cap, the header parsed here on Buffers before any git sees it, the
  *      pack checked object by object (`index-pack --strict`) into an EMPTY,
@@ -26,7 +28,7 @@
  * agent (or the owner) go after `--end-of-options`, or on stdin.
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, statfsSync, writeFileSync, existsSync, readdirSync, lstatSync, unlinkSync } from 'node:fs';
+import { mkdirSync, rmSync, statfsSync, writeFileSync, existsSync, readdirSync, lstatSync, unlinkSync, readFileSync, renameSync, linkSync, copyFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { Refusal } from './conversations.mjs';
@@ -45,6 +47,15 @@ export const READ_BRANCHES_MAX = 1000;
 export const READ_DEADLINE_MS = 360_000;
 export const HOST_READS = 2;
 export const BRANCH_MAX = 200;
+/* A list-only read (`git read <name> --tips`): its time limit, and the most bytes it may print. */
+export const TIPS_DEADLINE_MS = 60_000;
+/* A partial read: at most so many commits said to be had already (the host
+   program takes no more), and so many packs kept before a whole read again. */
+export const HAVES_MAX = 256;
+export const KEPT_PACKS_MAX = 16;
+/* A partial read that failed in its pack or its checks is made again whole:
+   what was had may be gone (the reference packed again, a history rewritten). */
+const AGAIN_WHOLE = new Set(['incomplete', 'fsck', 'header', 'connect', 'workspace']);
 /* What `git bundle create` writes for a repository with no branch. */
 export const EMPTY_BUNDLE = '# v2 git bundle\n\n';
 /* The fsck messages an owner may waive, for old histories made by old
@@ -312,7 +323,7 @@ export class GitRunner {
        fixed byte cap, for tests. */
     constructor({ dataDir, host = [], reserveBytes = RESERVE, readDeadlineMs = READ_DEADLINE_MS, spawnRead, git = runGit, cap } = {}) {
         this.#dataDir = dataDir; this.#host = host; this.#reserve = reserveBytes; this.#deadline = readDeadlineMs; this.#git = git; this.#cap = cap;
-        this.#spawnRead = spawnRead ?? ((name) => spawn(this.#host[0], [...this.#host.slice(1), 'git', 'read', name], { stdio: ['ignore', 'pipe', 'pipe'] }));
+        this.#spawnRead = spawnRead ?? ((name, how = []) => spawn(this.#host[0], [...this.#host.slice(1), 'git', 'read', name, ...how], { stdio: ['ignore', 'pipe', 'pipe'] }));
         /* What is left from before is nobody's now: a workspace outlives its
            use only if this server stopped in the middle of one. The copies an
            earlier version kept (git-review/) go too. */
@@ -323,6 +334,15 @@ export class GitRunner {
     }
 
     get workRoot() { return `${this.#dataDir}/git-work`; }
+    /* WHAT IS KEPT OF THE LAST READ of a repository: its packs (each one
+       checked object by object when it came, by index-pack --strict) and the
+       tips it held, so that the next read asks only for what is new. Ours
+       alone, like a workspace: never the agent's, never the reference. A
+       workspace gets its own links to these files, so that a newer read
+       replacing them never takes objects from under a review going on. */
+    keptDir(name) { return `${this.#dataDir}/git-kept/${name}`; }
+    /* The repository is gone: what was kept of it goes too. */
+    forget(name) { rmSync(this.keptDir(name), { recursive: true, force: true }); }
     /* An empty place for HOME: git and ssh find nothing there. */
     get home() { return `${this.#dataDir}/git-home`; }
 
@@ -398,24 +418,42 @@ export class GitRunner {
        `reference`: the remote's history, for the cap only (never borrowed
        here). `waivers`: the owner's fsck waivers. One read per repository
        at a time, two on the host. */
-    read(name, { reference, waivers } = {}) {
+    /* `partial` (the default): only what is new since the last read, and
+       what the reference does not have, travels -- see #haves. `got.partial`
+       says whether it did. */
+    read(name, { reference, waivers, partial = true } = {}) {
+        return this.#queued(name, () => this.#read(name, reference, waivers, partial));
+    }
+    /* One host read of a repository at a time, whatever kind: the host program refuses a second one as busy. */
+    #queued(name, work) {
         const before = this.#queues.get(name) ?? Promise.resolve();
-        const run = before.then(() => this.#read(name, reference, waivers), () => this.#read(name, reference, waivers));
+        const run = before.then(work, work);
         const tail = run.catch(() => {});
         this.#queues.set(name, tail);
         void tail.then(() => { if (this.#queues.get(name) === tail) this.#queues.delete(name); });
         return run;
     }
 
-    async #read(name, reference, waivers) {
+    async #read(name, reference, waivers, partial) {
         const release = await this.#slots.take();
         let ws;
         try {
             const cap = this.#cap ?? capFor(await this.sizeOf(reference));
             const free = this.freeBytes();
             if (free < 2 * cap + this.#reserve) throw new GitFailure(507, 'space', `Not read: ${Math.floor(free / MiB)} MB free on the server, ${Math.ceil((2 * cap + this.#reserve) / MiB)} MB needed.`, { alert: true });
+            const checks = strictOption(waivers);
+            const haves = partial ? await this.#haves(name, reference, checks) : { ids: [], packs: [] };
             ws = await this.workspace();
-            const got = await this.#receive(name, ws.path, cap, waivers);
+            let got = null;
+            if (haves.ids.length > 0) {
+                try { got = { ...await this.#partial(name, ws.path, reference, haves, cap, waivers), partial: true }; } catch (error) {
+                    if (!(error instanceof GitFailure) || !AGAIN_WHOLE.has(error.kind)) throw error;
+                    ws.remove();
+                    ws = await this.workspace();
+                }
+            }
+            if (!got) got = { ...await this.#receive(name, ws.path, cap, waivers), partial: false };
+            this.#keep(name, ws.path, got.branches, checks);
             return { ...got, path: ws.path, remove: ws.remove };
         } catch (error) {
             ws?.remove();
@@ -423,14 +461,110 @@ export class GitRunner {
         } finally { release(); }
     }
 
-    #receive(name, ws, cap, waivers) {
+    /* What the next read may leave out: the tips of the last read (kept,
+       read under the same fsck waivers, not too many packs), then the
+       reference's tips. { ids, packs }: `packs` the kept files to link. */
+    async #haves(name, reference, checks) {
+        const ids = []; let packs = [];
+        try {
+            const dir = this.keptDir(name);
+            const kept = JSON.parse(readFileSync(join(dir, 'tips.json'), 'utf8'));
+            const files = readdirSync(dir).filter((f) => /^pack-[0-9a-f]{40,64}\.(pack|idx|rev)$/.test(f));
+            if (kept?.checks === checks && Array.isArray(kept.ids) && files.filter((f) => f.endsWith('.pack')).length <= KEPT_PACKS_MAX) {
+                packs = files.map((f) => join(dir, f));
+                for (const id of kept.ids) if (isId(id)) ids.push(id);
+            }
+        } catch { /* nothing kept: the reference alone */ }
+        if (reference && existsSync(join(reference, 'objects'))) {
+            const r = await this.in(reference, ['for-each-ref', '--format=%(objectname)', 'refs/heads/'], { deadlineMs: 60_000 });
+            if (r.code === 0) for (const id of r.stdout.toString('latin1').split('\n')) if (isId(id)) ids.push(id);
+        }
+        return { ids: [...new Set(ids)].slice(0, HAVES_MAX), packs };
+    }
+
+    /* A PARTIAL READ: the kept packs linked into the workspace and the
+       reference lent to it BEFORE the pack comes, for index-pack --strict to
+       find every object the new ones point to -- it refuses a pack whose
+       links lead nowhere. Then every branch, moved or not, is walked to its
+       roots: a tip that did not travel must be whole here too, or the read
+       is made again whole. */
+    async #partial(name, ws, reference, haves, cap, waivers) {
+        for (const file of haves.packs) {
+            const to = join(ws, 'objects', 'pack', file.slice(file.lastIndexOf('/') + 1));
+            try { linkSync(file, to); } catch { copyFileSync(file, to); }
+        }
+        if (reference) this.borrow(ws, reference);
+        const got = await this.#receive(name, ws, cap, waivers, ['--have', ...haves.ids]);
+        if (got.branches.length > 0) {
+            const walked = await this.in(ws, ['rev-list', '--objects', '--quiet', '--stdin', '--end-of-options'], { input: got.branches.map((b) => `${b.id}\n`).join(''), deadlineMs: 120_000 });
+            if (walked.code !== 0 || walked.killed || walked.signal) throw new GitFailure(422, 'connect', 'The repository could not be read safely: a branch lacks objects here.');
+        }
+        return got;
+    }
+
+    /* After a read: its packs, and its tips, are what the next one may leave
+       out. Put in place whole or not at all; a failure here only makes the
+       next read whole. */
+    #keep(name, ws, branches, checks) {
+        const dir = this.keptDir(name);
+        try {
+            const fresh = `${dir}.new`; const old = `${dir}.old`;
+            rmSync(fresh, { recursive: true, force: true }); rmSync(old, { recursive: true, force: true });
+            mkdirSync(fresh, { recursive: true, mode: 0o700 });
+            const packDir = join(ws, 'objects', 'pack');
+            for (const f of readdirSync(packDir).filter((x) => /^pack-[0-9a-f]{40,64}\.(pack|idx|rev)$/.test(x))) {
+                try { linkSync(join(packDir, f), join(fresh, f)); } catch { copyFileSync(join(packDir, f), join(fresh, f)); }
+            }
+            writeFileSync(join(fresh, 'tips.json'), JSON.stringify({ ids: [...new Set(branches.map((b) => b.id))], checks }));
+            if (existsSync(dir)) renameSync(dir, old);
+            renameSync(fresh, dir);
+            rmSync(old, { recursive: true, force: true });
+        } catch { rmSync(dir, { recursive: true, force: true }); }
+    }
+
+    /* THE BRANCHES ALONE (`git read <name> --tips`): the same sandbox, the
+       same checks and refusals as a read, and only its header -- no pack, no
+       workspace. Resolves { branches: [{name, id}], dropped }. */
+    tips(name) {
+        return this.#queued(name, () => new Promise((resolve, reject) => {
+            const header = new HeaderReader();
+            let parsed = null; let failure = null; let bytes = 0; let errText = ''; let after = false;
+            const reader = this.#spawnRead(name, ['--tips']);
+            const fail = (f) => {
+                if (failure) return;
+                failure = f;
+                reader.stdout.destroy();
+                try { reader.kill('SIGTERM'); } catch { /* the host stops it */ }
+                void this.stopReads(name);
+            };
+            const timer = setTimeout(() => fail(new GitFailure(504, 'deadline', `Reading stopped: the server's time limit (${Math.round(TIPS_DEADLINE_MS / 1000)} s).`)), TIPS_DEADLINE_MS);
+            reader.stdout.on('data', (chunk) => {
+                if (failure) return;
+                bytes += chunk.length;
+                if (parsed) { after = true; return; }
+                try { parsed = header.push(chunk) ?? null; if (parsed?.rest.length) after = true; } catch (error) { fail(error instanceof GitFailure ? error : refused('it could not be parsed')); }
+            });
+            reader.stderr.on('data', (d) => { errText = (errText + d.toString('latin1')).slice(-4096); });
+            reader.on('error', () => fail(new GitFailure(502, 'host', 'The host program could not be started.', { alert: true })));
+            reader.on('close', (code) => {
+                clearTimeout(timer);
+                if (failure) return reject(failure);
+                if (code !== 0) return reject(hostFailure(code, errText, bytes));
+                /* Nothing after the list: a list-only read that sends a pack is not the reader. */
+                if (!parsed || after) return reject(refused('the list of branches is not as expected'));
+                resolve({ branches: parsed.refs, dropped: parsed.dropped });
+            });
+        }));
+    }
+
+    #receive(name, ws, cap, waivers, how = []) {
         return new Promise((resolve, reject) => {
             const deadline = Date.now() + this.#deadline;
             const header = new HeaderReader();
             let parsed; let bytes = 0; let failure = null; let packStarted = false; let first = Buffer.alloc(0);
             let indexer; let indexed; let readerClosed = false;
             let errText = '';
-            const reader = this.#spawnRead(name);
+            const reader = this.#spawnRead(name, how);
             let settled = false;
             const settle = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); if (error) reject(error); else resolve(value); };
             /* Given up: the bytes stop being taken (the git in the sandbox

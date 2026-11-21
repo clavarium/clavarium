@@ -38,9 +38,15 @@
 #                      server mode)
 #   --relay-installed  the relay was set up already (by `clavarium online`):
 #                      do not print the command to run on it
+#   --relay-ports T,H  the two ports the relay gave this machine, when it is
+#                      not the relay's first home (`clavarium online --join`)
 #   --name NAME        the name of this Clavarium, under its icon and in its
 #                      tab (default: drawn from --domain); changed in Settings.
 #                      Letters, digits, spaces, dots, hyphens: 30 at most
+#   --client-id ID     the OAuth client id, seen in the open when a browser is
+#                      sent to sign in. Default: a random string that tells
+#                      nothing. Give one for a third party that connects here.
+#                      Changed later: sudo clavarium client-id [ID]
 #   --dry-run          check the parameters, say what would be done, do nothing
 #
 # AFTER --local, going online is one command: `sudo clavarium online --relay
@@ -110,12 +116,12 @@ DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
 DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--name NAME] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--name NAME] [--client-id ID] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
-DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"; KEEP_RELEASE="no"; RELAY_INSTALLED="no"
-VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""; APP_NAME=""
+DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; RELAY_PORTS=""; LOCAL="no"; KEEP_RELEASE="no"; RELAY_INSTALLED="no"
+VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""; APP_NAME=""; CLIENT_ID=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --domain) DOMAIN="${2:-}"; shift 2 || bad "--domain needs a value" ;;
@@ -132,7 +138,9 @@ while [ $# -gt 0 ]; do
         --channel) CHANNEL="${2:-}"; shift 2 || bad "--channel needs a value" ;;
         --keep-release) KEEP_RELEASE="yes"; shift ;;
         --relay-installed) RELAY_INSTALLED="yes"; shift ;;
+        --relay-ports) RELAY_PORTS="${2:-}"; shift 2 || bad "--relay-ports needs a value" ;;
         --name) APP_NAME="${2:-}"; [ -n "$APP_NAME" ] || bad "--name needs a value"; shift 2 ;;
+        --client-id) CLIENT_ID="${2:-}"; [ -n "$CLIENT_ID" ] || bad "--client-id needs a value"; shift 2 ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
@@ -156,7 +164,9 @@ if [ -n "$RELAY" ]; then
     [[ "$RELAY" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$|^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || bad "--relay is the name or the address of the relay machine"
     [[ "$RELAY_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$RELAY_PORT" -ge 1 ] && [ "$RELAY_PORT" -le 65535 ] || bad "--relay-port is a port number"
     [ "$CORE_ONLY" = "no" ] || bad "--relay comes with the edge: it cannot go with --core-only"
+    [ -z "$RELAY_PORTS" ] || [[ "$RELAY_PORTS" =~ ^[0-9]{4,5},[0-9]{4,5}$ ]] || bad "--relay-ports is two ports: TLS,HTTP"
 fi
+[ -z "$RELAY_PORTS" ] || [ -n "$RELAY" ] || bad "--relay-ports goes with --relay"
 
 # WHAT IS INSTALLED: an exact version from npm, or a working tree (development).
 [ -z "$VERSION" ] || [[ "$VERSION" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || bad "--version is an exact version, like 1.2.3 or 1.3.0-next.1"
@@ -176,6 +186,10 @@ fi
 [ -z "$CHANNEL" ] || [[ "$CHANNEL" =~ ^(latest|next)$ ]] || bad "--channel is latest or next"
 # It goes in the unit file, between quotes: plain characters only (any other is chosen in Settings).
 [ -z "$APP_NAME" ] || [[ "$APP_NAME" =~ ^[A-Za-z0-9]([A-Za-z0-9\ ._-]{0,28}[A-Za-z0-9.])?$ ]] || bad "--name is letters, digits, spaces, dots and hyphens, 30 at most, like \"Home lab\""
+# The OAuth client id, seen in the open when a browser is sent to sign in. Default:
+# a random string, made below, that tells nothing. A value given here is for an
+# installation that a particular third party connects to (deploy/oidc.mjs).
+[ -z "$CLIENT_ID" ] || [[ "$CLIENT_ID" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$ ]] || bad "--client-id is letters, digits, dots, underscores and hyphens (no spaces), 64 at most"
 # What the updates will be, as the settings file has them or as asked now.
 had() { { sed -n "s/^$1=//p" "$UPDATE_CONF" 2>/dev/null || true; } | head -1; }
 SHOW_MODE="${UPDATES:-$(had MODE)}"; SHOW_MODE="${SHOW_MODE:-auto}"
@@ -195,6 +209,7 @@ would install Clavarium:
   address     $([ "$LOCAL" = "yes" ] && echo "http://127.0.0.1:$PORT, from this machine only (--local)" || echo "https://$DOMAIN")
   operators   $([ "$LOCAL" = "yes" ] && echo "whoever can open a page on this machine: no sign-in" || echo "$OPERATORS")
   name        $([ -n "$APP_NAME" ] && echo "$APP_NAME" || echo "drawn from the address; changed in Settings")
+  sign-in id  $([ "$LOCAL" = "yes" ] && echo "none (--local): no sign-in" || [ -n "$CLIENT_ID" ] && echo "$CLIENT_ID (given)" || echo "a random string, made at install: tells nothing (sudo clavarium client-id to change)")
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
   release     $([ "$KEEP_RELEASE" = "yes" ] && echo "the one that runs, kept (--keep-release)" || [ -n "$VERSION" ] && echo "clavarium@$VERSION from npm, checked (integrity, provenance from github.com/clavarium/clavarium, npm audit signatures)" || echo "the working tree $FROM_DIR, as it is (development: not checked)")
   updates     $(case "$SHOW_MODE" in auto) echo "automatic, between ${SHOW_WINDOW%-*} and ${SHOW_WINDOW#*-}" ;; asap) echo "as soon as a version is out" ;; ask) echo "said in Settings, done when you say" ;; off) echo "off" ;; esac), channel $SHOW_CHANNEL
@@ -228,7 +243,7 @@ apt-get update -qq
 # bindfs: the read-only views. nftables: the network rules. build-essential
 # and python3: one module of the server (the terminal) is compiled here.
 # qrencode: the public keys, shown as QR codes on a screen. openssh-client: the tunnel.
-apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd openssl git qrencode openssh-client >/dev/null
+apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd openssl git qrencode openssh-client ffmpeg >/dev/null
 snap list multipass >/dev/null 2>&1 || snap install multipass >/dev/null
 
 step "account"
@@ -309,6 +324,12 @@ printf 'DATA=%s\nMNT=%s\n' "$DATA" "$MNT" > "$ETC/host.conf"; chmod 0644 "$ETC/h
 rule="$(mktemp)"
 printf '# Clavarium: the server account may run ONE program as root, and nothing else.\n%s ALL=(root) NOPASSWD: %s\n' "$ACCOUNT" "$HOST_PROGRAM" > "$rule"
 visudo -cf "$rule" >/dev/null || refuse "the sudo rule did not pass its check"
+# Its probes every few seconds kept out of the system log, with what this sudo takes (the updater does the same).
+for quiet in '!syslog, !pam_session' '!pam_session'; do
+    cp "$rule" "$rule.q"; printf 'Defaults:%s %s\n' "$ACCOUNT" "$quiet" >> "$rule.q"
+    if out="$(visudo -cf "$rule.q" 2>&1)" && ! printf '%s' "$out" | grep -qiE 'unknown setting|syntax error|parse error'; then mv "$rule.q" "$rule"; break; fi
+    rm -f "$rule.q"
+done
 install -o root -g root -m 0440 "$rule" /etc/sudoers.d/clavarium; rm -f -- "$rule"
 
 step "what the machines are given, on root's chain"
@@ -473,6 +494,11 @@ PASSWORDS=""
 if [ ! -e /etc/dex/config.yaml ]; then
     client_secret="$(openssl rand -hex 32)"
     cookie_secret="$(openssl rand -base64 32 | tr '+/' '-_')"
+    # The OAuth client id is seen in the open (the sign-in redirect). By default
+    # it is random, so it tells nothing about what this is; --client-id sets a
+    # chosen one. dex and the proxy below MUST carry the same value. The display
+    # name is the id too: nothing here names the product (deploy/oidc.mjs).
+    client_id="${CLIENT_ID:-$(openssl rand -hex 16)}"
     identity="$(mktemp)"
     cat > "$identity" <<DEX
 # Who may sign in to Clavarium on THIS machine. Written by install.sh.
@@ -487,8 +513,8 @@ web:
 oauth2:
   skipApprovalScreen: true
 staticClients:
-  - id: clavarium
-    name: Clavarium
+  - id: $client_id
+    name: $client_id
     secret: $client_secret
     redirectURIs:
       - https://$DOMAIN/oauth2/callback
@@ -512,7 +538,7 @@ DEX
     proxy="$(mktemp)"
     cat > "$proxy" <<PROXY
 provider = "oidc"
-client_id = "clavarium"
+client_id = "$client_id"
 client_secret = "$client_secret"
 cookie_secret = "$cookie_secret"
 oidc_issuer_url = "https://$DOMAIN/dex"
@@ -532,9 +558,10 @@ skip_provider_button = true
 approval_prompt = "auto"
 http_address = "127.0.0.1:4180"
 upstreams = ["http://127.0.0.1:$PORT/"]
-# A paired device does not sign in: its own door (/c/) checks its key. The
+# A paired device does not sign in: its own door (/c/) checks its key; nor
+# does a program with an API key (/api/ext/, server/apikeys.mjs). The
 # identity headers are stripped there, so nobody can claim to be an operator.
-skip_auth_routes = ["^/c/"]
+skip_auth_routes = ["^/c/", "^/api/ext/"]
 skip_auth_strip_headers = true
 # Two sign-ins at once (two tabs, a reload during it) each have their own CSRF
 # cookie; and there is time to type a password (deploy/updater.mjs, PROXY_LINES).
@@ -590,7 +617,7 @@ $BIND
 				@api path /api/* /c/api/*
 				handle @api {
 					header Content-Type "application/json; charset=utf-8"
-					respond "{\"error\":\"Clavarium is being updated or restarted: it comes back by itself in a moment.\",\"down\":true}" 503
+					respond "{\"error\":\"Clavarium did not answer just now -- it may be busy or restarting. It comes back by itself; try again in a moment.\",\"down\":true}" 503
 				}
 				handle {
 					root * /var/lib/clavarium/maintenance
@@ -722,8 +749,8 @@ if [ -n "$RELAY" ]; then
     fi
     # The unit is the updater's (deploy/tunnel.mjs, tunnelUnit): one text, kept up to date by each update.
     install -o root -g root -m 0755 "$APP/deploy/clavarium-tunnel" /usr/local/sbin/clavarium-tunnel
-    "$NODE_DIR/bin/node" --input-type=module -e 'const { tunnelUnit } = await import(process.argv[1]); process.stdout.write(tunnelUnit(process.argv[2], process.argv[3]));' \
-        "$APP/deploy/tunnel.mjs" "$RELAY" "$RELAY_PORT" > /etc/systemd/system/clavarium-tunnel.service
+    "$NODE_DIR/bin/node" --input-type=module -e 'const { tunnelUnit } = await import(process.argv[1]); const [t, h] = (process.argv[4] || "").split(","); process.stdout.write(tunnelUnit(process.argv[2], process.argv[3], undefined, t ? { tls: t, http: h } : null));' \
+        "$APP/deploy/tunnel.mjs" "$RELAY" "$RELAY_PORT" "$RELAY_PORTS" > /etc/systemd/system/clavarium-tunnel.service
     systemctl daemon-reload
     systemctl enable --quiet clavarium-tunnel.service
     systemctl restart clavarium-tunnel.service

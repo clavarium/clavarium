@@ -83,6 +83,38 @@ export function explain(stderr) {
     return String(text).trim().split('\n').filter(Boolean).pop()?.slice(0, 300) ?? '';
 }
 
+/* What the remote's own hooks said (pre-receive, update: the "remote:" lines of a push), for a
+   person and for the agent: colours and control characters out, git's progress lines out, the
+   last REMOTE_LINES lines, REMOTE_CHARS characters at most. Text of the remote: data, quoted. */
+export const REMOTE_ALL = 64 * 1024;
+/* All of it, cleaned the same way, for a file the agent reads (REMOTE_ALL characters at most, the end kept). */
+export function remoteAll(stderr) {
+    const text = String(stderr ?? '').split(/\r?\n|\r/).filter((l) => /^remote:/.test(l))
+        .map((l) => l.replace(/^remote:\s?/, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trimEnd()).join('\n').trim();
+    return text.length > REMOTE_ALL ? `…${text.slice(-REMOTE_ALL)}` : text;
+}
+export const REMOTE_LINES = 20;
+export const REMOTE_CHARS = 1500;
+export function remoteSaid(stderr) {
+    const lines = String(stderr ?? '').split(/\r?\n|\r/)
+        .filter((l) => /^remote:/.test(l))
+        .map((l) => l.replace(/^remote:\s?/, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/[\x00-\x1f\x7f]/g, '').trimEnd())
+        .filter((l) => l.trim() && !/^(Resolving deltas|Counting objects|Compressing objects|Processing changes|Total \d|Enumerating objects|Writing objects)\b/.test(l.trim()));
+    /* A very talkative hook: the lines that say what is wrong first (error, refused, must…), in their
+       order, then the end of what it said, up to REMOTE_LINES; "[N lines left out]" where lines went. */
+    let kept = lines;
+    if (lines.length > REMOTE_LINES) {
+        const telling = new Set(lines.map((l, i) => (/\b(error|errors|denied|reject|rejected|refused|must|fail|failed|failure|forbidden|invalid|not allowed|violation|required|missing|GH\d{3})\b/i.test(l) ? i : -1)).filter((i) => i >= 0).slice(0, REMOTE_LINES - 5));
+        for (let i = lines.length - 1; telling.size < REMOTE_LINES && i >= 0; i -= 1) telling.add(i);
+        const picked = [...telling].sort((a, b) => a - b);
+        kept = [];
+        picked.forEach((i, k) => { const gap = i - (k ? picked[k - 1] + 1 : 0); if (gap > 0) kept.push(`[${gap} line${gap > 1 ? 's' : ''} left out]`); kept.push(lines[i]); });
+    }
+    let text = kept.join('\n');
+    if (text.length > REMOTE_CHARS) text = `…${text.slice(-REMOTE_CHARS)}`;
+    return text;
+}
+
 /* An ed25519 key pair in the formats OpenSSH reads, made with Node's own
    crypto: no program is run and nothing touches the disk. The private key is
    the unencrypted "openssh-key-v1" container (it is encrypted by the vault). */
@@ -114,7 +146,7 @@ const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const originOf = (address) => `https://${address.host}${address.port ? `:${address.port}` : ''}`;
 
 export class GitAccess {
-    #keys; #credentials; #vault; #dir; #ssh;
+    #keys; #credentials; #vault; #dir; #ssh; #machines = () => [];
 
     /* `ssh`: the ssh program. A test gives a stand-in that plays a remote. */
     constructor({ vault, dataDir, keys = new Store(`${dataDir}/git-keys.json`), credentials = new Store(`${dataDir}/git-access.json`), ssh = 'ssh' }) {
@@ -128,7 +160,16 @@ export class GitAccess {
     /* Where a key lives for the length of one git command. */
     get runDir() { return `${this.#dir}/run`; }
 
-    #usersOf(key) { return this.#credentials.all().filter((c) => c.method === 'ssh-key' && c.key === key).map((c) => c.name); }
+    #usersOf(key) { return [...this.#credentials.all().filter((c) => c.method === 'ssh-key' && c.key === key).map((c) => c.name), ...this.#machines(key)]; }
+
+    /* THE SAME KEYS OPEN MACHINES (Tether's SSH accesses, sshmachine.mjs, 17-11): `using(key)` names the machines a key
+       opens, so that "used by" says them and a key in use is not removed. */
+    machinesUsing(using) { this.#machines = typeof using === 'function' ? using : () => []; }
+    /* The private half, for Tether's SSH connector alone (tethers.mjs reveal): never sent to the page. */
+    privateKeyOf(name) {
+        const key = this.#keys.get(String(name ?? ''));
+        return key ? this.#vault.open(key.sealed) : undefined;
+    }
 
     /* What the page may know of the keys: the public half, never the private one. */
     keys() {
@@ -151,7 +192,7 @@ export class GitAccess {
     removeKey(name) {
         if (!this.#keys.get(String(name))) throw new Refusal(404, 'No such key.');
         const used = this.#usersOf(String(name));
-        if (used.length > 0) throw new Refusal(409, `This key is how ${used.join(', ')} ${used.length > 1 ? 'are' : 'is'} reached: removing it would cut ${used.length > 1 ? 'them' : 'it'} off. Remove ${used.length > 1 ? 'those repositories' : 'that repository'} first.`);
+        if (used.length > 0) throw new Refusal(409, `This key is how ${used.join(', ')} ${used.length > 1 ? 'are' : 'is'} reached: removing it would cut ${used.length > 1 ? 'them' : 'it'} off. Remove ${used.length > 1 ? 'them' : 'it'} first.`);
         this.#keys.remove(String(name));
     }
 

@@ -1,3 +1,5 @@
+import { Rooms } from './rooms.mjs';
+import { Catalogue } from './catalog.mjs';
 /* The server. Loopback only: what faces the internet is the edge in front of it.
  *
  * Two ways to run it:
@@ -21,39 +23,46 @@ import pty from 'node-pty';
 import { attachBridge } from './bridge.mjs';
 import { attachCommand } from './tmux.mjs';
 import { handleApi } from './api.mjs';
-import { Conversations, DRAWN_MS } from './conversations.mjs';
+import { Conversations, DRAWN_MS, Refusal } from './conversations.mjs';
 import { Store, JsonFile } from './store.mjs';
 import { Instance } from './instance.mjs';
-import { loadTools } from './tools.mjs';
-import { Vms, runner } from './vm.mjs';
-import { Resources } from './resources.mjs';
+import { loadTools, screenRules } from './tools.mjs';
+import { SigninHelp, typeInto } from './signinhelp.mjs';
+import { Vms, runner, HostTally } from './vm.mjs';
+import { Resources, WORK_TAB } from './resources.mjs';
+import { download } from './files.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
 import { Shortcuts } from './shortcuts.mjs';
-import { Dictation } from './voice.mjs';
+import { hearBox, Dictation } from './voice.mjs';
 import QRCode from 'qrcode';
 import { Devices } from './devices.mjs';
 import { handleDoor, deviceTerminal } from './door.mjs';
 import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
+import { scan, secretRef } from './secret-scan.mjs';
 import { Network } from './network.mjs';
 import { Answerer, answererConfig } from './answerer.mjs';
-import { Dockets } from './dockets.mjs';
+import { Dockets, copyPlans } from './dockets.mjs';
 import { PULSE_MS } from 'clavarium-parley/ui';
 import { Wakeups, TypingWatch, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
-import { Talk } from './talk.mjs';
+import { Talk, escapeCommand } from './talk.mjs';
 import { Toolbox } from './toolbox.mjs';
 import { Guide, commonText } from './guide.mjs';
 import { SignInMailboxes } from './signin.mjs';
 import { Mailboxes, recentMessages } from './mailbox.mjs';
 import { Grants } from './grants.mjs';
+import { Groups } from './groups.mjs';
 import { GitReview } from './gitpush.mjs';
+import { machinesUsing } from './sshmachine.mjs';
 import { GitAccess } from './gitaccess.mjs';
 import { GitChecks } from './gitchecks.mjs';
 import { GitKeeper } from './gitkeeper.mjs';
 import { GitRunner } from './gitrunner.mjs';
 import { Shelf } from './shelf.mjs';
-import { Health } from './health.mjs';
+import { Health, RESTART_OUTSIDE, TOOLS_HOST_PATTERN } from './health.mjs';
+import { Revive } from './revive.mjs';
+import { LinkGuard, removedLine, toolLine } from './linkguard.mjs';
 import { Setup } from './setup.mjs';
 import { Capacity } from './capacity.mjs';
 import { packageFile, PARLEY } from './parley.mjs';
@@ -66,12 +75,35 @@ import { MachinesMove } from './machinesmove.mjs';
 import { Wifi } from './wifi.mjs';
 import { MeshCentral } from './meshcentral.mjs';
 import { Binders } from './binders.mjs';
+import { Tethers } from './tethers.mjs';
+import { McpOAuth } from './mcpoauth.mjs';
+import { Browsers } from './browsers.mjs';
+import { Accounts } from './accounts.mjs';
 import { ServerLogs } from './serverlogs.mjs';
+import { Profiler, AutoProfile } from './profile.mjs';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { History, STEP_MS as HISTORY_STEP_MS } from './history.mjs';
 import { Events } from './events.mjs';
 import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
+import { Watchdog } from './watchdog.mjs';
+import { MachineList } from './machinelist.mjs';
+import { WakeLearn } from './wakelearn.mjs';
+import { BoxCollect } from './boxcollect.mjs';
+import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH, FIRMWARE_PATH as BOX_FIRMWARE_PATH } from './boxes.mjs';
+import { Pocket } from './pocket.mjs';
+import { Speech } from './speech.mjs';
+import { Features, handleFeatures, cached } from './features.mjs';
+import { Desks, handleDesktop } from './desktop.mjs';
+import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs';
+import { RelayJoin, handleRelayJoin, RELAY_JOIN_PATH } from './relayjoin.mjs';
+import { WebSocketServer } from 'ws';
+import { attachConsole } from './sshconsole.mjs';
+import { copyWorkFolder } from './copywork.mjs';
+import { Beat, beatWanted } from './beat.mjs';
+import { accessesOf, relinkAccesses } from './carry.mjs';
+import { Jobs, withUpdates } from './jobs.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MAINTENANCE = 'deploy/maintenance.html';
@@ -88,12 +120,24 @@ export const FILES = {
     '/voice-core.js': ['web/voice-core.js', 'text/javascript; charset=utf-8'],
     '/icons.js': ['web/icons.js', 'text/javascript; charset=utf-8'],
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
+    '/features.js': ['web/features.js', 'text/javascript; charset=utf-8'],
+    '/kit.js': ['web/kit.js', 'text/javascript; charset=utf-8'],
+    /* The desk, the home page (desktop.mjs keeps its places). */
+    '/desk.js': ['web/desk.js', 'text/javascript; charset=utf-8'],
+    /* A mail file (.eml) read as a mail program shows it (the file viewer, app.js showMail). */
+    '/mail-view.js': ['web/mail-view.js', 'text/javascript; charset=utf-8'],
     '/gitgraph.js': ['web/gitgraph.js', 'text/javascript; charset=utf-8'],
     /* The page shown while an update stops this server (app.js goes to it); the front serves the same file while it is down. */
     '/maintenance.html': [MAINTENANCE, 'text/html; charset=utf-8'],
     /* The review's diff, drawn by diff2html (vendored, pinned: web/vendor/diff2html/LICENSE). */
     '/vendor/diff2html.js': ['web/vendor/diff2html/diff2html-ui-slim.min.js', 'text/javascript; charset=utf-8'],
     '/vendor/diff2html.css': ['web/vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
+    /* Tether's own module that flashes a device from this browser (ui/device-flash.js), and what it loads. */
+    '/vendor/tether/jobs.js': [packageFile('clavarium-tether', 'ui/jobs.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/device-flash.js': [packageFile('clavarium-tether', 'ui/device-flash.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/improv.js': [packageFile('clavarium-tether', 'ui/improv.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/vendor/esptool-0.6.1.js': [packageFile('clavarium-tether', 'ui/vendor/esptool-0.6.1.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/vendor/web-serial-polyfill-1.0.15.js': [packageFile('clavarium-tether', 'ui/vendor/web-serial-polyfill-1.0.15.js'), 'text/javascript; charset=utf-8'],
     '/vendor/xterm.js': [packageFile('@xterm/xterm', 'lib/xterm.js'), 'text/javascript; charset=utf-8'],
     '/vendor/xterm.css': [packageFile('@xterm/xterm', 'css/xterm.css'), 'text/css; charset=utf-8'],
     '/vendor/fit.js': [packageFile('@xterm/addon-fit', 'lib/addon-fit.js'), 'text/javascript; charset=utf-8'],
@@ -109,6 +153,10 @@ export const FILES = {
     '/vendor/binder-fr.json': [packageFile('clavarium-binder', 'ui/texts/fr.json'), 'application/json; charset=utf-8'],
     '/vendor/pdf.mjs': [packageFile('pdfjs-dist', 'build/pdf.min.mjs'), 'text/javascript; charset=utf-8'],
     '/vendor/pdf.worker.mjs': [packageFile('pdfjs-dist', 'build/pdf.worker.min.mjs'), 'text/javascript; charset=utf-8'],
+    /* Office files shown (02-11), read in the page alone -- the file goes nowhere: spreadsheets by SheetJS
+       (Apache-2.0, from its own site: its npm copy is old), Word by mammoth (BSD-2). Asked for only when one is opened. */
+    '/vendor/xlsx.js': [packageFile('xlsx', 'dist/xlsx.full.min.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/mammoth.js': [packageFile('mammoth', 'mammoth.browser.min.js'), 'text/javascript; charset=utf-8'],
     /* Drawings in the chat (```mermaid), at the version package.json fixes: asked for only when one is shown. */
     '/vendor/mermaid.js': [packageFile('mermaid', 'dist/mermaid.min.js'), 'text/javascript; charset=utf-8'],
     /* Code coloured in the chat: Prism and the languages it is given, one file; asked for only when code is shown. */
@@ -131,7 +179,7 @@ DEVICE_FILES['/c/device.js'] = ['web/device.js', 'text/javascript; charset=utf-8
 
 /* Nothing loads from anywhere else, and nothing may frame the page. */
 const HEADERS = {
-    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'cache-control': 'no-store',
@@ -154,7 +202,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin, desks } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -168,7 +216,8 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
            every page hears it at its next question, whatever it asks. */
         try { const notice = updates?.notice(); if (notice) response.setHeader('x-clavarium-update', notice); } catch { /* never in the way of an answer */ }
         /* The version that answers, to the page's own questions: a page loaded before an update starts again (app.js). */
-        if (platform?.version && (pathname.startsWith('/api/') || pathname.startsWith('/c/api/'))) response.setHeader('x-clavarium-version', platform.version);
+        /* Not to a program at /api/ext/: what it may read, its key says (apikeys.mjs). */
+        if (platform?.version && ((pathname.startsWith('/api/') && !pathname.startsWith('/api/ext/')) || pathname.startsWith('/c/api/'))) response.setHeader('x-clavarium-version', platform.version);
         /* The device door first, and apart: it never consults the gate. */
         /* An address that wakes a tool, called from outside by what its owner
            runs elsewhere: the address is the right. Nothing else is looked at,
@@ -184,6 +233,31 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             say(happened === 'typed' ? 202 : happened === 'capped' ? 429 : 409, { woken: happened === 'typed', why: happened });
             return;
         }
+        /* A voice box pairing: under /c/, no sign-on; the one-use code is the right (boxes.mjs). */
+        /* A firmware a box fetches to update itself: the one-use token in the address is the right. */
+        if (boxes && pathname.startsWith(BOX_FIRMWARE_PATH) && request.method === 'GET') {
+            const bytes = boxes.image(pathname.slice(BOX_FIRMWARE_PATH.length));
+            if (!bytes) { response.writeHead(404, HEADERS).end(); return; }
+            response.writeHead(200, { ...HEADERS, 'content-type': 'application/octet-stream', 'content-length': bytes.length, 'cache-control': 'no-store' }).end(bytes);
+            return;
+        }
+        if (boxes && pathname === BOX_PAIR_PATH) {
+            const say = (status, body) => response.writeHead(status, { ...HEADERS, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
+            if (request.method !== 'POST') { say(405, { error: 'Call this address with POST.' }); return; }
+            let text = ''; let over = false;
+            for await (const piece of request) { text += piece; if (text.length > 4096) { over = true; break; } }
+            if (over) { say(413, { error: 'Too long.' }); return; }
+            try { say(200, boxes.pair(JSON.parse(text || '{}'))); } catch (error) { say(error.status ?? 400, { error: error instanceof SyntaxError ? 'Not JSON.' : error.message }); }
+            return;
+        }
+        /* Another home joins this machine's relay: under /c/, no sign-on; the one-time code is the right (relayjoin.mjs). */
+        if (relayJoin && pathname === RELAY_JOIN_PATH) { await handleRelayJoin(request, response, relayJoin, HEADERS); return; }
+        /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
+           /api/ext/ through without sign-on, and strips the identity headers there. */
+        if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, reminders: apikeys.reminders, binder: apikeys.binder, jobs: apikeys.jobs, diagnostics: apikeys.diagnostics, events, headers: HEADERS, originOk, version: platform?.version ?? null });
+            return;
+        }
         if (door && pathname.startsWith('/c/')) {
             if (await handleDoor(request, response, door)) return;
             if (pathname === '/c/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
@@ -193,11 +267,20 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             return;
         }
         /* Before anything else, static files included: see gate.mjs. */
-        if (gate(request.headers) === undefined) {
+        const who = gate(request.headers);
+        if (who === undefined) {
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral)) return;
+        /* The desk (desktop.mjs): one per person, the gate's name for them. */
+        if (desks && pathname === '/api/desktop' && await handleDesktop(request, response, desks, who, originOk, HEADERS)) return;
+        /* What this Clavarium can do and its next step (features.mjs); an export of the setup is its backup's day. */
+        if (features && pathname.startsWith('/api/features') && await handleFeatures(request, response, features, originOk, HEADERS)) return;
+        if (features && ((request.method === 'POST' && pathname === '/api/setup/export') || (request.method === 'GET' && pathname === '/api/setup/bundle' && !request.url.includes('stats=1')))) response.once('finish', () => { if (response.statusCode === 200) features.exported(); });
+        /* Settings, Access, API keys: made and revoked by an administrator only (past the gate). */
+        if (apikeys && pathname.startsWith('/api/apikeys') && await handleApiKeys(request, response, apikeys.keys, originOk, HEADERS, events)) return;
+        if (boxes && pathname.startsWith('/api/boxes') && await handleBoxes(request, response, boxes, originOk, HEADERS, (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }))) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms, machineList)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -229,11 +312,20 @@ export function start({ port, command, cwd, env = process.env }) {
 const MAIL_EVERY_MS = 120_000;
 /* An opening waits this long at most for Parley to be installed in its machine (toolbox.mjs). */
 const PARLEY_WAIT_MS = 20_000;
+/* A QUIET START (17-11): after the server starts, its background work on the machines (the
+   references' refreshes and the fetches into the machines, the health looks with the secrets'
+   names, the network watch, every machine's terminal opened beforehand) waits this long, then
+   comes one machine after another: the machines starting again, and the owner's first pages,
+   come first. What a page asks is never held. The server run as a service passes it; a test
+   or a bench that calls startHome itself gets none (quietStartMs: 0). */
+export const QUIET_START_MS = 150_000;
+/* Between two machines of that first round. */
+const QUIET_STEP_MS = 5_000;
 
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS, tetherConnectors, sshProbe, quietStartMs = 0 }) {
     /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
     const migrated = migrateData(dataDir);
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
@@ -243,11 +335,27 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const originOk = makeOriginCheck(publicOrigin);
     const instance = new Instance({ file: new JsonFile(`${dataDir}/instance.json`, {}), origin: publicOrigin, given: appName });
     let repairTerminal = async () => { throw new Error('not ready'); };
-    const asHost = runner(host);
-    const vms = new Vms(asHost, host);
-    const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
+    /* Every command to the host counted (vm.mjs HostTally): said in the log every 5 minutes, and in Settings
+       (Diagnostics, Load). The machines' own commands are counted by Vms, with the same tally. */
+    const hostTally = new HostTally({ loop: true });
+    const hostRun = runner(host);
+    const asHost = hostTally.wrap(hostRun);
+    /* A conversation in a shared machine (#221) says which: the machine its VM operations reach. */
+    const jobs = new Jobs({ path: `${dataDir}/jobs.json` });
+    const conversationStore = new Store(`${dataDir}/conversations.json`, { onChange: (before, after) => jobs.seen(before, after) });
+    const vms = new Vms(hostRun, host, { tally: hostTally,
+        machineOf: (name) => { const m = conversationStore.get(name)?.sharedMachine; return typeof m === 'string' && m ? m : undefined; },
+        userOf: (name) => { const u = conversationStore.get(name)?.machineUser; return u && Number.isInteger(u.uid) && Number.isInteger(u.gid) ? u : undefined; },
+    });
+    const all = conversations ?? new Conversations({ store: conversationStore, layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
+    /* What it is doing (jobs.mjs): read by GET /api/jobs. */
+    if (!all.jobs) all.jobs = jobs;
     /* Who may do what with what: ONE table, shared by everything below. */
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
+    /* Folder-style boxes the owner drops assets into, to tidy the views and hand a whole box at once (groups.mjs). */
+    const groups = new Groups({ store: new Store(`${dataDir}/groups.json`) });
+    /* The providers and models OpenCode knows (models.dev), for a conversation set up from here (03-11). */
+    const catalogue = new Catalogue({ file: `${dataDir}/models-catalogue.json` });
     /* What happened, in one dated list (events.mjs): the owner's actions, and what the server did by itself. */
     const events = new Events({ file: `${dataDir}/events.log` });
     const vault = new Vault(vaultKey ?? `${dataDir}/vault.key`);
@@ -256,7 +364,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const gitAccess = new GitAccess({ vault, dataDir, ...(gitSsh ? { ssh: gitSsh } : {}) });
     /* The tools every machine sees at /tools, read-only: see toolbox.mjs. */
     /* With /tools/CLAVARIUM.md in it: where a tool is, the same for all (guide.mjs). */
-    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: () => commonText(), launched: new Store(`${dataDir}/launched.json`),
+    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: () => commonText(), launched: new Store(`${dataDir}/launched.json`), screens: screenRules(tools),
         launches: (name) => Boolean(tools.find((t) => t.id === all.list().find((c) => c.name === name)?.tool)?.launch) });
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess, toolbox });
     /* The ready-made machine new conversations are copied from, kept fresh
@@ -283,6 +391,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* Not in place is said, not fatal: no machine is then given /tools. */
         await toolbox.prepare().catch((error) => console.error(error.message));
         await Promise.resolve(all.ensureWork?.()).catch((error) => console.error(`work folders: ${error.message}`));
+        /* Should memory run out, a machine is stopped first, never this server, its front or ssh (04-11). */
+        const kept = await asHost(['server', 'protect'], { timeoutMs: 30_000 }).catch(() => ({ code: 1, stderr: 'not run' }));
+        if (kept.code) console.error(`protect: ${String(kept.stderr ?? '').trim() || `exit ${kept.code}`}`);
     })();
     const bounded = (promise, ms, what) => {
         let timer;
@@ -292,7 +403,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     await bounded(hostSteps, startWaitMs, 'the host program');
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
     /* The engine of dictation: chosen in Settings, else the environment's (voice.mjs). */
-    const voice = new Dictation({ file: new JsonFile(`${dataDir}/dictation.json`, {}), env, secret: (name) => secrets.reveal(name), expired: (name) => secrets.isExpired(name) });
+    /* Its backup taking over, and the main one back: said once each, in What happened. */
+    const voice = new Dictation({ file: new JsonFile(`${dataDir}/dictation.json`, {}), env, secret: (name) => secrets.reveal(name), expired: (name) => secrets.isExpired(name),
+        names: () => secrets.list().map((s) => s.name), notice: (text) => { console.log(text); events.add({ kind: 'server', text }); } });
     /* Read here already: a device paired before a conversation was shared in
        two parts keeps the chat it reached then (see devices.mjs). */
     const talkStore = new Store(`${dataDir}/talk.json`);
@@ -312,10 +425,12 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     secrets.expired = (name, users) => { events.add({ kind: 'asset', text: `Secret ${name} expired: no longer given${users.length ? ` to ${users.join(', ')}` : ''}` }); };
     secrets.check();
     const expiryTimer = setInterval(() => secrets.check(), 10 * 60_000); expiryTimer.unref();
-    const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
+    const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name), mailboxes: () => { try { return mailboxes; } catch { return null; } } });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
     const network = new Network({ host: asHost, offline: () => all.offline() });
+    /* A machine the VM manager started by itself (after a reboot) is put in its silo too (04-11). */
+    const stopNetworkWatch = network.watch(undefined, { quietMs: quietStartMs });
     /* The rules follow what runs: applied now, and again each time a
        conversation is opened, since a VM that just started has a new tap. */
     const hostReady = (async () => { await hostSteps; await network.apply().catch((error) => console.error(`network rules: ${error.message}`)); })();
@@ -334,7 +449,12 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line), reread: () => talk?.rereadCommand() ?? null });
     /* Why Parley is not in a machine, said once in the log, not at each opening. */
     const parleySaid = new Map();
+    /* ITS HEARTBEAT (beat.mjs): with CLAVARIUM_BEAT=health, its health read from its work folder instead of
+       a command every two minutes; put in its machine at an opening (once per version), never waited for. */
+    const beat = new Beat({ on: beatWanted(env.CLAVARIUM_BEAT, 'health'), vms, workFolder: (name) => folders.workFolder(name), conversations: all });
+    if (beat.on) console.log('beat: the health of the machines read from their heartbeat (CLAVARIUM_BEAT)');
     all.prepare = async (name, woke) => {
+        void beat.ensure(name, { woke }).catch(() => {});
         await hostReady;
         secrets.check();
         const wanted = secrets.signature(name);
@@ -381,15 +501,21 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let bridge;
     /* A wake-up typed is said in its chat (talk, made below: called only once a wake-up fires). */
     /* Where its chat is on, what wakes a tool is an event it acknowledges: see dockets.mjs. */
+    let signinHelp = null;
     const dockets = new Dockets({ store: new Store(`${dataDir}/dockets.json`), resources: folders,
         say: (name, line) => wakeups.say(name, line),
         event: (name, line) => talk.event(name, line),
         alert: (message) => { void alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }); },
         /* Not in a turn: its pulse ended, or is old (Parley's own measure). */
         idle: (name) => { const p = talk.pulse(name); return !(p?.busy === true && Date.now() - Date.parse(p.at) < PULSE_MS); },
-        awake: () => all.awake(), chatOn: (name) => talk.isOn(name) });
+        awake: () => all.awake(), chatOn: (name) => talk.isOn(name),
+        /* A sign-in a companion did for another conversation (signinhelp.mjs, made below): its answer typed there. */
+        acked: (name, e) => signinHelp?.acked(name, e) });
     const typingWatch = new TypingWatch();
-    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), docket: dockets, typing: (name) => typingWatch.busy(name),
+    /* WHO WOKE IT (16-11): this server opens a terminal for others (a wake-up, a key); said once it wakes one. */
+    const wakeWhy = { why: new Map(), set(name, by) { this.why.set(name, by); }, take(name) { const by = this.why.get(name); this.why.delete(name); return by ?? 'the server'; } };
+    all.woken = (name, by, was) => events.add({ kind: 'machine', text: `Machine of ${name}: woken by ${by} (it was ${was})`, conversation: name });
+    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => { if (!all.awake().includes(name)) wakeWhy.set(name, 'its wake-up'); return bridge?.warm(name); }, docket: dockets, typing: (name) => typingWatch.busy(name),
         fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
     const wakeTimer = wakeups.start(wakeEveryMs);
     const docketTimer = dockets.start(wakeEveryMs);
@@ -397,34 +523,125 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const binders = new Binders({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), dockets, team,
         alert: (message) => alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }) });
     const stopBinders = binders.start();
+    /* The accesses an agent was given -- a machine over SSH, an online folder, a
+       mailbox, a calendar, an address book -- held here with their secrets read from
+       the vault by name, never in a machine: see tethers.mjs. */
+    /* Voice boxes are Tether targets too (boxes.mjs): their connector reaches them through `boxes`, made below. */
+    /* A person's own browser, paired through the Tether extension, which connects out to this server (browsers.mjs). */
+    let tethers = null;
+    const browsers = new Browsers({ dataDir, store: () => tethers?.store(), log: (line) => console.log(line) });
+    tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, browsers, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) }, ...(tetherConnectors ?? {}) } });
+    /* The SSH keys made here open machines too (sshmachine.mjs): Tether asks the private half by name; "used by" names them. */
+    tethers.sshKeys = gitAccess;
+    gitAccess.machinesUsing(machinesUsing(tethers));
+    /* A test reads a machine's host key from a stand-in (no network). */
+    if (sshProbe) tethers.sshProbe = sshProbe;
+    /* External MCP servers signed in with OAuth: their tokens held here, refreshed here (mcpoauth.mjs). */
+    tethers.oauth = new McpOAuth({ secrets });
+    const stopTethers = tethers.start();
+    /* Connecting a mailbox, calendar or address book by token: the consent happens
+       in the owner's browser, the refresh token is kept host-only (never in a
+       machine) and a Tether target is made for it: see accounts.mjs. */
+    const accounts = new Accounts({ secrets, targets: { put: (spec) => tethers.store().putTarget(spec), all: () => tethers.store().targets() }, probe: (target, password) => tethers.probe(target, password) });
+    /* A calendar target made before it needed the account address (Google CalDAV
+       puts it in the URL) carries none. The same account's mailbox or address book
+       has it -- they share the one refresh token -- so fill it in from a sibling,
+       once, with no reconnection asked of anyone. */
+    (() => {
+        const store = tethers.store();
+        for (const t of store.targets()) {
+            if (t.kind !== 'calendar' || t.config?.user || !t.secrets?.refresh) continue;
+            const sib = store.targets().find((o) => o.secrets?.refresh === t.secrets.refresh && o.config?.user);
+            if (sib) store.putTarget({ ...t, config: { ...t.config, user: sib.config.user } });
+        }
+    })();
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */
     /* `only`: the conversation whose automatic sending it is about: its agent alone can act on it. */
-    const tellAgent = async (repository, line, only) => {
+    /* `full`: what the line sums up (all a remote said), put in each one's chat folder for it to read. */
+    const tellAgent = async (repository, line, only, full) => {
         const writers = Object.entries(folders.list().find((x) => x.name === repository)?.attachments ?? {}).filter(([, access]) => access === 'write').map(([conversation]) => conversation).filter((c) => only === undefined || c === only);
         /* Told: at least one of them had the line typed (see GitKeeper #toAgent). */
         let heard = false;
-        for (const conversation of writers) if (await wakeups.say(conversation, line) === true) heard = true;
+        for (const conversation of writers) {
+            let path = null;
+            if (full) { try { path = talk.keepText(conversation, 'git-remote-refused.txt', full); } catch { path = null; } }
+            if (await wakeups.say(conversation, path ? `${line.replace(/\.$/, '')}; all it said: ${path}.` : line) === true) heard = true;
+        }
         return heard;
     };
     /* What happened to a repository is said in the chat of the conversations it is attached to (talk.mjs). */
     const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), last: new Store(`${dataDir}/git-checks.json`), review: gitReview, resources: folders, alerts, tellAgent,
         thread: (conversation, event) => talk.event(conversation, event),
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
-    const gitTimer = gitKeeper.start(gitEveryMs);
+    const gitTimer = gitKeeper.start(gitEveryMs, { quietMs: quietStartMs });
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
-    const talk = new Talk({ store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+    /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
+    let boxes; let rooms; let machineList;
+    const talk = new Talk({ spoke: (name, text, to, how) => { void boxes?.agentSaid(name, text, to, how); }, inRoom: (name, entry, kind) => rooms?.answered(name, entry, kind), store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
            what is already known of a machine used instead of asking (talk.mjs). */
-        terminal: { open: (name) => bridge?.open(name) ?? false, type: (name, line, ms) => bridge?.type(name, line, ms) ?? false, droppedAt: (name) => bridge?.droppedAt(name) },
+        /* `settled` (17-11): how long its terminal has been open and quiet -- without it, the line after a restart
+           was typed REREAD_AFTER_MS after, into a tool maybe still loading (talk.mjs, READY). */
+        terminal: { open: (name) => bridge?.open(name) ?? false, type: (name, line, ms) => bridge?.type(name, line, ms) ?? false, droppedAt: (name) => bridge?.droppedAt(name), settled: (name) => bridge?.settled(name) ?? null },
         health: { of: (name) => health?.of(name) ?? null },
+        /* A secret pasted in a message is lifted out before the message is kept:
+           it goes to the short-lived vault and the message keeps only a marker
+           the chat shows as stars; the value reaches the machine as
+           /run/secrets/<name>, and is swept after a few minutes. */
+        screen: async (conversation, text) => {
+            /* A sign-in code its tool waits for (#394): left whole, screen-watch types it in. */
+            if (signinHelp?.awaitsCode(conversation, text)) return text;
+            const hits = scan(text);
+            if (!hits.length) return text;
+            let out = ''; let last = 0; let any = false;
+            for (const h of hits) {
+                out += text.slice(last, h.start);
+                try { const { name, expiresAt } = secrets.stash(conversation, h.value); out += secretRef(name, Date.parse(expiresAt)); any = true; }
+                catch { out += text.slice(h.start, h.end); }      /* cannot be stashed (too large): left as it is */
+                last = h.end;
+            }
+            out += text.slice(last);
+            if (any) { try { await secrets.deliver(conversation); } catch { /* machine not running: delivered at its next open */ } }
+            return out;
+        },
+        /* The agent asked to forget a short-lived secret (parley forget): drop it from the vault and machine. */
+        dropSecret: (conversation, name) => { void secrets.drop(conversation, name).catch(() => {}); },
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);
+    /* Its guide changed while its tool ran (15-11): its docket tells it to read it again. */
+    guide.told = (name, line) => { if (dockets.on(name)) dockets.post(name, { kind: 'guide-changed', text: line }); };
+    /* Restarted with nothing written since (15-11): its docket tells it, once its tool is ready and free. */
+    talk.restarted = (name, why) => {
+        if (!dockets.on(name)) return false;
+        try { dockets.post(name, { kind: 'restarted', text: `Your machine was restarted${why ? ` (${String(why).replace(/\.$/, '')})` : ''}. What ran in the background stopped with it: pick up where you were.` }); return true; } catch { return false; }
+    };
+    /* What an owner did to a machine (start, stop, sleep, force, restart): in the journal, and a line in its chat. */
+    all.machineSaid = (name, text, ok, chat) => {
+        /* What runs changed (a start, a stop, a sleep): the rules follow at once, not at the next watch. */
+        void network.apply().catch(() => {});
+        events.add({ kind: 'machine', text: `Machine of ${name}: ${text}`, conversation: name });
+        if (chat) try { talk.event(name, ok ? { kind: 'machine-ok', text, topic: 'Machine' } : { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine', brief: 'Machine action failed' }); } catch { /* its chat is off */ }
+    };
+    /* A Tether call waiting for the owner is said in its conversation's thread, with Accept / Refuse. */
+    tethers.announce = (name, event) => { try { return talk.event(name, event); } catch { return null; } };
+    /* DELEGATED SIGN-IN (15-11, #362): a tool that must sign in is signed in by another conversation's browser
+       (its companion), the code it reads typed back into that tool: see signinhelp.mjs. */
+    signinHelp = new SigninHelp({ store: new JsonFile(`${dataDir}/signin-companion.json`, {}),
+        conversations: () => all.list(), tools: () => tools, awake: () => all.awake(), chatOn: (name) => talk.isOn(name),
+        workFolder: (name) => folders.workFolder(name),
+        browsers: (name) => { try { return tethers.store().targets().filter((t) => t.kind === 'browser').map((t) => ({ id: t.id, level: t.grants?.[`conversation:${name}`]?.level ?? '' })).filter((b) => b.level); } catch { return []; } },
+        post: (name, event) => dockets.post(name, event), type: (name, text) => typeInto(vms, name, text),
+        event: (name, line) => talk.event(name, line) });
+    const stopSigninHelp = signinHelp.start();
+    all.signinHelp = signinHelp;
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
+    /* A mail cited by its reference, opened on a device that may read its mailbox (mailref.mjs). */
+    door.tethers = tethers; door.mailboxes = mailboxes;
     /* AFTER AN UPDATE, the machines that run get the new tools at once (parley, docket: they serve from
        their next command); a tool started with older launchers is told, in its chat, that a restart
        gives it the rest (its hooks, its MCP servers: read only when it starts). Nothing is restarted. */
@@ -433,11 +650,61 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             await toolbox.installIn(name).catch(() => {});
             if (!toolbox.stale(name)) continue;
             try { if (talk.event(name, { kind: 'tools-updated', text: 'Tools updated: restart it to use them all. Its work picks up where it was.', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
+            /* Its tool told too, by its docket (15-11, its owner's ask): it takes them up when it suits it, never mid-work. */
+            try { if (dockets.on(name)) dockets.post(name, { kind: 'tools-updated', text: `Clavarium was updated to ${JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}: your tools (parley, docket, the MCP servers given to you) are new. When nothing runs, touch /work/.parley/restart-asked to take them up; your work picks up where it was.` }); } catch { /* its docket may be off */ }
         }
     });
+    /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): its tool restarted by this server
+       once its turn has ended (its pulse no longer busy), said in its chat; once per ten minutes at most. */
+    const restartedAt = new Map();
+    /* ITS TOOL STILL IN A FOLDER THAT CAME LOOSE, or asking from outside /work (16-11, revive.mjs): restarted
+       by the server, its tool only; told through its docket first (read as it starts), its chat after. */
+    const revive = new Revive({
+        /* Its tools' host stopped first (it starts again at the tool's first tool, from the folder put back). */
+        restart: async (name) => { await vms.exec(name, ['sh', '-c', `for p in $(pgrep -f '${TOOLS_HOST_PATTERN}'); do kill "$p"; done; true`], { timeoutMs: 10_000 }).catch(() => {}); return all.restartTool(name); },
+        restartMachine: async (name) => { const r = await all.machineAction(name, 'restart', { wait: true }); return r?.ok !== false; },
+        busy: (name) => talk.pulse(name)?.busy === true,
+        taken: (name) => vms.exec(name, ['rm', '-f', RESTART_OUTSIDE], { timeoutMs: 10_000 }),
+        tell: (name, why, step) => {
+            const loose = why === 'stale' || why === 'stuck';
+            if (step === 'before') {
+                if (loose) try { if (dockets.on(name)) dockets.post(name, { kind: 'restarted', text: 'Your work folder came loose in your machine and was put back: your tool was restarted to see it again (what was in the old one could not be reached). Your work picks up where it was; what ran in the background stopped.' }); } catch { /* its docket may be off */ }
+                return;
+            }
+            const text = step === 'done'
+                ? (why === 'stuck' ? 'Its work folder could not be mounted again: its machine was restarted, the folder is back. Its work picks up where it was.' : loose ? 'Its work folder had come loose: its tool was restarted to see it again. Its work picks up where it was.' : 'Its tool was restarted as it asked: its work picks up where it was.')
+                : 'Its tool could not be restarted: open its terminal and type exit, it starts again.';
+            try { talk.event(name, { kind: step === 'done' ? 'restarted' : 'machine-problem', text, topic: step === 'done' ? 'Restarted' : 'Machine', ...(step === 'done' ? {} : { tone: 'warn' }) }); } catch { /* its chat is off */ }
+            if (step === 'failed') events.add({ kind: 'machine', text: `${name}: ${text}`, conversation: name });
+        },
+    });
+    const restartTimer = setInterval(() => {
+        void revive.tick().catch(() => {});
+        for (const name of all.awake()) {
+            if (!talk.restartAsked(name)) continue;
+            if (talk.pulse(name)?.busy) continue;
+            talk.restartTaken(name);
+            if (Date.now() - (restartedAt.get(name) ?? 0) < 10 * 60_000) continue;
+            restartedAt.set(name, Date.now());
+            /* Its tool only, never its machine (04-11: a machine restarted so did not start again). */
+            void all.restartTool(name).then((done) => {
+                if (done) try { talk.event(name, { kind: 'restarted', text: 'Its tool was restarted as it asked: its work picks up where it was.', topic: 'Restarted' }); } catch { /* its chat is off */ }
+            }).catch(() => {});
+        }
+    }, 15_000); restartTimer.unref?.();
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
-    const health = new Health({ vms, conversations: all, resources: folders, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
-    const stopHealth = health.start(healthEveryMs);
+    /* Links its folders hold that the share cannot serve: removed where safe, said once (linkguard.mjs). */
+    const linkGuard = typeof folders.attachedTo === 'function' ? new LinkGuard({ resources: folders }) : null;
+    if (linkGuard) linkGuard.removed = (name, link) => {
+        try { talk.event(name, { kind: 'machine-ok', text: removedLine(link), topic: 'Machine', brief: 'Shared folder' }); } catch { /* its chat is off */ }
+        if (link.path.split('/').pop() !== 'node_modules') return;
+        /* Its tool told it may install them again: through its docket where its chat is on, else typed to its agent. */
+        const line = toolLine(link);
+        try { if (dockets.on(name)) { dockets.post(name, { kind: 'shared-folder', text: line, data: { folder: link.folder, path: link.path } }); return; } } catch { /* typed instead */ }
+        if (all.list().find((c) => c.name === name)?.ai === true) void wakeups.say(name, line).catch(() => {});
+    };
+    const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, beat, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
+    const stopHealth = health.start(healthEveryMs, { quietMs: quietStartMs });
     /* What is wrong with its machine is said in its chat too, where it happened. */
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
     const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line), exec: (name, argv, options) => vms.exec(name, argv, options),
@@ -445,11 +712,31 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs);
        not where its owner turned on its own reaction (above): one way of telling it, not two. */
     const healthDocket = new HealthDocket({ store: new Store(`${dataDir}/health-docket.json`), dockets, reacting: (name) => reacting.settings(name).on });
-    health.forgotten = (name) => healthDocket.forget(name);
+    health.forgotten = (name) => { healthDocket.forget(name); watchdog.forget(name); revive.forget(name); };
     /* A machine's problems worth keeping in What happened: said once, until they went away. */
     const problemsSaid = new Map();
+    /* ITS WATCHDOG (watchdog.mjs): mute or full for as long as its owner set, forced off then started, once;
+       its AI told in its chat, its owner alerted with the report. */
+    const watchdog = new Watchdog({ conversations: all, store: new Store(`${dataDir}/watchdog.json`),
+        act: async (name) => {
+            events.add({ kind: 'machine', text: `Machine of ${name}: mute or full for too long, forced off and started by its watchdog`, conversation: name });
+            const forced = await all.machineAction(name, 'force', { wait: true });
+            if (!forced?.ok) return forced;
+            return all.machineAction(name, 'start', { wait: true });
+        },
+        tell: (name, text, started) => all.renewed(name, text, started),
+        alert: (payload) => { events.add({ kind: 'machine', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
+    /* A machine found running that was not (the VM manager started it by itself): its rules at once. */
+    const wasRunning = new Map();
     health.judged = (name, record) => {
+        const running = record?.state === 'Running';
+        if (running && wasRunning.get(name) === false) void network.apply().catch(() => {});
+        if (record?.state !== undefined && record.state !== 'Unknown') wasRunning.set(name, running);
+        void watchdog.judged(name, record).catch(() => {});
+        try { revive.judged(name, record); } catch { /* its tool: nothing more */ }
         talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
+        /* A folder that came loose and was put back: said once, in its chat (the look that put it back). */
+        for (const path of record?.remounted ?? []) { try { talk.event(name, { kind: 'machine-ok', text: `Le dossier ${path} s'était détaché de la machine : il a été remonté.`, topic: 'Machine', brief: 'Shared folder' }); } catch { /* its chat is off */ } }
         try { healthDocket.judged(name, record); } catch { /* its docket: nothing more */ }
         const now = (record?.problems ?? []).filter((x) => x.level === 'bad' || (x.level === 'warn' && ['memory', 'disk'].includes(x.kind)));
         const before = problemsSaid.get(name) ?? new Set();
@@ -472,24 +759,95 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Settings, Updates: what the updater (deploy/updater.mjs, as root) wrote, and how to ask it. */
     const updates = new Updates({ host: asHost, version: platform.version, store: new Store(`${dataDir}/updates.json`), alerts, ...(updateState ? { stateFile: updateState } : {}), ...(updateConf ? { confFile: updateConf } : {}) });
     const stopUpdates = updates.watch();
-    const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, guide, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
+    const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, guide, tethers, groups, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
     /* This server's disk and memory, and the reserve no machine may eat into: see capacity.mjs. */
     const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }),
         /* Under the reserve: the machine that takes the most put to sleep, the owner told, and its chat. */
-        sleep: (name) => { events.add({ kind: 'machine', text: `Machine of ${name} put to sleep: this server was short of room`, conversation: name }); return all.sleep(name); }, alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload); },
+        sleep: (name) => { events.add({ kind: 'machine', text: `Machine of ${name} put to sleep: this server was short of room`, conversation: name }); return all.sleep(name); },
+        /* Memory short, forced off (capacity.mjs, pressureWay: the default), or frozen and so not put to sleep: through the one lock of its machine. */
+        force: async (name) => { events.add({ kind: 'machine', text: `Machine of ${name} forced off: this server was short of memory`, conversation: name }); return (await all.machineAction(name, 'force', { wait: true }))?.ok === true; }, alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload); },
+        /* A machine asleep but still holding its RAM (a suspend that did not free it): its memory reclaimed, only that machine touched. */
+        reclaim: (name) => { events.add({ kind: 'machine', text: `Machine of ${name}: memory reclaimed (it was asleep but still held RAM)`, conversation: name }); return vms.reclaim(name).then((r) => (r.stdout || '').trim()); },
         say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
     all.room = (ask) => capacity.check(ask);
+    /* A COPY (conversations.copy): its work folder from its original's, host side -- what is its alone left out
+       (its reminders, its pending asks to the keepers, its devices, its chat's live files) -- then the same accesses. */
+    all.copyWork = (from, to, onProgress) => copyWorkFolder(folders.workFolder(from), folders.workFolder(to), onProgress);
+    /* Where a conversation's work folder is on this side: a copy reads its tool's memory through it (14-11). */
+    all.workFolder = (name) => folders.workFolder(name);
+    /* Its reminders and wake-ups, when the copy asked for them (15-11). */
+    all.copyReminders = (from, to) => { copyPlans(folders.workFolder(from), folders.workFolder(to)); wakeups.copyTo(from, to); };
+    all.copyRights = async (from, to) => {
+        for (const r of folders.of(from)) {
+            if (r.access === 'write') gitKeeper?.beforeWriter(r.name, to, true);
+            await folders.attach(to, r.name, r.access);
+        }
+        for (const s of secrets.of(from)) secrets.attach(to, s, true);
+        tethers?.copyGrants(from, to);
+        binders?.copyGrants(from, to);
+        if (talk.isOn(from)) await talk.set(to, true).catch(() => {});
+        const lines = guide.lines(from);
+        if (lines.length) await guide.setLines(to, lines).catch(() => {});
+    };
+    /* A WHOLE EXPORT (conversations.exportWhole): what it was given, each by its id -- a folder, a repository or a
+       mailbox by its asset, a secret by its name only (never its value), its Tether targets and its lists by theirs. */
+    all.accessesOf = async (name) => accessesOf({ folders, secrets, tethers, binders, talk, guide }, name);
+    /* ITS IMPORT: each given again where the same id exists here, with the same level (as copyRights does). */
+    all.wakeupsOf = (name) => wakeups.exportOf(name);
+    all.importReminders = (name, work, given) => { copyPlans(work, folders.workFolder(name)); wakeups.importTo(name, given); };
+    all.relink = (name, given) => relinkAccesses({ folders, secrets, tethers, binders, talk, guide, gitKeeper }, name, given);
+    /* A tool that ended cut for lack of memory: said in the events, to the owner, and in its chat. */
+    all.onToolExit = (name, report) => {
+        if (!report?.oom?.length) return;
+        const size = report.memoryMb ? ` (${Math.round(report.memoryMb / 1024 * 10) / 10} GB)` : '';
+        const text = `Its tool was stopped: the machine ran out of memory${size}. Give it more in Settings → Machine → Memory, or start it fresh.`;
+        events.add({ kind: 'machine', text: `Machine of ${name}: its tool was stopped for lack of memory${size}`, conversation: name });
+        void alerts.tell({ title: `${name}: its tool ran out of memory`, body: text, url: `/?c=${encodeURIComponent(name)}&open=settings` });
+        try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine', brief: 'Out of memory', actions: ['memory', 'restart', 'terminal'] }); } catch { /* its chat may be off */ }
+    };
     const stopWatch = capacity.start();
+    /* Settings, Machines: each machine, the VM manager, this server's choices (machinelist.mjs). */
+    machineList = new MachineList({ conversations: all, vms, capacity, vmWatch });
     /* The curves of the resources (history.mjs): one look a minute, from what the server knows already. */
     const history = new History({ file: `${dataDir}/history.json` });
     const historyLook = () => capacity.room().then((room) => history.sample(room, all.list().filter((c) => c.phase === 'ready').map((c) => ({ name: c.name, vm: `clv-${c.name}`, cores: c.cpus ?? 1, memoryMb: c.memoryMb, health: health.of(c.name) })))).catch(() => {});
     const historyTimer = setInterval(() => { void historyLook(); }, historyEveryMs); historyTimer.unref?.();
+    /* THE SECRETS' GUARD: every machine that runs is looked at -- the names in its /run/secrets
+       against those it should hold now, and what was last put there against what would be now. A
+       missing one is put back, one too many taken away, a new value given: whatever path changed
+       them (a page, an expiry, a machine restarted behind our back).
+       The names are read by the health probe (health.mjs), in the look made anyway every few
+       minutes: no command of its own. Each minute, what would be put there now is weighed against
+       what was, with nothing asked of the machine: a change (a page, an expiry) is given within
+       the minute, as before. */
+    const guarding = new Set();
+    const guardOne = async (name, listed) => {
+        if (guarding.has(name)) return;
+        guarding.add(name);
+        try { const now = await secrets.reconcile(name, delivered.get(name), listed).catch(() => null); if (now !== null) delivered.set(name, now); } finally { guarding.delete(name); }
+    };
+    health.probed = (name, facts) => (facts?.secrets && all.awake().includes(name) ? guardOne(name, facts.secrets) : undefined);
+    const secretsGuard = async () => {
+        for (const name of all.awake()) {
+            if (!delivered.has(name) || delivered.get(name) === secrets.signature(name)) continue;
+            /* What it should hold changed: given again whatever is there, so nothing is asked of it first. */
+            await guardOne(name, { count: 0, names: [] });
+        }
+    };
+    const secretsTimer = setInterval(() => { void secretsGuard().catch(() => {}); }, 60_000); secretsTimer.unref?.();
+    /* The machines' disks give back what was erased, every hour (conversations.trimAll, vm.mjs trim). */
+    const trimTimer = setInterval(() => { void all.trimAll().catch(() => {}); }, 60 * 60_000); trimTimer.unref?.();
     /* The certificate the front serves, said in Settings (certificate.mjs). */
     const certificate = new Certificate({ origin: publicOrigin, alerts });
     /* All the machines to another disk, from Settings (machinesmove.mjs). */
     const machinesMove = new MachinesMove({ host: asHost, usedMb: () => capacity.machinesUsedMb() });
     /* What the server's programs said, and this server started again, from Settings (serverlogs.mjs). */
-    const serverLogs = new ServerLogs({ host: asHost });
+    /* What holds this server: measured on demand (Settings, Load, Measure; MCP), and by itself when its loop is slow (profile.mjs). */
+    const profiler = new Profiler();
+    const loopWatch = monitorEventLoopDelay({ resolution: 20 }); loopWatch.enable();
+    const autoProfile = new AutoProfile({ profiler, file: new JsonFile(`${dataDir}/profiles.json`, {}),
+        delay: () => { if (!loopWatch.count) return null; const d = { p50: Math.round(loopWatch.percentile(50) / 1e6), p99: Math.round(loopWatch.percentile(99) / 1e6) }; loopWatch.reset(); return d; } }).start();
+    const serverLogs = new ServerLogs({ host: asHost, load: () => ({ ...hostTally.windows(), profiles: autoProfile.kept() }), profiler });
     /* This server's Wi-Fi, from Settings (wifi.mjs): how a switch ended, said in What happened. */
     const wifi = new Wifi({ host: asHost, said: (text) => events.add({ kind: 'server', text }) });
     /* The remote screen (MeshCentral), from Settings (meshcentral.mjs): how a turn-on ended, said in What happened. */
@@ -499,14 +857,150 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopBinders(); clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    const speechLog = (line) => events.add({ kind: 'server', text: line });
+    const speech = new Speech({ dir: `${dataDir}/voices`, log: speechLog, secret: (name) => { try { return secrets.reveal(name) ?? undefined; } catch { return undefined; } },
+        /* The voice by default: Kyutai's Pocket TTS, run here (pocket.mjs); CLAVARIUM_POCKET=0 to leave it out. */
+        pocket: process.env.CLAVARIUM_POCKET === '0' ? null : new Pocket({ dir: `${dataDir}/voices`, log: speechLog }) });
+    boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
+        /* A box withdrawn: what an API key was given of it goes with it. */
+        removed: (id) => grants.forgetAsset(`box:${id}`),
+        /* A box speaks in a conversation, or in a room ('room:<id>', #281). */
+        exists: (name) => all.list().some((c) => c.name === name) || (/^room:/.test(name) && Boolean(rooms?.has(name.slice(5)))),
+        /* A long recording (a meeting): transcribed in parts, kept beside the conversation for its assistant. */
+        react: (said) => voice.reaction(said),
+        /* The wake word that learns: each box's wake clips, when it is set so (wakelearn.mjs). */
+        learn: new WakeLearn({ dir: `${dataDir}/wake-learn` }),
+        /* A collect session: a box's false wakes kept on purpose, nothing answered (boxcollect.mjs; started by the owner). */
+        collect: new BoxCollect({ dir: `${dataDir}/box-collect`, log: (line) => events.add({ kind: 'server', text: line }) }),
+        recordDir: `${dataDir}/recordings`, parts: (wav) => voice.transcribeParts(wav), keep: (name, file, text) => talk.keepText(name, file, text),
+        hear: (wav, lang) => hearBox(voice, wav, lang),   /* any language heard; one neither the box's (its page's) nor English heard again in the box's (voice.mjs) */
+        /* Said as the person's own message, the room named (one speaker for now). */
+        say: (name, text, by) => (/^room:/.test(name) ? rooms.say(name.slice(5), text, { box: by?.id }) : talk.say(name, text, undefined, undefined, 'voice', { by })),
+        /* A discreet line in the thread, never a message to the agent: a wake ignored (05-11). A room: the log only. */
+        note: (name, event) => (/^room:/.test(name) ? null : talk.event(name, event)),
+        /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
+        origin: () => publicOrigin ?? null,
+        changed: () => { try { rooms?.boxesBound(boxes.all()); } catch (error) { console.error(`voice boxes in rooms: ${error.message}`); } for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); } },
+        speak: (text) => speech.speak(text),
+        log: (line) => events.add({ kind: 'server', text: line }) });
+    /* Rooms (#268): a thread shared by several AIs, the person and boxes (rooms.mjs). */
+    rooms = new Rooms({ file: new JsonFile(`${dataDir}/rooms.json`, []), dir: `${dataDir}/rooms`,
+        removed: (id) => grants.forgetAsset(`room:${id}`),
+        say: (name, text, extra, files) => talk.say(name, text, undefined, files, undefined, extra),
+        /* A line in an AI's own chat, not a message (it wakes nothing): a hand-over of its not passed on. */
+        note: (name, text) => talk.event(name, { kind: 'room-hops', text }),
+        attach: (name, fileName, request) => talk.attach(name, fileName, request),
+        rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all(),
+        speak: (where, text, ids, how) => { void boxes.agentSaid(where, text, ids, how); },
+        /* What an AI shows in a room: opened through its own conversation, with its rights (talk.mjs). */
+        reach: (name, path) => talk.reachOf(name, path), shown: (name, ref) => talk.shown(name, ref),
+        /* What an AI gives another AI of the room: read from its own folders, as the room's /shown route does (api.mjs). */
+        read: async (name, ref) => {
+            const m = /^([a-z][a-z0-9-]{0,31}):(.+)$/.exec(String(ref ?? ''));
+            if (!m) throw new Refusal(404, 'No such file.');
+            if (m[1] === WORK_TAB) {
+                if (all.list().find((x) => x.name === name)?.work !== 'kept') throw new Refusal(404, 'No such file.');
+                return download(folders.workFolder(name), m[2]);
+            }
+            if (!folders.of(name).some((r) => r.name === m[1])) throw new Refusal(404, 'No such file.');
+            return download(folders.folder(m[1]), m[2]);
+        } });
+    rooms.boxesBound(boxes.all());
+    rooms.refresh();
+    /* A Tether call held for an AI at work for a room: said in that room too, closed there once decided (tethers.mjs). */
+    tethers.rooms = { held: (name, event) => rooms.held(name, event), closed: (ids, event) => rooms.closed(ids, event) };
+    /* FEATURES (features.mjs): read from what the modules say, never a secret's value. The remote screen and the
+       catalogue are slow to ask: kept a while, and never waited for long. */
+    const screenNow = cached(() => meshcentral.status().catch(() => null), 60_000);
+    const quick = (p, ms, fallback) => Promise.race([p, new Promise((done) => { setTimeout(() => done(fallback), ms).unref?.(); })]);
+    /* API KEYS (apikeys.mjs): a third kind of subject in the table of rights; their door, /api/ext/. */
+    const components = {};
+    for (const name of ['clavarium-parley', 'clavarium-tether', 'clavarium-binder', 'clavarium-docket']) {
+        try { components[name.slice('clavarium-'.length)] = JSON.parse(readFileSync(packageFile(name, 'package.json'), 'utf8')).version; } catch { /* not installed here */ }
+    }
+    const apiKeys = new ApiKeys({ store: new Store(`${dataDir}/apikeys.json`), grants, journal: `${dataDir}/apikeys.log`, exists: (name) => all.list().some((c) => c.name === name),
+        roomExists: (id) => rooms.has(id), boxExists: (id) => boxes.all().some((b) => b.id === id),
+        /* Its binder lists, kept on each list by Binder (binders.mjs), as a conversation's are. */
+        binders: { lists: () => binders.lists(), grant: (list, subject, level, who) => binders.grant(list, subject, level, who) } });
+    /* What the host program says of the server is never waited for long: a key gets what is known. */
+    const briefly = { brief: () => quick(capacity.brief(), 3000, null), room: () => quick(capacity.room(), 3000, null) };
+    const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }),
+        /* What Clavarium does (jobs.mjs), as Settings shows it: the list without logs, one job with its log. */
+        jobs: { list: () => withUpdates(all.jobs, all.list(), updates?.about().history ?? []), log: (id) => all.jobs.log(id) },
+        /* Diagnostics (scope "diagnostics"): what Settings > Diagnostics > Load and Logs show. */
+        diagnostics: { load: () => serverLogs.load(), profile: (seconds) => serverLogs.profile(seconds), logs: (source, span) => serverLogs.start(source, span) },
+        /* A key's conversations (their chat, through talk.mjs): read as the page reads it; a message posted as the page
+           posts one (its secrets lifted the same way), signed with the key's name. */
+        chats: {
+            list: () => all.list().map((c) => ({ id: c.name, name: typeof c.title === 'string' && c.title ? c.title : c.name })),
+            chatOn: (name) => { try { return talk.of(name, { state: '1' }).on === true; } catch { return false; } },
+            read: (name, part) => talk.of(name, part),
+            say: (name, text, by) => talk.say(name, text, undefined, [], undefined, { by }),
+            /* To act (level "act"): what the owner's buttons do. Woken as a terminal opened is (its machine started,
+               its terminal kept), not waited for; put to sleep as Sleep does; its turn stopped as the Esc key does. */
+            wake: (name) => {
+                const c = all.get(name);
+                if (c?.phase !== 'ready') throw new Refusal(409, 'This conversation is not ready.');
+                if (c.asleep === true || c.stopped === true) wakeWhy.set(name, 'a key (API)');
+                void bridge?.warm(name);
+                return { state: c.asleep === true ? 'waking' : 'awake' };
+            },
+            sleep: async (name) => { await all.sleep(name); return { state: 'asleep' }; },
+            stop: async (name) => {
+                const c = all.get(name);
+                if (c?.phase !== 'ready' || c.asleep === true) throw new Refusal(409, 'This conversation is asleep: nothing to stop.');
+                const r = await vms.exec(name, escapeCommand(), { timeoutMs: 30_000 });
+                if (r.code !== 0) throw new Refusal(502, 'Its turn could not be stopped.');
+                return { state: 'awake' };
+            },
+        },
+        /* Its rooms: read as the room's page reads them (names of the moment), never marked seen; posted as the person
+           posts there (rooms.mjs say, `as` the key). */
+        rooms: {
+            list: () => rooms.list().map((r) => ({ id: r.id, name: r.name, host: r.members.find((m) => m.host)?.name ?? null, members: r.members.map((m) => ({ id: m.id, ref: m.ref, name: m.name, kind: m.kind, ...(m.host ? { host: true } : {}) })) })),
+            read: (id, part) => rooms.read(id, { ...part, ...(part.last ? { last: Number(part.last) } : {}), seen: false }),
+            say: (id, text, how) => rooms.say(id, text, how),
+            /* To manage (level "manage", or "create rooms"): as the page asks (api.mjs /api/rooms). */
+            create: (asked) => rooms.create(asked), change: (id, asked) => rooms.change(id, asked), remove: (id) => rooms.remove(id),
+        },
+        /* A conversation's reminders, its Docket (dockets.mjs): what the owner sees of it, one set as the tool sets one. */
+        reminders: { of: (name) => dockets.of(name), set: (name, asked, by) => dockets.remind(name, asked, by), cancel: (name, plan) => dockets.cancel(name, plan) },
+        /* Its binder lists: Binder asked as the key, an agent (binders.mjs asKey). */
+        binder: { act: (op, args, who) => binders.asKey(op, args, who) },
+        /* Its voice boxes: their state only, and a short text said aloud (boxes.mjs announce). */
+        boxes: {
+            list: () => { const names = new Map([...all.list().map((c) => [c.name, c.title || c.name]), ...rooms.list().map((r) => [`room:${r.id}`, r.name])]);
+                return boxes.all().map((b) => ({ id: b.id, name: b.name, online: b.online, volume: b.volume, heardAt: b.heardAt ?? null,
+                    where: /^room:/.test(String(b.conversation)) ? { kind: 'room', name: names.get(b.conversation) ?? null } : { kind: 'conversation', name: names.get(b.conversation) ?? null } })); },
+            say: (id, text, by) => boxes.announce(id, text, by),
+        } };
+    const features = new Features({ file: new JsonFile(`${dataDir}/features.json`, {}), context: async () => ({
+        secrets: secrets.list(), dictation: voice.about(), boxes: boxes.all(), alerts: alerts.about().devices.length,
+        conversations: all.list().map((c) => ({ tool: c.tool })), tools: all.tools().map((t) => t.id),
+        mail: { mailboxes: mailboxes.list().map((m) => ({ failure: m.failure })), targets: tethers.store().targets().filter((t) => t.kind === 'mail' || t.kind === 'calendar').map((t) => ({ kind: t.kind })) },
+        answerer: answererConfig(env)?.models.length ?? 0, updates: updates.about(), team: team ? team.list().length : null,
+        screen: await quick(screenNow(), 1500, null), catalogue: await quick(catalogue.providers().catch(() => []), 1500, []),
+    }) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, desks: new Desks({ file: new JsonFile(`${dataDir}/desktops.json`, {}) }), apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); clearInterval(trimTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); clearInterval(stopSigninHelp); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
+    boxes.attach(server, WebSocketServer);
+    browsers.attach(server, WebSocketServer); server.on('close', () => browsers.shutdown());
+    /* A machine's shared SSH console, live in its asset panel (sshconsole.mjs): the same checks as the terminal. */
+    attachConsole(server, { tethers, gate, originOk });
+    /* The wake word's weekly threshold tuning (Sunday from 03:00, each box's own time): looked at every 10 minutes. */
+    const wakeWeekly = setInterval(() => { try { boxes.wakeWeekly(); } catch (error) { console.error(`wake tuning: ${error.message}`); } }, 10 * 60_000); wakeWeekly.unref?.(); server.on('close', () => clearInterval(wakeWeekly));
+    /* A collect session's clock: the stations asked, its end, the speaker told to stop (boxcollect.mjs). */
+    const collectTick = setInterval(() => { boxes.collectTick().catch((error) => console.error(`box collect: ${error.message}`)); }, 30_000); collectTick.unref?.(); server.on('close', () => clearInterval(collectTick));
+    for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name));
+    try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); }
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
+        /* Put to sleep or stopped: a page that comes back by itself does not wake it (bridge.mjs, CLOSE_ASLEEP). */
+        asleep: (name) => { const c = all.get(name); return c?.asleep === true || c?.stopped === true; },
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },
-        spawn: async (name, cols, rows, say) => {
-            const [program, ...argv] = await all.open(name, say);
+        spawn: async (name, cols, rows, say, who) => {
+            const [program, ...argv] = await all.open(name, say, who ?? wakeWhy.take(name));
             const started = pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });
             /* Its start is over once something is drawn (nothing of it is
                read), once it ends, or after a while whatever happens. Not
@@ -548,7 +1042,19 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     all.ready = (name) => { toolbox.forget(name); void bridge.warm(name); };
     /* Their health too: after a restart of the host, a folder may not have come back. */
     /* The tools are shown in them first: a machine made before /tools existed gets it now, not as "a folder that came loose". */
-    void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) { await toolbox.show(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); } })();
+    /* After the quiet start, one machine after another (QUIET_STEP_MS apart). */
+    const warmAll = async () => {
+        let first = true;
+        for (const name of all.awake()) {
+            if (closing) return;
+            if (!await all.running(name).catch(() => false)) continue;
+            if (!first && quietStartMs > 0) await new Promise((r) => { setTimeout(r, QUIET_STEP_MS).unref?.(); });
+            first = false;
+            await toolbox.show(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name);
+        }
+    };
+    if (quietStartMs > 0) setTimeout(() => { void warmAll().catch(() => {}); }, quietStartMs).unref?.();
+    else void warmAll().catch(() => {});
     return listening;
 }
 
@@ -578,7 +1084,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         const mntDir = hostSetting('MNT') || dataDir;
         /* --name: the name of this Clavarium until one is chosen in Settings (instance.mjs). */
         const name = option(argv, 'name', '') || undefined;
-        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey, appName: name }).catch((error) => { console.error(`start: FAILED: ${error.message}`); process.exit(1); });
+        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey, appName: name, quietStartMs: QUIET_START_MS }).catch((error) => { console.error(`start: FAILED: ${error.message}`); process.exit(1); });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);

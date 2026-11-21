@@ -16,7 +16,7 @@ const stateOf = (b, name) => readFileSync(join(vmHome(b, name), 'state'), 'utf8'
 test('folders that came loose while it slept are put back when it wakes; a machine asleep is never touched', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('loose');
+    await me.create('loose', 'Shell', { chat: false });
     await me.newFolder('notes');
     await me.access('notes', 'Write');
     await me.page.locator('#folders').click();
@@ -35,12 +35,13 @@ test('folders that came loose while it slept are put back when it wakes; a machi
     process.env.FAKE_VM_START_SECONDS = '2';
     t.after(() => { delete process.env.FAKE_VM_START_SECONDS; });
     await me.page.locator('#notice-action', { hasText: 'Wake it' }).click();
-    /* Told step by step: what it is, the step of how many with its time so far, the step under way, and what is usual. */
-    await me.until('the wait is said, with its time so far', async () => /^Step 1 of \d \u00b7 0:0\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
+    /* Told step by step (« 1 / 4 · 0:03 », 03-11): what it is, the step of how many with its time so far, the step under way, and what is usual. */
+    await me.until('the wait is said, with its time so far', async () => /^1 \/ \d \u00b7 0:0\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
     assert.equal(await me.page.locator('#state').innerText(), 'Waking the machine...');
     assert.match(await me.page.locator('#notice-title').innerText(), /waking it up/i);
     assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').innerText(), 'Waking the machine');
-    assert.match(await me.page.locator('#notice-text').innerText(), /^A start usually takes a minute or two\. Its work, its files and its chat are kept\.$/);
+    /* The step under way in one line; what is usual, only once it is passed (03-11, less is more). */
+    assert.equal(await me.page.locator('#notice-text').innerText(), 'Waking the machine');
     /* Its machine looked at meanwhile: what is known is said, never a restart for a start that is merely under way. */
     await new Promise((r) => setTimeout(r, 900));
     assert.equal(await me.page.locator('#notice-restart').isVisible(), false, 'no restart offered while it starts');
@@ -60,7 +61,7 @@ test('folders that came loose while it slept are put back when it wakes; a machi
 test('a machine that does not answer is said over the terminal; Restart is asked first, and forces the stop when the clean one fails', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('silent');
+    await me.create('silent', 'Shell', { chat: false });
     await me.type('MARK=before-restart; echo set rights:$RIGHTS');
     /* Every right in its machine: the default, given at its first start. */
     await me.sees('\nset rights:full');
@@ -68,6 +69,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     assert.match(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-docket-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-binder-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
     report(b, 'silent', { silent: true });
     await me.page.locator('#folders').click();
+    await me.chapter('health');
     await me.page.locator('#health-check').click();
     await me.until('the Machine chapter says it', async () => /Its machine does not answer/.test(await me.page.locator('#machine-health').innerText()));
     /* Its tool can take up its last session when it starts: the default. */
@@ -96,8 +98,8 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
     await me.until('the page says it restarts', async () => /restarting/.test(await me.state()));
     /* While it restarts, the page says the step, the time so far and what is usual. */
-    await me.until('a clock while it restarts', async () => /^Step \d of 6 \u00b7 \d+:\d\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
-    assert.match(await me.page.locator('#notice-text').innerText(), /A restart usually takes one to two minutes/);
+    await me.until('a clock while it restarts', async () => /^\d \/ 6 \u00b7 \d+:\d\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
+    assert.doesNotMatch(await me.page.locator('#notice-text').innerText(), /usually/, 'what is usual is said only once it is passed');
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     assert.equal(existsSync(join(vmHome(b, 'silent'), 'killed')), true, 'stopped by force');
     const c = (await me.api('/api/conversations')).body.find((x) => x.name === 'silent');
@@ -131,7 +133,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
 test('a terminal not opened for a blink is tried again in silence, under a neutral word; a fault is said only if it lasts', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('blink');
+    await me.create('blink', 'Shell', { chat: false });
     /* The bridge refuses the first openings, with no reason a page could act on (a server starting again). */
     let refused = 2;
     await me.page.routeWebSocket(/\/terminal\?/, (ws) => {
@@ -166,6 +168,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.api('/api/conversations/roomy/talk', { on: true });
     report(b, 'roomy', { oom: 2, oomMachine: 2, availableMb: 20, diskLeftMb: 50 });
     await me.page.locator('#folders').click();
+    await me.chapter('health');
     await me.page.locator('#health-check').click();
     await me.until('it is said', async () => /whole machine ran out of memory 2 times/.test(await me.page.locator('#machine-health').innerText()));
     const said = await me.page.locator('#machine-health').innerText();
@@ -200,13 +203,17 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     /* Its chat says it too, where it happened, with the same ways out; and the terminal is shown only when asked. */
     await me.page.goBack();
     await me.page.locator('#view-chat').click();
-    const line = me.page.locator('#simple-thread .parley-system');
+    const line = me.page.locator('#simple-thread .parley-system', { hasText: 'whole machine ran out of memory' });
     await me.until('a line of the machine in its chat', async () => /whole machine ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
     assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal', '\u2713 Seen']);
     assert.equal(await me.page.locator('#health-room').isVisible(), true, 'the strip offers its terminal over the chat');
+    /* One line per problem (Parley 0.17.53): its lines, and their ways out, one tap away under « details ». */
+    await me.page.locator('#simple-thread .parley-issue', { hasText: 'whole machine ran out of memory' }).first().locator('.parley-issue-more').click();
     await line.first().locator('button', { hasText: 'See the terminal' }).click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
-    await me.page.locator('#folders').click();
+    if (!(await me.page.locator('#panel').isVisible())) await me.page.locator('#folders').click();
+    await me.until('its settings', async () => me.page.locator('#panel').isVisible());
+    await me.chapter('machine');
     await me.page.selectOption('#machine-memory', '2048');
     await me.page.selectOption('#machine-disk', '16');
     await me.page.locator('#machine-size-apply').click();
@@ -226,14 +233,16 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     /* The line that offered Restart before it offers it no more: its machine was restarted since. */
     await me.page.locator('#view-chat').click();
     await me.until('Restart no longer offered by the older line', async () => !(await line.first().locator('button').allInnerTexts().catch(() => ['Restart...'])).includes('Restart...'), 20_000);
-    assert.ok((await line.first().locator('button').allInnerTexts()).includes('More memory...'));
+    /* Its problem went away since (machine-ok, 0.2.148): nothing left to do on that line, More memory gone too. */
+    await me.until('More memory no longer offered either', async () => !(await line.first().locator('button').allInnerTexts().catch(() => ['More memory...'])).includes('More memory...'), 20_000);
     await me.page.locator('#view-terminal').click();
     assert.equal(c.memoryMb, 2048); assert.equal(c.diskGb, 16);
     assert.deepEqual(JSON.parse(readFileSync(join(vmHome(b, 'roomy'), 'size.json'), 'utf8')), { memory: 2048, disk: 16 });
     /* A disk never shrinks; a tool's least memory is kept. */
     assert.match((await me.api('/api/conversations/roomy/machine', { diskGb: 8 })).body.error, /can only grow: it has 16 GB/);
     assert.match((await me.api('/api/conversations/roomy/machine', { memoryMb: 512 })).body.error, /between 768 MB/);
-    await me.page.locator('#folders').click();
+    if (!(await me.page.locator('#panel').isVisible())) await me.page.locator('#folders').click();
+    await me.chapter('machine');
     await me.until('the choices follow what it has now', async () => (await me.page.locator('#machine-disk option').first().innerText()) === '16 GB (now)');
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '2048');
     assert.equal(await me.page.locator('#machine-memory option[value="2048"]').innerText(), '2 GB (now)');
@@ -285,5 +294,120 @@ test('Needs you for a machine that needs a hand, not for programs once stopped f
     await me.api('/api/conversations/short/health', {});
     await me.page.reload();
     await me.until('memory short now: back in Needs you', async () => (await needsRows()).includes('short'));
+    assert.deepEqual(me.errors, []);
+});
+
+test('its machine from its settings: five buttons always there; Stop asked in one line, its steps live, "Force now" past a bound, Force stop, a report at the end', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('lever', 'Shell', { chat: false });
+    await me.page.locator('#folders').click();
+    const FIVE = ['m-start', 'm-stop', 'restart', 'sleep', 'm-force'];
+    const allThere = async () => { for (const id of FIVE) assert.equal(await me.page.locator(`#${id}`).isVisible(), true, id); };
+    await allThere();
+    /* What does not apply is greyed, with why. */
+    assert.equal(await me.page.locator('#m-start').isDisabled(), true);
+    assert.equal(await me.page.locator('#m-start').getAttribute('title'), 'It runs already');
+    /* A polite stop that hangs; each step given two seconds here. */
+    writeFileSync(join(vmHome(b, 'lever'), 'hang-stop'), '');
+    await me.page.evaluate(() => { window.clavariumTimes = { ...(window.clavariumTimes ?? {}), mstep: 2 }; });
+    await me.page.locator('#m-stop').click();
+    assert.match(await me.page.locator('#m-confirm-text').innerText(), /interrupted/);
+    await me.page.locator('#m-confirm-yes').click();
+    await me.until('its steps, live', async () => (await me.page.locator('#m-live li[data-step="polite"]').getAttribute('data-state').catch(() => '')) === 'run');
+    assert.deepEqual(await me.page.locator('#m-live li[data-step]').evaluateAll((l) => l.map((x) => x.dataset.step)), ['polite', 'force', 'term', 'kill', 'check']);
+    await allThere();
+    await me.until('"Force now" once past its bound', async () => me.page.locator('#m-live .m-force-now').isVisible());
+    await me.page.locator('#m-live .m-force-now').click();
+    await me.until('stopped, with its report', async () => /^Stopped/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
+    assert.match(await me.page.locator('#m-report').innerText(), /Forced/);
+    assert.equal(stateOf(b, 'lever'), 'Stopped');
+    const c = (await me.api('/api/conversations')).body.find((x) => x.name === 'lever');
+    assert.equal(c.stopped, true); assert.equal(c.machineReport.ok, true);
+    assert.equal(c.machineReport.steps.find((x) => x.id === 'polite').result, 'skip', 'moved on by its owner');
+    /* Stopped: Start applies now, Stop does not. */
+    assert.equal(await me.page.locator('#m-start').isDisabled(), false);
+    assert.equal(await me.page.locator('#m-stop').isDisabled(), true);
+    rmSync(join(vmHome(b, 'lever'), 'hang-stop'));
+    await me.page.locator('#m-start').click();
+    await me.until('started', async () => /^Started/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
+    /* Force stop: apart from the buttons of every day (10-11), asked in one line right under it, as a power cut. */
+    assert.equal(await me.page.locator('#panel-actions #m-force').count(), 0);
+    assert.equal(await me.page.locator('#m-danger #m-force').isVisible(), true);
+    assert.equal(await me.page.locator('#m-danger .m-danger-title').textContent(), 'If the machine is stuck');
+    await me.page.locator('#m-force').click();
+    assert.match(await me.page.locator('#m-confirm-text').innerText(), /power cut/);
+    assert.equal(await me.page.evaluate(() => document.getElementById('m-danger').nextElementSibling?.id), 'm-confirm');
+    if (process.env.CLAVARIUM_E2E_SHOTS) for (const [w, h, name] of [[1280, 900, 'desktop'], [900, 1200, 'tablet'], [390, 844, 'phone']]) {
+        await me.page.setViewportSize({ width: w, height: h });
+        await me.page.locator('#m-danger').scrollIntoViewIfNeeded();
+        await me.page.screenshot({ path: `${process.env.CLAVARIUM_E2E_SHOTS}/m-danger-${name}.png` });
+    }
+    await me.page.locator('#m-confirm-yes').click();
+    await me.until('forced off', async () => /^Forced off/.test(await me.page.locator('#m-report').innerText().catch(() => '')), 20_000);
+    assert.equal(stateOf(b, 'lever'), 'Stopped');
+    assert.deepEqual(me.errors, []);
+});
+
+test('its watchdog in its Machine chapter; Settings, Machines: each machine, Force stop asked in the page, the manager restarted when confirmed, its two choices', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('watched', 'Shell', { chat: false });
+    await me.create('other', 'Shell', { chat: false });
+    /* Its watchdog: one hour by default; Off, then minutes of its own. */
+    await me.page.locator('#folders').click();
+    await me.chapter('machine');
+    const dog = me.page.locator('#m-dog');
+    assert.equal(await dog.locator('button[aria-pressed="true"]').innerText(), '1 h');
+    await dog.locator('button[data-min="0"]').click();
+    await me.until('off', async () => (await me.api('/api/conversations/other/machine')).body.watchdog.on === false);
+    await dog.locator('button[data-min="custom"]').click();
+    assert.equal(await me.page.locator('#m-dog-custom').isVisible(), true);
+    await me.page.locator('#m-dog-min').fill('45');
+    await me.page.locator('#m-dog-min').press('Enter');
+    await me.page.locator('#m-dog-min').blur();
+    await me.until('45 minutes', async () => (await me.api('/api/conversations/other/machine')).body.watchdog.delayMin === 45);
+    assert.deepEqual((await me.api('/api/conversations/other/machine')).body.watchdog, { on: true, delayMin: 45 });
+    const shots = process.env.SHOTS;
+    if (shots) await me.page.locator('#m-dog-row').screenshot({ path: join(shots, 'watchdog-row.png') });
+    /* Settings, Machines. */
+    await me.page.goto(`${b.origin}/?open=settings&at=machines`);
+    await me.until('the list', async () => (await me.page.locator('#machines-rows .machine-item').count()) === 2);
+    const row = (name) => me.page.locator(`#machines-rows .machine-item[data-name="${name}"]`);
+    assert.match(await row('watched').locator('small').innerText(), /^Running · 0\.9 GB · since \d/);
+    assert.equal(await me.page.locator('#manager-mode button[aria-pressed="true"]').innerText(), 'At night');
+    assert.equal(await me.page.locator('#pressure-way button[aria-pressed="true"]').innerText(), 'Force stop');
+    assert.match(await me.page.locator('#manager-line').innerText(), /^Answers/);
+    if (shots) for (const [w, h] of [[1280, 800], [390, 844]]) for (const scheme of ['light', 'dark']) {
+        await me.page.setViewportSize({ width: w, height: h });
+        await me.page.emulateMedia({ colorScheme: scheme });
+        await me.page.locator('#settings-ch-machines').scrollIntoViewIfNeeded();
+        await me.page.screenshot({ path: join(shots, `machines-${w}-${scheme}.png`) });
+        assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `no sideways scroll at ${w}`);
+    }
+    await me.page.setViewportSize({ width: 1280, height: 800 }); await me.page.emulateMedia({ colorScheme: 'light' });
+    /* Force stop from the list: asked in the page first; Cancel does nothing. */
+    await row('watched').locator('button[data-act="force"]').click();
+    assert.match(await me.page.locator('#machines-confirm-text').innerText(), /^Force stop watched\? Nothing is saved\.$/);
+    if (shots) await me.page.locator('#settings-ch-machines').screenshot({ path: join(shots, 'machines-confirm.png') });
+    await me.page.locator('#machines-confirm-no').click();
+    assert.equal(stateOf(b, 'watched'), 'Running');
+    await row('watched').locator('button[data-act="force"]').click();
+    await me.page.locator('#machines-confirm-yes').click();
+    await me.until('forced off', async () => stateOf(b, 'watched') === 'Stopped', 20_000);
+    await me.until('said in the list', async () => /^Stopped/.test(await row('watched').locator('small').innerText().catch(() => '')), 20_000);
+    assert.equal(await row('watched').locator('button[data-act="force"]').isDisabled(), true);
+    /* The manager: restarted only once confirmed (every machine is resumed). */
+    await me.page.locator('#manager-restart').click();
+    assert.equal(await me.page.locator('#machines-confirm-text').innerText(), 'Restart the manager? All machines are resumed.');
+    await me.page.locator('#machines-confirm-yes').click();
+    await me.until('restarted by its owner', async () => (await me.api('/api/server/machines')).body.manager.last?.by === 'owner');
+    /* Its two choices. */
+    await me.page.locator('#manager-mode button[data-mode="ask"]').click();
+    await me.until('ask', async () => (await me.api('/api/server/machines')).body.manager.mode === 'ask');
+    await me.page.locator('#pressure-way button[data-way="sleep"]').click();
+    await me.until('sleep', async () => (await me.api('/api/server/machines')).body.pressure === 'sleep');
+    /* The server may say it before the page has painted its answer: waited for, not read at once. */
+    await me.until('Sleep is the one chosen', async () => (await me.page.locator('#pressure-way button[aria-pressed="true"]').innerText()) === 'Sleep');
     assert.deepEqual(me.errors, []);
 });

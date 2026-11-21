@@ -60,14 +60,19 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     /* Its Assets: by kind, the repository first; nothing opened until one is chosen. */
     await page.locator('#view-assets').click();
     const rows = page.locator('#cassets-rows .as-row');
-    await me.until('its assets are listed', async () => (await rows.count()) === 4);
+    await me.until('its assets are listed, its USB device access too (given live: shown since assets step 3)', async () => (await rows.count()) === 5);
     /* To send first, once it has a repository: every one of them at once. */
     assert.match(await rows.first().innerText(), /To send\s*every repository, reviewed and sent at once/);
     assert.equal(await rows.first().getAttribute('data-asset'), 'send:all');
     assert.match(await page.locator('#cassets-rows .as-row[data-asset="folder:work"]').innerText(), /where its tool works/);
-    assert.deepEqual(await page.locator('#cassets-rows .as-kind h3').allTextContents(), ['Git repositories', 'Folders']);
-    assert.match(await page.locator('#cassets-rows .as-row[data-asset="git:site"]').innerText(), /site\s*write/);
-    assert.match(await page.locator('#cassets-rows .as-row[data-asset="folder:notes"]').innerText(), /notes\s*read/);
+    assert.deepEqual(await page.locator('#cassets-rows .kit-aslist-sec h3').allTextContents(), ['Git repositories', 'Folders', 'Accesses']);
+    assert.equal(await page.locator('#cassets-rows .as-row[data-asset="git:site"] .kit-rights').getAttribute('data-level'), 'write');
+    assert.equal(await page.locator('#cassets-rows .as-row[data-asset="folder:notes"] .kit-rights').getAttribute('data-level'), 'read');
+    /* Searched, its own list: only what is found, To send set aside meanwhile. */
+    await page.fill('#cassets-search', 'NOT');
+    await me.until('its search', async () => (await rows.count()) === 1 && (await rows.first().getAttribute('data-asset')) === 'folder:notes');
+    await page.fill('#cassets-search', '');
+    await me.until('all again', async () => (await rows.count()) === 5);
     assert.equal(await page.locator('#cassets-detail .as-none').innerText(), 'Select an asset to see its detail.');
     assert.equal(await page.locator('#cassets-rows .as-row[aria-current="true"]').count(), 0, 'no row chosen');
     await page.locator('#cassets-rows .as-row[data-asset="git:site"]').click();
@@ -125,21 +130,24 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     /* THE SERVER'S ASSETS: a place of its own; Access is the map alone. */
     await page.locator('#nav-assets').click();
     await me.until('the Assets place', async () => await page.locator('#assets').isVisible());
-    await me.until('everything is listed', async () => (await page.locator('#assets-rows .as-row').count()) === 2);
-    assert.equal(await page.locator('#assets-rows .as-row[data-asset="git:site"] .as-badge').innerText(), '1', 'how many conversations use it');
+    /* Every kind, an access too (Tether's USB device: listed by type as well now, not only by group). */
+    await me.until('everything is listed', async () => (await page.locator('#assets-rows .as-row').count()) === 3);
+    assert.equal(await page.locator('#assets-rows .as-row[data-asset="git:site"] .kit-holders .kit-av').count(), 1, 'who uses it, by its initial');
+    assert.deepEqual(await page.locator('#assets-rows .kit-aslist-sec').evaluateAll((s) => s.map((x) => x.dataset.kind)), ['git', 'folder', 'acces'], 'an empty type is not shown');
     assert.equal(await page.locator('#assets-detail .as-none').innerText(), 'Select an asset to see its detail.', 'nothing opened by itself');
     await shot(page, 'tablet-assets-none-chosen');
     await page.fill('#assets-search', 'not');
     await me.until('searched', async () => (await page.locator('#assets-rows .as-row').count()) === 1);
     await page.fill('#assets-search', '');
-    await page.locator('#assets-rows .as-kind[data-kind="folder"] .as-add').click();
+    await page.locator('#assets-new').click();
+    await page.locator('#assets-detail .as-kinds button[data-kind="folder"]').click();
     await page.fill('#folder-name', 'seeds');
     await page.locator('#folder-new button[type=submit]').click();
     await me.until('the new folder is opened', async () => /seeds/.test(await page.locator('#assets-detail h2').innerText()));
     assert.match(await page.locator('#assets-detail').innerText(), /No conversation uses it/);
     await page.locator('#assets-detail .as-chapter .as-add').click();
     await page.locator('#assets-detail .as-picker .given-row[data-conversation="coder"] button', { hasText: 'Read' }).click();
-    await me.until('it is used by coder', async () => (await page.locator('#assets-rows .as-row[data-asset="folder:seeds"] .as-badge').innerText()) === '1');
+    await me.until('it is used by coder', async () => (await page.locator('#assets-rows .as-row[data-asset="folder:seeds"] .kit-holders .kit-av').count()) === 1);
     await me.until('Delete waits until nobody uses it', async () => await page.locator('#assets-detail .danger-link').isDisabled());
     await page.locator('#assets-rows .as-row[data-asset="git:site"]').click();
     await me.until('the repository: its settings', async () => /Remote/.test(await page.locator('#assets-detail .as-settings').innerText()));
@@ -148,11 +156,13 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     /* Its review, in the place: the header of Assets and the conversations stay; "< site" goes back. */
     await page.locator('#assets-detail button[data-act="review"]').click();
     await me.until('the review in Assets', async () => /would be sent to/.test(await page.locator('#gitview-state').innerText()), 20_000);
-    for (const kept of ['#list', '#assets > .panel-top', '#assets #gitview']) assert.equal(await page.locator(kept).isVisible(), true, kept);
+    /* The header of Assets: the one top bar of every page (kit TopBar, 06-11), in place of its .panel-top.
+       The list of conversations was folded by the click on Assets (14-11: foldOnOpen), and stays so. */
+    for (const kept of ['#assets > .kit-topbar', '#assets #gitview']) assert.equal(await page.locator(kept).isVisible(), true, kept);
     assert.equal(await page.locator('#gitview-back').innerText(), 'site');
     await page.locator('#gitview-close').click();
     await me.until('the repository again', async () => !(await page.locator('#gitview').isVisible()) && await page.locator('#assets-detail').isVisible());
-    await page.locator('#nav-access').click();
+    await me.nav('access');
     await me.until('the map', async () => await page.locator('#links').isVisible());
     for (const gone of ['#tab-devices', '#tab-assets', '#flows-export']) assert.equal(await page.locator(gone).isVisible(), false, gone);
     assert.equal(await page.locator('#map-new-device').isVisible(), true);
@@ -161,7 +171,7 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     /* A PHONE: the list, then one asset with "All assets"; the review unified, file by file. */
     const phone = await b.person({ phone: true, at: '/?c=coder' });
     await phone.page.locator('#view-assets').click();
-    await phone.until('the list first', async () => (await phone.page.locator('#cassets-rows .as-row').count()) === 5 && !(await phone.page.locator('#cassets-detail').isVisible()));
+    await phone.until('the list first', async () => (await phone.page.locator('#cassets-rows .as-row').count()) === 6 && !(await phone.page.locator('#cassets-detail').isVisible()));
     await shot(phone.page, 'phone-conversation-assets-list');
     await phone.page.locator('#cassets-rows .as-row[data-asset="git:site"]').tap();
     await phone.until('then the repository', async () => (await phone.page.locator('#cassets-detail .gg-row').count()) >= 3, 20_000);
@@ -180,7 +190,7 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     await phone.until('the list again', async () => await phone.page.locator('#cassets-rows').isVisible());
     await phone.page.locator('#back').tap();
     await phone.page.locator('#nav-assets').tap();
-    await phone.until('the server\'s assets, on a phone', async () => (await phone.page.locator('#assets-rows .as-row').count()) === 3, 'site, notes, seeds');
+    await phone.until('the server\'s assets, on a phone', async () => (await phone.page.locator('#assets-rows .as-row').count()) === 4, 'site, notes, seeds, the USB device');
     await shot(phone.page, 'phone-server-assets');
     assert.deepEqual(me.errors, []);
     assert.deepEqual(phone.errors, []);

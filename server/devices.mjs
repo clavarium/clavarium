@@ -108,6 +108,7 @@ export class Devices {
         for (const g of asked) {
             const rights = readRights(g?.asset, g?.rights);
             if (typeOf(g.asset) === 'secret') throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
+            if (typeOf(g.asset) === 'server') throw new Refusal(400, 'The state of the server is given to an API key, not to a device.');
             given.set(g.asset, rights);
         }
         for (const asset of given.keys()) {

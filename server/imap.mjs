@@ -72,4 +72,20 @@ export class Exchange {
         if (!new RegExp(`^${tag} OK`, 'i').test(lines.at(-1) ?? '')) throw new Refusal(502, failure);
         return lines;
     }
+    /* AUTHENTICATE XOAUTH2 with the base64 SASL response given inline (initial
+       response, which Gmail and Outlook accept). On success the server answers the
+       tag with OK. On failure it first sends a `+ <base64 error>` challenge and
+       waits for an empty line before the tagged NO, so we finish that exchange and
+       then surface the refusal, rather than hang. */
+    async authenticateXoauth2(initial, failure) {
+        const tag = `c${++this.#n}`;
+        this.#socket.write(`${tag} AUTHENTICATE XOAUTH2 ${initial}\r\n`);
+        let lines = await this.#until((l) => l.startsWith(`${tag} `) || l.startsWith('+ '));
+        if ((lines.at(-1) ?? '').startsWith('+ ')) {
+            this.#socket.write('\r\n');
+            lines = await this.#until((l) => l.startsWith(`${tag} `));
+        }
+        if (!new RegExp(`^${tag} OK`, 'i').test(lines.at(-1) ?? '')) throw new Refusal(502, failure);
+        return lines;
+    }
 }

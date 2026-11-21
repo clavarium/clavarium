@@ -14,7 +14,8 @@ test('a card\'s message opens its chat at that message (further back than shown 
     const b = await bench(t);
     const me = await b.person();
     await me.page.setViewportSize({ width: 1280, height: 800 });
-    await me.create('links');
+    /* Made with its chat off (it is on from the start now, 02-11): its thread is written before it is turned on. */
+    await me.create('links', 'Shell', { chat: false });
     /* A long thread, both sides: the owner's message pointed to is older than the 200 shown at first. */
     const work = join(b.dir, 'data', 'work', 'links');
     mkdirSync(join(work, '.parley'), { recursive: true });

@@ -4,6 +4,7 @@
 (() => {
     const CLOSE_ENDED = 1000;
     const CLOSE_TAKEN = 4001;
+    const CLOSE_ASLEEP = 4004;
     const CLOSE_FAILED = 1011;
     const RETRY_MS = 1500;
     const NAME = /^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
@@ -18,6 +19,8 @@
     /* A paired device gets the same page with less in it, and asks its own
        door: see server/door.mjs. */
     const DEVICE = document.documentElement.dataset.door === 'device';
+    /* THE KIT (kit.js): the pieces every screen shares -- the state's point, the conversation's card... */
+    const KIT = window.clavariumKit;
     /* On a paired device, every request names the pairing it speaks for:
        the address is completed once the device has signed in. */
     let API = DEVICE ? '/c/api' : '/api';
@@ -99,6 +102,86 @@
     };
 
     const say = (label, kind) => { state.textContent = label; state.dataset.state = kind; };
+    /* THE MASCOT (02-11): a small animal drawn above the words while a conversation goes to sleep, sleeps,
+       or wakes. All of it is HERE -- the drawing -- and in style.css under .mascot -- its poses: another
+       animal, or other movements, is changed in one place. Poses: 'asleep' (lies, eyes shut, breathes, z's),
+       'waking' (rises in one movement, an ear flick, a blink), '' (standing). A device asking for less
+       motion sees still pictures. */
+    const scallops = (cx, cy, rx, ry, n, depth) => {
+        let d = '';
+        for (let i = 0; i <= n; i++) {
+            const a = (i / n) * Math.PI * 2; const x = cx + rx * Math.cos(a); const y = cy + ry * Math.sin(a);
+            if (i === 0) { d += `M${x.toFixed(1)} ${y.toFixed(1)}`; continue; }
+            const m = ((i - 0.5) / n) * Math.PI * 2;
+            d += ` Q${(cx + (rx + depth) * Math.cos(m)).toFixed(1)} ${(cy + (ry + depth) * Math.sin(m)).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`;
+        }
+        return `${d} Z`;
+    };
+    const MASCOTS = {
+        sheep: () => `<svg viewBox="0 0 150 112" aria-hidden="true">
+            <g class="m-legs"><path class="m-line m-leg" d="M46 82 l-1 16 h4"/><path class="m-line m-leg" d="M60 85 l0 14 h4"/><path class="m-line m-leg" d="M84 85 l0 14 h4"/><path class="m-line m-leg" d="M97 82 l1 16 h4"/></g>
+            <g class="m-body">
+              <path class="m-line m-fill" d="${scallops(72, 62, 42, 27, 14, 9)}"/>
+              <path class="m-soft" d="M52 56 q4 -6 8 0"/><path class="m-soft" d="M70 48 q4 -6 8 0"/><path class="m-soft" d="M60 70 q4 -6 8 0"/><path class="m-soft" d="M80 66 q4 -6 8 0"/>
+              <g class="m-head">
+                <path class="m-line m-fill m-ear" d="M110 47 c-4 -6 -12 -8 -17 -5 c4 5 11 7 17 5 z"/>
+                <path class="m-line m-fill" d="M106 44 c8 -6 20 -2 24 10 c3 9 2 18 -4 22 c-5 3 -12 1 -16 -4 c-5 -6 -8 -14 -6 -22 z"/>
+                <path class="m-line m-fill" d="${scallops(114, 43, 9, 4.5, 6, 3.5)}"/>
+                <ellipse class="m-eye" cx="120" cy="53" rx="2.1" ry="2.7"/>
+                <path class="m-shut" d="M117 54 q3 2.4 6 0"/>
+                <ellipse class="m-blush" cx="117" cy="62" rx="3.4" ry="2.1"/>
+                <path class="m-line m-thin" d="M126 70 q-2 2 -4 1"/>
+              </g>
+            </g>
+          </svg>`,
+    };
+    const MASCOT = 'sheep';
+    const mascot = (pose) => {
+        let m = document.getElementById('notice-mascot');   /* not $(): it gives a stand-in when there is none */
+        if (pose === null) { if (m) m.hidden = true; return; }
+        if (!m) {
+            m = document.createElement('div'); m.id = 'notice-mascot'; m.className = 'mascot';
+            m.innerHTML = `${MASCOTS[MASCOT]()}<span class="m-z">z</span><span class="m-z">z</span><span class="m-z">z</span><span class="m-q" aria-hidden="true">?</span>`;
+            $('notice-text').before(m);
+        }
+        m.hidden = false;
+        const was = m.dataset.pose ?? '';
+        /* Trying to wake (03-11): it lifts its head, and lies back, again, until it is up (a restart, a build). */
+        if (pose === 'trying') { m.classList.remove('waking', 'stirring', 'asleep'); m.classList.add('trying'); m.dataset.pose = 'trying'; return; }
+        /* From trying to waking (03-11, no jolt): wait till its head lies down again -- the end of a try, the
+           very pose it wakes from -- then rise. At most one try's length (with less motion: no try, no wait). */
+        if (pose === 'waking' && was === 'trying') {
+            if (m.dataset.rising) return;
+            m.dataset.rising = 'yes';
+            /* Where it is in its try (2.6 s: lying until 15 %, lying again from 80 %), read from the animation itself. */
+            const tryNow = m.querySelector('.m-head')?.getAnimations?.().find((x) => x.animationName === 'm-try');
+            const at = Number(tryNow?.currentTime ?? 0) % 2600;
+            const rise = () => { delete m.dataset.rising; m.dataset.pose = 'tried'; mascot('waking'); };
+            if (at <= 390 || at >= 2080) rise(); else setTimeout(rise, 2080 - at);
+            return;
+        }
+        m.classList.remove('trying');
+        if (pose === 'waking') {
+            if (was === 'waking') return;
+            /* From lying, in one movement: the breathing stops first, then it rises. */
+            m.classList.add('asleep', 'stirring'); m.dataset.pose = 'waking';
+            requestAnimationFrame(() => requestAnimationFrame(() => { m.classList.remove('asleep'); m.classList.add('waking'); }));
+            return;
+        }
+        m.classList.remove('waking', 'stirring');
+        m.classList.toggle('asleep', pose === 'asleep');
+        /* Finding its way back (14-11): the page come back after a while, the server asked again -- a question mark over it. */
+        m.classList.toggle('wondering', pose === 'wondering');
+        m.dataset.pose = pose;
+    };
+
+    /* A wait that ends goes in a short fade (14-11: not abrupt), its place given back at once. */
+    const fadeAway = (box) => {
+        if (box.hidden) return;
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) { box.hidden = true; return; }
+        box.classList.add('fading-out');
+        setTimeout(() => { box.classList.remove('fading-out'); box.hidden = true; }, 160);
+    };
     const show = (text, action, run, cancel) => {
         $('notice-text').textContent = text;
         $('notice-action').textContent = action ?? '';
@@ -108,11 +191,14 @@
         $('notice-cancel').onclick = cancel ?? null;
         $('notice-health').hidden = true; $('notice-restart').hidden = true;
         notice.hidden = false;
-        $('notice-spin').hidden = true; $('notice-steps').hidden = true;
+        $('notice-spin').hidden = true; $('notice-steps').hidden = true; $('notice-mlive').hidden = true;
         $('notice-head').hidden = true; delete notice.dataset.progress; delete notice.dataset.loading;
+        mascot(null);
     };
-    /* A terminal on its way: a neutral word and the wheel, nothing that sounds like a fault. */
-    const loading = () => { show('Loading the terminal\u2026'); $('notice-spin').hidden = false; notice.dataset.loading = 'yes'; };
+    /* A terminal on its way: a neutral word and the wheel, nothing that sounds like a fault. It
+       covers only when the terminal is what is on screen -- not the chat already there, which a tab
+       resume (its channel reopened) used to blank behind "Loading the terminal..." (found 26-10). */
+    const loading = () => { if (tabNow() !== 'terminal') return; show('Loading the terminal\u2026'); $('notice-spin').hidden = false; notice.dataset.loading = 'yes'; };
     /* A restart: when the page first saw it (when the server did not say), and the clock that tells it. */
     const restartSeen = new Map(); let restartTicking = 0;
     /* A START TOLD STEP BY STEP (a build, a restart, a wake: `progress`, see
@@ -158,10 +244,94 @@
     const usualFor = (kind, s) => {
         if (kind === 'build') return 'A new machine takes a few minutes. Nothing to do meanwhile: its terminal comes by itself.';
         if (kind === 'wake') return `${s < 180 ? 'A start usually takes a minute or two.' : 'This takes much longer than a start usually does.'} Its work, its files and its chat are kept.`;
-        return `${s < 180 ? 'A restart usually takes one to two minutes.' : 'This is taking longer than usual: the machine may be slow to stop or to start. It goes on by itself.'} Its files and its chat are kept.`;
+        return `${s < 180 ? 'A restart usually takes one to two minutes.' : 'Longer than usual: its step is above, with what you can do.'} Its files and its chat are kept.`;
+    };
+    /* ---------- ITS MACHINE'S ACTION, STEP BY STEP (09-11) ----------
+       The escalation in one line (server/conversations.mjs, machineAction; the host program's vm halt):
+       polite stop, forced stop, soft kill (SIGTERM), hard kill (SIGKILL), checked. Done ticked, the
+       one under way pulsing with its time and its bound, those to come dimmed; right under it, "Force
+       now" once the step passes its bound (it moves on to the next), and "Force stop" (it takes the
+       place of the action). Drawn the same in its settings and over its terminal. */
+    const MSTEPS = {
+        polite: [() => uiSaid('set-mstep-polite', 'Polite'), 60], force: [() => uiSaid('set-mstep-force', 'Forced'), 30],
+        term: [() => uiSaid('set-mstep-term', 'Soft kill'), 5], kill: [() => uiSaid('set-mstep-kill', 'Hard kill'), 5],
+        check: [() => uiSaid('set-mstep-check', 'Checked'), 10], start: [() => uiSaid('set-mstep-start', 'Start'), 180],
+        suspend: [() => uiSaid('set-mstep-suspend', 'Sleep'), 120], resleep: [() => uiSaid('set-mstep-resleep', 'Wake and sleep'), 300],
+        stop: [() => uiSaid('set-mstep-stop', 'Clean stop'), 120],
+    };
+    const MNEXT = new Set(['polite', 'force', 'term']);
+    const mstepSaid = (id) => (MSTEPS[id] ? MSTEPS[id][0]() : id);
+    const MMARK = { ok: '\u2713', run: '\u25CF', todo: '\u25CB', skip: '\u2013', fail: '\u2715', timeout: '\u2715', cut: '\u2715' };
+    /* The step under way, its seconds so far and its bound; null when none runs. */
+    /* A step's bound, in seconds (a test may shorten them all: window.clavariumTimes.mstep). */
+    const mlimit = (id) => window.clavariumTimes?.mstep ?? MSTEPS[id]?.[1] ?? 60;
+    const mstepRunning = (a) => {
+        const x = a?.steps?.find((y) => y.state === 'run');
+        if (!x) return null;
+        const s = Math.max(0, Math.floor((Date.now() - (Date.parse(x.since ?? '') || Date.now())) / 1000));
+        return { id: x.id, s, limit: mlimit(x.id), past: s >= mlimit(x.id) };
+    };
+    /* In one line, for over its terminal: the step under way and its time, and what can be done past its bound. */
+    const mstepLine = (a) => {
+        const now = mstepRunning(a);
+        if (!now) return '';
+        const done = (a.steps ?? []).filter((x) => x.state === 'ok').map((x) => mstepSaid(x.id));
+        return `${mstepSaid(now.id)} \u00b7 ${clockOf(now.s)} / ${clockOf(now.limit)}${done.length ? ` \u2014 ${uiSaid('set-mstep-done', 'Done: {steps}', { steps: done.join(', ') })}` : ''}${now.past && MNEXT.has(now.id) && !DEVICE ? ` \u2014 ${uiSaid('set-mpast', 'Past its time: Force now moves on')}` : ''}`;
+    };
+    function paintMlive(el, c) {
+        const a = c?.machine;
+        el.hidden = !a;
+        if (!a) { el.replaceChildren(); el.dataset.key = ''; return; }
+        const key = `${c.name}|${a.kind}|${(a.steps ?? []).map((x) => `${x.id}:${x.state}`).join(',')}`;
+        if (el.dataset.key !== key) {
+            el.dataset.key = key;
+            const ol = document.createElement('ol'); ol.className = 'mstep'; ol.setAttribute('aria-live', 'polite');
+            (a.steps ?? []).forEach((x, i) => {
+                if (i) { const arr = document.createElement('li'); arr.className = 'arr'; arr.textContent = '\u2192'; arr.setAttribute('aria-hidden', 'true'); ol.append(arr); }
+                const li = document.createElement('li'); li.dataset.state = x.state; li.dataset.step = x.id;
+                const mark = document.createElement('span'); mark.className = 'mark'; mark.setAttribute('aria-hidden', 'true'); mark.textContent = MMARK[x.state] ?? '';
+                const label = document.createElement('span'); label.textContent = mstepSaid(x.id);
+                li.append(mark, label, document.createElement('small'));
+                ol.append(li);
+            });
+            const row = document.createElement('div'); row.className = 'row';
+            const now = document.createElement('button'); now.type = 'button'; now.className = 'primary m-force-now'; now.textContent = uiSaid('set-m-force-now', 'Force now');
+            now.title = uiSaid('set-m-force-now-why', 'Ends this step, starts the next');
+            now.addEventListener('click', () => void machineAct('force-now'));
+            const force = document.createElement('button'); force.type = 'button'; force.className = 'danger m-force-stop'; force.textContent = uiSaid('set-m-force', 'Force stop');
+            force.addEventListener('click', () => askMachine('force', row));
+            row.append(now, force);
+            el.replaceChildren(ol, row);
+        }
+        /* Each second: the time of each step, and whether "Force now" applies yet. */
+        const running = mstepRunning(a);
+        for (const li of el.querySelectorAll('li[data-step]')) {
+            const x = (a.steps ?? []).find((y) => y.id === li.dataset.step);
+            li.querySelector('small').textContent = x?.state === 'run' && running ? `${clockOf(running.s)} / ${clockOf(running.limit)}` : x?.s !== undefined ? `${x.s} s` : x?.state === 'todo' ? `${mlimit(x.id)} s` : '';
+        }
+        el.querySelector('.m-force-now').hidden = DEVICE || !running || !running.past || !MNEXT.has(running.id);
+        el.querySelector('.m-force-stop').hidden = DEVICE || a.kind === 'force';
+        el.querySelector('.row').hidden = el.querySelector('.m-force-now').hidden && el.querySelector('.m-force-stop').hidden;
+    }
+    /* The report of its last action, in one line: how it ended, its steps and their seconds, the memory freed, what to do. */
+    const MREPORT = {
+        start: () => [uiSaid('set-mk-start', 'Started'), uiSaid('set-mk-start-no', 'Not started')],
+        stop: () => [uiSaid('set-mk-stop', 'Stopped'), uiSaid('set-mk-stop-no', 'Not stopped')],
+        restart: () => [uiSaid('set-mk-restart', 'Restarted'), uiSaid('set-mk-restart-no', 'Not restarted')],
+        resize: () => [uiSaid('set-mk-resize', 'Resized'), uiSaid('set-mk-resize-no', 'Not resized')],
+        sleep: () => [uiSaid('set-mk-sleep', 'Asleep'), uiSaid('set-mk-sleep-no', 'Did not go to sleep')],
+        force: () => [uiSaid('set-mk-force', 'Forced off'), uiSaid('set-mk-force-no', 'Not forced off')],
+    };
+    const MADVICE = { force: () => uiSaid('set-madv-force', 'Try Force stop'), manager: () => uiSaid('set-madv-manager', 'The VM manager may need a restart'), again: () => uiSaid('set-madv-again', 'Try again in a moment'), look: () => uiSaid('set-madv-look', 'Look at its state') };
+    const mreportWords = (r) => {
+        if (!r) return '';
+        const [yes, no] = (MREPORT[r.kind] ?? MREPORT.stop)();
+        const steps = (r.steps ?? []).filter((x) => x.result !== 'skip').map((x) => `${MMARK[x.result] ?? ''}\u00a0${mstepSaid(x.id)} ${x.s ?? 0} s`).join(' ');
+        const freed = r.ok && r.freedGb ? uiSaid('set-mrep-freed', '{gb} GB freed', { gb: Number(r.freedGb).toFixed(1) }) : '';
+        return [`${r.ok ? yes : no} \u00b7 ${r.s ?? 0} s`, steps, freed, r.preempted ? uiSaid('set-mrep-replaced', 'Replaced by Force stop') : r.advice ? MADVICE[r.advice]?.() : ''].filter(Boolean).join(' \u00b7 ');
     };
     /* `source()`: the latest word of the server (its list, or the terminal opening). */
-    const panel = { source: () => undefined, of: '', key: '', timer: 0 };
+    const panel = { source: () => undefined, of: '', key: '', timer: 0, open: false };
     const paintProgress = () => {
         const p = panel.source();
         if (!p || !Array.isArray(p.steps) || notice.hidden || notice.dataset.progress === undefined) return false;
@@ -198,11 +368,24 @@
         }
         const s = Math.max(0, Math.floor((Date.now() - (Date.parse(p.since ?? '') || Date.now())) / 1000));
         $('notice-title').textContent = PROGRESS_TITLES[p.kind] ?? 'Starting';
-        $('notice-count').textContent = `Step ${at + 1} of ${p.steps.length} \u00b7 ${clockOf(s)}`;
-        $('notice-text').textContent = usualFor(p.kind, s);
+        /* 03-11, less is more: the sheep trying to wake (a wake, a restart, a build), the step under way in one
+           line; the list of the steps stays one tap away, and the usual time is said only when it is passed.
+           It wakes for real at the last step only (03-11, his idea): until then, it tries. */
+        mascot(at >= p.steps.length - 1 ? 'waking' : 'trying');
+        $('notice-steps').hidden = !panel.open; $('notice-spin').hidden = true;
+        $('notice-count').textContent = `${at + 1} / ${p.steps.length} \u00b7 ${clockOf(s)}`;
+        /* Its machine stopping under it (a restart, a resize): which step, what is done, what can be done now. */
+        const owner = conversations.find((x) => x.name === panel.of.split('/')[0]);
+        paintMlive($('notice-mlive'), owner);
+        const mline = mstepLine(owner?.machine);
+        /* A copy or a move, past its machine's build: what it does now (its work, its tool's memory), said as the server says it. */
+        const carrying = owner?.phase === 'building' && /^(Copying|Taking|Putting|Giving)\b/.test(owner.step ?? '') ? owner.step : '';
+        if (carrying) $('notice-title').textContent = owner.copyOf ? 'Copying it' : 'Moving it';
+        $('notice-text').textContent = mline || (carrying ? `${carrying}\u2026` : `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`);
         return true;
     };
     /* Shown, or brought up to date when it is shown already (its wheel keeps turning). */
+    $('notice-count').addEventListener('click', () => { panel.open = !panel.open; paintProgress(); });
     const progressPanel = (of, source) => {
         panel.source = source;
         if (notice.hidden || notice.dataset.progress === undefined || panel.of !== of) {
@@ -300,13 +483,15 @@
     document.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
         const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest('#terminal')) return;
+        if (target?.closest('#terminal, .sc-screen')) return;
         if (target?.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable]:not([contenteditable=false])')) { target.blur(); return; }
         if (nav.back()) event.preventDefault();
     });
 
     /* ---------- the terminal ---------- */
-    const terminal = new Terminal({
+    /* ONE TERMINAL, everywhere a terminal is drawn (a conversation's, a machine's shared console): the same xterm,
+       the same font and theme, the same links. What it is given to draw is only ever drawn by it, never as HTML. */
+    const terminalOptions = () => ({
         cursorBlink: true, scrollback: 5000,
         fontSize: innerWidth < 500 ? 11 : 14,
         fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
@@ -315,6 +500,7 @@
            tab, with no way back to this page; anything else is not followed. */
         linkHandler: { activate: (_event, uri) => openWeb(uri), allowNonHttpProtocols: false },
     });
+    const terminal = new Terminal(terminalOptions());
     /* A web address on screen opens in a new tab, on its own: nothing of this
        page is handed to it. Only http and https. */
     function openWeb(uri) {
@@ -326,14 +512,108 @@
     /* ---------- the list of conversations, folded away or not ---------- */
     /* One click hides it and the terminal takes the room; one click brings
        it back. Kept on this device. */
+    /* THE TOP BAR, ONE COMPONENT (03-11; 06-11: kit.js TopBar, the same visual everywhere): every page of the right
+       pane has the same bar -- the button that shows or hides the list on its left, a state's dot when there is one,
+       its title (a line under it when there is one), and on its right what that page offers. Two variants: 'main',
+       a conversation or a room (its views, its gear; its "‹" on a narrow screen), and 'sub', a page of its own or
+       inside one (its way back, last on the right). Built from each page's own elements: their ids, their gestures. */
+    const backSaid = (label) => ({ Back: 'set-back', Conversations: 'set-back-convs' })[label] ?? null;
+    function topBar(top, { variant = 'sub', state = null, title = top.querySelector(':scope > b'), sub = null, actions = null } = {}) {
+        const close = top.querySelector(':scope > .place-back');
+        const label = close ? close.textContent.replace(/^\s*‹\s*/, '').trim() : '';
+        const bar = KIT.TopBar({
+            variant, fold: true, onFold: () => $('fold').click(), state, title, sub,
+            back: close ? { element: close, label, said: backSaid(label) } : null,
+            actions: actions ?? [...top.children].filter((n) => n !== title && n !== close),
+            cls: [...top.classList].filter((c) => c !== 'panel-top').join(' '),
+        });
+        top.replaceWith(bar);
+        return bar;
+    }
+    /* A conversation's bar (its page, or a device's: no list to fold; its state in words and its own controls on the right). */
+    {
+        const old = document.getElementById('room')?.querySelector(':scope > header');
+        if (old) old.replaceWith(DEVICE
+            ? KIT.TopBar({ variant: 'main', title: $('name'), actions: [...old.children].filter((n) => n.id !== 'name') })
+            : KIT.TopBar({ variant: 'main', fold: $('fold'), back: { element: $('back'), label: 'Conversations' }, state: $('state'), title: $('name'), actions: [$('jobs-room'), $('views')] }));
+    }
+    /* A room (the device page has none): its dot, its name, under it who speaks now (only then); on its right who is
+       in it (07-11: small stacked avatars, a click opens the list) then its settings, in the same group of views a
+       conversation's settings sit in; one line, as every bar; its way back, "‹", as a conversation's (kit: 'main'). */
+    if (document.getElementById('salon')) {
+        const top = $('salon').querySelector(':scope > .panel-top');
+        const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; t.replaceChildren(name);
+        const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true;
+        const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings'));
+        const strip = $('salon').querySelector('.salon-bar');
+        topBar(top, { variant: 'main', state: { id: 'salon-state' }, sub: [live], actions: [$('salon-who'), views] });
+        strip?.remove();
+    }
+    for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon-new' ? { state: { id: 'salon-new-state' } } : {});
+    /* A SEARCH ATOP A SETTINGS PAGE (05-11): one field in its top bar; what is typed keeps only the chapters (or
+       blocks) whose title or rows say it, opened; the headings left with nothing are hidden. Emptied, all comes back
+       as it was. The server's Settings, a conversation's, and any sheet given the same shape. */
+    const settingsSearch = (sheet) => {
+        const bar = sheet?.querySelector(':scope > header.topbar .bar-right') ?? sheet?.querySelector(':scope > header.topbar') ?? sheet?.querySelector(':scope > .panel-top');
+        if (!bar || sheet.querySelector('.settings-search')) return;
+        const field = document.createElement('input'); field.type = 'search'; field.className = 'settings-search';
+        field.placeholder = 'Search'; field.setAttribute('aria-label', 'Search these settings'); field.autocomplete = 'off';
+        bar.prepend(field);
+        const items = () => {
+            const chapters = [...sheet.querySelectorAll('details.chapter')];
+            return chapters.length ? chapters : [...sheet.querySelectorAll(':scope > :not(header.topbar):not(.panel-top)')].filter((e) => e.querySelector(':scope > .panel-top'));
+        };
+        const wasOpen = new Map(); const wasHidden = new Map();
+        const norm = (t) => String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+        field.addEventListener('input', () => {
+            const q = norm(field.value.trim());
+            sheet.dataset.searching = q ? 'on' : '';
+            for (const it of items()) {
+                if (!q) { it.hidden = wasHidden.get(it) ?? it.hidden; wasHidden.delete(it); for (const row of it.querySelectorAll('.search-out')) row.classList.remove('search-out'); if (it.tagName === 'DETAILS' && wasOpen.has(it)) { it.open = wasOpen.get(it); wasOpen.delete(it); } continue; }
+                if (!wasHidden.has(it)) wasHidden.set(it, it.hidden);
+                const hit = !wasHidden.get(it) && norm(it.textContent).includes(q);
+                it.hidden = !hit;
+                /* Within a chapter whose title does not say it: only its rows that do. */
+                const head = it.querySelector(':scope > summary, :scope > .panel-top');
+                const whole = !head || norm(head.textContent).includes(q);
+                for (const row of it.querySelectorAll('.set-row')) row.classList.toggle('search-out', hit && !whole && !norm(row.textContent).includes(q));
+                if (hit && it.tagName === 'DETAILS') { if (!wasOpen.has(it)) wasOpen.set(it, it.open); it.open = true; }
+            }
+            for (const group of sheet.querySelectorAll('.settings-group')) group.hidden = Boolean(q) && ![...group.querySelectorAll('details.chapter')].some((d) => !d.hidden);
+        });
+        field.addEventListener('keydown', (e) => { if (e.key === 'Escape' && field.value) { e.stopPropagation(); field.value = ''; field.dispatchEvent(new Event('input')); } });
+    };
+    for (const id of ['settings', 'panel']) settingsSearch($(id));
     const applyFold = (folded) => {
         app.dataset.list = folded ? 'folded' : 'open';
-        $('fold').textContent = folded ? '\u00bb' : '\u00ab';
-        $('fold').setAttribute('aria-pressed', String(folded));
-        $('fold').setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
+        for (const f of [$('fold'), ...document.querySelectorAll('.fold-here')]) {
+            f.textContent = folded ? '\u00bb' : '\u00ab';
+            f.setAttribute('aria-pressed', String(folded));
+            f.setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
+        }
     };
-    let listFolded = false;
-    try { listFolded = localStorage.getItem('clavarium-list') === 'folded'; } catch { /* a private window */ }
+    /* Folded by default: the list takes room few need all the time; the fold is remembered, so opening it
+       keeps it open (a person who wants it open sets it once). Open only when that choice was remembered. */
+    let listFolded = true;
+    try { listFolded = localStorage.getItem('clavarium-list') !== 'open'; } catch { /* a private window */ }
+    /* PINNED OPEN (the pin at the top of the list): it stays open, even when a conversation is opened.
+       Folding it by hand takes the pin out. Kept on this device. */
+    let listPinned = false;
+    try { listPinned = localStorage.getItem('clavarium-list-pin') === 'on'; } catch { /* a private window */ }
+    if (listPinned) listFolded = false;
+    const paintPin = () => {
+        $('list-pin').setAttribute('aria-pressed', String(listPinned));
+        const label = listPinned ? 'The list stays open: click to let it fold when something is opened' : 'Keep the list open: it no longer folds when something is opened';
+        $('list-pin').title = label; $('list-pin').setAttribute('aria-label', listPinned ? 'Unpin the list' : 'Keep the list open');
+    };
+    const pin = (on) => {
+        listPinned = on;
+        try { localStorage.setItem('clavarium-list-pin', on ? 'on' : 'off'); } catch { /* as above */ }
+        paintPin();
+    };
+    paintPin();
+    if (DEVICE) $('list-pin').hidden = true;
+    $('list-pin').addEventListener('click', () => { pin(!listPinned); if (listPinned && listFolded) $('fold').click(); });
     /* THE LIST SLIDES, THE PAGE IS LAID OUT ONCE. Animating the grid's columns laid the whole page out (and
        redrew the terminal) at every frame: it stuttered. The columns change once, the room taking the whole
        width (its far side off the screen), and the list, the menu and the room slide -- transforms, which cost
@@ -342,6 +622,7 @@
     const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || window.innerWidth <= 700;
     $('fold').addEventListener('click', async () => {
         listFolded = !listFolded;
+        if (listFolded && listPinned) pin(false);
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
         const folded = listFolded;
         if (still()) { applyFold(folded); fit.fit(); focusTerminal(); return; }
@@ -377,6 +658,8 @@
         document.documentElement.dataset.theme = light ? 'light' : 'dark';
         /* The chat's colours of meaning (notes, warnings, code) follow the page's theme, not the device's. */
         $('simple-thread').dataset.theme = light ? 'light' : 'dark';
+        /* A room's thread is the same chat (Parley), in the same colours (03-11). */
+        $('salon-thread').dataset.theme = light ? 'light' : 'dark';
         for (const view of document.querySelectorAll('.md-view')) view.dataset.theme = light ? 'light' : 'dark';
         terminal.options.theme = light ? LIGHT : DARK;
         document.querySelector('meta[name=theme-color]')?.setAttribute('content', light ? LIGHT.background : DARK.background);
@@ -542,11 +825,16 @@
     /* When this wait began (kept across the tries made by the page itself), and whether the server repaired it meanwhile. */
     let waitingSince = 0;
     let repairedFor = '';
+    let resumeWait = false;
     const disconnect = () => { wanted = false; clearSlow(); socket?.close(); socket = undefined; stopVoice?.(); };
 
     /* `again`: a try made by the page itself, within the same wait. */
+    /* `resume`: the page comes back by itself (a dropped connection, the server restarted): a machine asleep stays so. */
     function connect(options) {
         const again = options?.again === true;
+        /* Tries the page makes by itself within that wait keep it: a server still restarting refuses a few first. */
+        const resume = options?.resume === true || (again && resumeWait);
+        resumeWait = resume;
         disconnect();
         if (!NAME.test(current)) return;
         const name = current;
@@ -556,7 +844,7 @@
         say('connecting', 'connecting');
         fit.fit();
         const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-        const where = DEVICE ? `/c/terminal?d=${pairing}&c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`;
+        const where = DEVICE ? `/c/terminal?d=${pairing}&c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}`;
         const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
@@ -599,7 +887,7 @@
                it said then was lost -- nobody listened yet. The bridge listens
                from "ready" on. Until it hears, the tool draws for the old size
                and whatever is typed meanwhile lands in a garbled screen. */
-            if (message.type === 'ready') { say('live', 'live'); notice.hidden = true; fit.fit(); sendSize(); setTimeout(() => { fit.fit(); sendSize(); }, 300); }
+            if (message.type === 'ready') { say('live', 'live'); fadeAway(notice); fit.fit(); sendSize(); setTimeout(() => { fit.fit(); sendSize(); }, 300); }
             /* A start told step by step: the same panel as a build or a restart. */
             if (message.type === 'status' && message.progress) {
                 if (message.text) say(String(message.text), 'connecting');
@@ -611,13 +899,13 @@
                    not enough for a wait that can last minutes (a tester waited
                    three, with nothing else to read). One sentence, with the time
                    it has taken so far, said again each second. */
-                const said = String(message.text);
+                const said = message.text ? String(message.text) : uiSaid('set-reaching', 'Reaching it again:');
                 const since = waitingSince || Date.now();
                 const tell = () => {
                     const s = Math.floor((Date.now() - since) / 1000);
                     $('notice-text').textContent = `${said} ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} so far; a start usually takes a minute or two. Its work, its files and its chat are kept.`;
                 };
-                show(''); tell();
+                show(''); tell(); mascot('wondering');
                 const ticking = setInterval(() => { if (socket !== mine || output || notice.hidden) { clearInterval(ticking); return; } tell(); }, 1000);
                 slowTimers.push(ticking);
             }
@@ -625,7 +913,11 @@
         };
         mine.onclose = (event) => {
             if (socket !== mine || !wanted) return;       /* we moved on, or closed it ourselves */
-            if (event.code === CLOSE_TAKEN) {
+            if (event.code === CLOSE_ASLEEP) {
+                say('asleep', 'waiting');
+                show(uiSaid('set-asleep-page', 'Asleep. It wakes only when you wake it.'), uiSaid('set-wake-it', 'Wake it'), connect); mascot('asleep');
+                if (DEVICE) void refresh();
+            } else if (event.code === CLOSE_TAKEN) {
                 say('open elsewhere', 'waiting');
                 show('This conversation is now open on another screen.', 'Use it here', connect);
             } else if (event.code === CLOSE_ENDED) {
@@ -660,7 +952,7 @@
             } else {
                 say('reconnecting', 'connecting');
                 if (DEVICE) void refresh();       /* removed meanwhile? then say it, do not retry for ever */
-                setTimeout(() => { if (socket === mine && wanted) connect(); }, RETRY_MS);
+                setTimeout(() => { if (socket === mine && wanted) connect({ resume: true }); }, RETRY_MS);
             }
         };
     }
@@ -672,7 +964,7 @@
         if (!current || !socket || !wanted) return;
         const dead = socket; socket = undefined;
         try { dead.close(); } catch { /* gone */ }
-        connect();
+        connect({ resume: true });
     });
 
     terminal.onData(send);
@@ -692,7 +984,13 @@
        A click from the keyboard (Enter or Space on the focused button)
        sends once. */
     const stopRepeats = new Set();
-    for (const button of document.querySelectorAll('#keys button[data-keys]')) {
+    /* THE KEYS BAR, one behaviour wherever it is (a conversation's #keys, a machine's console): each button's
+       data-keys, sent to `sendKeys`, the focus given back by `focusBack`. */
+    function wireKeys(buttons, sendKeys, focusBack) {
+        for (const button of buttons) wireKey(button, sendKeys, focusBack);
+    }
+    wireKeys(document.querySelectorAll('#keys button[data-keys]'), (keys) => send(keys), () => focusTerminal());
+    function wireKey(button, send, focusTerminal) {
         const key = button.dataset.keys;
         let delay = null; let every = null;
         const stop = () => { clearTimeout(delay); clearInterval(every); delay = null; every = null; };
@@ -821,25 +1119,82 @@
        (seen on the live site: the "Start" button vanished before it could be
        pressed). */
     let welcoming = false;
+    const MLIVE_SAY = { stop: 'stopping', force: 'forcing off', sleep: 'going to sleep', start: 'starting' };
+    const MLIVE_TITLE = { stop: () => uiSaid('set-mt-stop', 'Stopping its machine'), force: () => uiSaid('set-mt-force', 'Forcing its machine off'), sleep: () => uiSaid('set-mt-sleep', 'Going to sleep'), start: () => uiSaid('set-mt-start', 'Starting its machine') };
     /* What can be done to the conversation shown, from what is known of it now. */
     function paintActions() {
         const c = conversations.find((x) => x.name === current);
         const usable = Boolean(c) && c.phase === 'ready' && !holds(c);
         $('archive').hidden = !c;
+        $('reset-machine').hidden = $('erase-conversation').hidden = !c || DEVICE;
         $('files-open').hidden = $('share').hidden = !usable;
         /* Given its chat alone: the files of the chat open from the chat; Files holds only what was given to the device itself. */
         if (noTerminal()) $('files-open').hidden = deviceShared.length === 0;
-        $('sleep').hidden = !usable || c.asleep === true;
-        $('restart').hidden = DEVICE || !usable;
+        paintMachineActs(c);
+        /* At hand, on top of its settings: wake when asleep, else restart, sleep, its terminal. */
+        $('quick-wake').hidden = !c || c.asleep !== true;
+        $('hand-terminal').hidden = !usable || noTerminal();
+        $('panel-actions').hidden = DEVICE || !c;
+        $('m-danger').hidden = DEVICE || !c;
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
+    }
+    /* ITS MACHINE'S FIVE BUTTONS, never hidden: greyed when they do not apply, with why in their title. */
+    function paintMachineActs(c) {
+        const busy = Boolean(c?.machine) || !c || c.phase !== 'ready' || holds(c);
+        const asleep = c?.asleep === true;
+        const stopped = c?.stopped === true || (!asleep && c?.health?.state === 'Stopped');
+        const why = {
+            busy: !c || c.phase === 'ready' || c.phase === 'restarting' ? uiSaid('set-mwhy-busy', 'Another action is running') : uiSaid('set-mwhy-notready', 'Not ready yet'),
+            runs: uiSaid('set-mwhy-runs', 'It runs already'), stopped: uiSaid('set-mwhy-stopped', 'Already stopped'), asleep: uiSaid('set-mwhy-asleep', 'Asleep already'),
+        };
+        const set = (id, on, title, own = '') => { const b = $(id); b.hidden = false; b.disabled = !on; b.title = on ? own : title; };
+        set('m-start', !busy && (asleep || stopped), busy ? why.busy : why.runs, uiSaid('set-mwhat-start', 'Starts its machine and its tool'));
+        set('m-stop', !busy && !stopped, busy ? why.busy : why.stopped, uiSaid('set-mwhat-stop', 'Stops it cleanly, by force if it hangs'));
+        set('restart', !busy, why.busy, uiSaid('set-mwhat-restart', 'Stops it, then starts it again'));
+        set('sleep', !busy && !asleep && !stopped, busy ? why.busy : asleep ? why.asleep : why.stopped, 'Freezes the tool as it is; it wakes when you open the conversation');
+        const forceable = c && ['ready', 'restarting'].includes(c.phase) && c.machine?.kind !== 'force' && (Boolean(c.machine) || (!stopped && !asleep));
+        set('m-force', Boolean(forceable), c?.machine?.kind === 'force' ? why.busy : stopped ? why.stopped : asleep ? uiSaid('set-mwhy-nothing', 'Asleep: nothing runs') : why.busy, uiSaid('set-mwhat-force', 'Cuts it off, like a power cut'));
+        paintMlive($('m-live'), c);
+        const r = c?.machineReport;
+        $('m-report').hidden = Boolean(c?.machine) || !r;
+        $('m-report').textContent = mreportWords(r);
+        $('m-report').dataset.ok = String(r?.ok === true);
+    }
+    /* ASKED IN THE PAGE, in one line: what is lost. Start and Sleep lose nothing: not asked. */
+    const MCONFIRM = {
+        stop: () => [uiSaid('set-mconf-stop', 'Stop it? What the tool does now is interrupted.'), uiSaid('set-m-stop', 'Stop')],
+        restart: () => [uiSaid('set-mconf-restart', 'Restart it? The tool restarts; its files stay.'), uiSaid('set-m-restart', 'Restart')],
+        force: () => [uiSaid('set-mconf-force', 'Like a power cut: nothing is saved.'), uiSaid('set-m-force', 'Force stop')],
+    };
+    /* `near`: where it was asked (the zone apart, the steps over the chat): the question comes right under it. */
+    function askMachine(kind, near) {
+        const [line, yes] = MCONFIRM[kind]();
+        const where = near ?? (kind === 'force' ? $('m-danger') : $('panel-actions'));
+        where.after($('m-confirm'));
+        $('m-confirm-text').textContent = line;
+        $('m-confirm-yes').textContent = yes;
+        $('m-confirm-yes').className = kind === 'force' ? 'danger' : 'primary';
+        $('m-confirm-yes').onclick = () => { $('m-confirm').hidden = true; if (kind === 'restart') void restartMachine(true); else void machineAct(kind); };
+        $('m-confirm').hidden = false;
+        $('m-confirm-yes').focus();
+    }
+    /* One action on its machine; its steps come with the list (refreshed faster meanwhile). */
+    async function machineAct(kind) {
+        const name = current;
+        if (!name) return;
+        $('panel-error').hidden = true;
+        if (kind === 'stop' || kind === 'force') disconnect();
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { action: kind }); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        await refresh();
     }
     /* `keepSheets`: the same conversation, looked at again (its state changed):
        a sheet the owner has open is not shut under their fingers. */
     function enter(keepSheets = false) {
         if (welcoming) return;
         const c = conversations.find((x) => x.name === current);
-        $('name').textContent = (c ? shownName(c) : current) || 'No conversation';
+        $('name').textContent = (c ? shownName(c) : current) || uiSaid('set-no-conv', 'No conversation');
         pageTitle = current ? (c ? shownName(c) : current) : ''; paintTitle();
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         paintActions();
@@ -847,7 +1202,7 @@
         if (!keepSheets) resetTabs();
         paintChips();
         $('keys').hidden = !current;
-        if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
+        if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? uiSaid('set-home-choose', 'Choose a conversation, or create one.') : uiSaid('set-home-no-such', 'This address names no conversation.')); return; }
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
         const usable = Boolean(c) && c.phase === 'ready' && !holds(c);
         $('shortcuts').hidden = $('keys').hidden = !current || (home && !usable);
@@ -872,20 +1227,40 @@
                 const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
                 const clock = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
                 const now = conversations.find((x) => x.name === c.name);
-                const usual = s < 180 ? 'A restart usually takes one to two minutes.' : 'This is taking longer than usual: the machine may be slow to stop or to start. It goes on by itself.';
-                $('notice-text').textContent = `${now?.step ?? c.step ?? 'Restarting its machine'}... ${clock} so far. ${usual} The tool starts again by itself; its files and its chat are kept.`;
+                /* Its step, what is done and what can be done now (the steps and the buttons under it): never a vague wait. */
+                const mline = mstepLine(now?.machine);
+                paintMlive($('notice-mlive'), now);
+                $('notice-text').textContent = mline ? `${mline}. ${clock} so far.` : `${now?.step ?? c.step ?? 'Restarting its machine'}... ${clock} so far. The tool starts again by itself; its files and its chat are kept.`;
             };
             show(''); tell(); $('notice-spin').hidden = false;
             clearInterval(restartTicking);
             restartTicking = setInterval(() => { const now = conversations.find((x) => x.name === c.name); if (current !== c.name || now?.phase !== 'restarting' || notice.hidden) { clearInterval(restartTicking); return; } tell(); }, 1000);
             return;
         }
+        /* ITS MACHINE BEING STOPPED, FORCED OFF, PUT TO SLEEP OR STARTED by its owner: the steps over its terminal. */
+        if (c && c.machine && c.phase === 'ready') {
+            disconnect(); say(MLIVE_SAY[c.machine.kind] ?? 'busy', 'connecting');
+            show(''); $('notice-spin').hidden = false;
+            const tell = () => {
+                const now = conversations.find((x) => x.name === c.name);
+                if (current !== c.name || !now?.machine || notice.hidden) { clearInterval(restartTicking); return; }
+                paintMlive($('notice-mlive'), now);
+                $('notice-text').textContent = mstepLine(now.machine) || MLIVE_TITLE[now.machine.kind]?.() || '';
+            };
+            tell();
+            clearInterval(restartTicking); restartTicking = setInterval(tell, 1000);
+            return;
+        }
+        /* STOPPED BY ITS OWNER: it stays stopped until somebody starts it. */
+        /* Read for a copy just now (#221): started or woken without its tool, put back as it was after -- said, not « Stopped ». */
+        if (c && c.lentTo && !socket && c.phase === 'ready') { say('read for a copy', 'connecting'); show(uiSaid('set-lent-page', 'Read for its copy « {t} » · nothing to do', { t: c.lentTo })); $('notice-spin').hidden = false; return; }
+        if (c && c.stopped === true && !socket && c.phase === 'ready') { say('stopped', 'waiting'); show(uiSaid('set-stopped-page', 'Stopped. It starts when you start it.'), uiSaid('set-m-start', 'Start'), connect); return; }
         if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
         /* Given its chat and not its terminal: the chat is the whole page, and no terminal is ever opened. */
         if (noTerminal()) { chatAlone(); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
-        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show(`Asleep. The tool is frozen as it was.${c.sizeAtWake ? ` When it wakes, its machine is restarted with its new size (${laterWords(c.sizeAtWake)}), and the tool takes up its session.` : ''}`, 'Wake it', connect); return; }
+        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show(`${uiSaid('set-asleep-page', 'Asleep. It wakes only when you wake it.')}${c.sizeAtWake ? ` When it wakes, its machine is restarted with its new size (${laterWords(c.sizeAtWake)}), and the tool takes up its session.` : ''}`, uiSaid('set-wake-it', 'Wake it'), connect); mascot('asleep'); return; }
         if (!socket) { terminal.reset(); connect(); }
         void watchSignIn();
     }
@@ -905,8 +1280,11 @@
        back to the list. Another one picked while one is open takes the
        place of the first (the list is still one Back away). */
     function select(name, { step = false } = {}) {
-        if (name !== current) { disconnect(); terminal.reset(); }
+        /* Another one: the chat of the one before goes at once -- never shown under this one's name while its own loads. */
+        if (name !== current) { disconnect(); terminal.reset(); thread?.destroy(); thread = null; threadOf = ''; }
         current = name;
+        /* The strip over the terminal is the one of the conversation now open, at once -- never the last one's until the next look. */
+        paintHealth();
         /* What was open over the one before -- its tab, an asset, a review,
            what was over it, a place of the menu (Access, Settings) -- gives way. */
         const room = nav.last(['room']);
@@ -920,6 +1298,24 @@
         paint();
         enter();
         void chatFirst();
+        if (step && name) foldOnOpen();
+    }
+    /* Opening a conversation or a room gets the list out of the way, so it has the room;
+       the "»" button brings the list back. Only on a real pick by the owner, never on a
+       device or when deselecting. The same for any pick in the list column that changes
+       the right pane (Settings, Assets, Access, New, the server gauge): called from those
+       clicks, never from showPlace/enterPlace (they also run on reload, address, Back). */
+    function foldOnOpen() {
+        if (DEVICE || listFolded || listPinned) return;
+        listFolded = true;
+        try { localStorage.setItem('clavarium-list', 'folded'); } catch { /* a private window */ }
+        applyFold(true); fit.fit?.();
+    }
+    /* NEW CONTENT FADES IN, barely (style.css .fade-in, none under reduced motion): never a delay before it shows. */
+    function fadeIn(box) {
+        if (!box) return;
+        box.classList.remove('fade-in'); void box.offsetWidth; box.classList.add('fade-in');
+        box.addEventListener('animationend', () => box.classList.remove('fade-in'), { once: true });
     }
 
     /* ---------- THE NAME OF THIS CLAVARIUM (server/instance.mjs) ----------
@@ -942,9 +1338,13 @@
     pointManifest(installName());
 
     /* ---------- the list ---------- */
+    /* THE FRONT'S "NO ANSWER" (503, down): the server was busy a moment, or restarting -- it does
+       not know which. Said as busy, never as an update (#220); a read is tried again by itself. */
+    const BUSY = 'The server is busy just now: try again in a moment.';
     const post = async (path, body) => {
         const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
         const j = await r.json().catch(() => ({}));
+        if (!r.ok && r.status === 503 && j.down === true) throw Object.assign(new Error(BUSY), { retry: true });
         if (!r.ok) throw Object.assign(new Error(j.error || 'The request failed.'), { kind: j.kind, retry: j.retry === true });
         return j;
     };
@@ -956,18 +1356,25 @@
     /* Its machine calls its owner for what needs a hand -- it does not serve, its memory or disk is almost
        full -- not marked "Seen"; a program stopped for lack of memory (its files safe) is only said. */
     const healthNeeds = (c) => c.phase === 'ready' && !c.asleep && (c.health?.problems ?? []).some((p) => (p.level === 'bad' || (p.level === 'warn' && ['memory', 'disk'].includes(p.kind) && !String(p.key).startsWith('oom:'))) && !(c.health.seen ?? []).includes(p.key));
-    const needsYou = (c) => Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed' || healthNeeds(c));
-    /* ONE STATE PER CONVERSATION, one point for it: it needs you (red), something to watch (yellow: being built,
-       restarted, moved), fine (green), asleep (a hollow ring). */
-    const STATE_WORDS = { need: 'needs you', watch: 'to watch', ok: 'fine', sleep: 'asleep' };
-    const stateOf = (c) => (needsYou(c) ? 'need' : c.asleep ? 'sleep' : holds(c) || ['building', 'restarting', 'moving'].includes(c.phase) ? 'watch' : 'ok');
-    const statePoint = (state) => { const d = document.createElement('span'); d.className = 'state-dot'; d.dataset.state = state; return d; };
-    /* Folded, a heading says how its conversations are: at most four points, shared out like them -- every state
-       there keeps at least one, the worst first -- and the same in words for a screen reader and the pointer. */
-    const STATE_ORDER = ['need', 'watch', 'ok', 'sleep'];
+    /* Asleep, it is frozen and asks nothing until it wakes: it does not belong in "Needs you"
+       (waking it is what answers it). Health already excludes asleep; this covers the rest. */
+    const needsYou = (c) => !c.asleep && Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed' || healthNeeds(c));
+    /* ONE FLAT POINT per conversation, its colour the state -- the worst that applies: a machine problem (red),
+       the agent waits for you (blue), the agent at work (gold, pulsing), the machine busy (amber, pulsing),
+       fine (green), asleep (a hollow ring). The same point, same colours, sums a folded group below. */
+    /* Stopped is off as asleep is (14-11: a stopped one had the green point of one that runs). */
+    const machineState = (c) => (c.asleep || c.stopped === true ? 'off' : (c.phase === 'failed' || healthNeeds(c)) ? 'problem'
+        : (holds(c) || ['building', 'restarting', 'moving'].includes(c.phase)) ? 'busy' : 'online');
+    const agentState = (c) => (c.asleep || c.stopped === true ? 'sleep' : (talkNeeds(c) || c.answerer?.needs) ? 'wait'
+        : c.talk?.state === 'working' ? 'work' : c.talk?.state === 'done' ? 'done' : 'idle');
+    const STATE_WORDS = KIT.STATE_WORDS;
+    const rollup = (c) => { const m = machineState(c); const a = agentState(c);
+        return (m === 'off' ? 'sleep' : m === 'problem' ? 'problem' : a === 'wait' ? 'wait' : a === 'work' ? 'work' : m === 'busy' ? 'busy' : 'ok'); };
+    const statePoint = (state) => KIT.StatusDot({ state });
+    const STATE_ORDER = KIT.STATES;
     function stateSummary(list) {
         const count = Object.fromEntries(STATE_ORDER.map((k) => [k, 0]));
-        for (const c of list) count[stateOf(c)] += 1;
+        for (const c of list) count[rollup(c)] += 1;
         const slots = Math.min(4, list.length);
         const present = STATE_ORDER.filter((k) => count[k] > 0);
         const got = Object.fromEntries(STATE_ORDER.map((k) => [k, 0]));
@@ -1002,59 +1409,104 @@
     const plain = (text) => String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
     const matches = (c) => [shownName(c), c.name, c.group, c.toolLabel].some((x) => plain(x).includes(plain(query)));
     const byRank = (a, b) => (a.rank ?? 0) - (b.rank ?? 0);
+    /* A GROUP FIELD (01-11): typed freely, or chosen from the groups there are -- a ▾ beside it opens them all
+       (a datalist alone shows only what matches what is typed, and not on every browser). */
+    function groupChooser(input, values) {
+        if (!input || input.dataset.chooser) return;
+        input.dataset.chooser = 'true';
+        const wrap = document.createElement('span'); wrap.className = 'chooser';
+        input.replaceWith(wrap); wrap.append(input);
+        const open = document.createElement('button'); open.type = 'button'; open.className = 'chooser-open'; open.textContent = '▾';
+        open.setAttribute('aria-label', 'Existing groups'); open.setAttribute('aria-haspopup', 'listbox'); open.setAttribute('aria-expanded', 'false');
+        const list = document.createElement('div'); list.className = 'chooser-list'; list.setAttribute('role', 'listbox'); list.hidden = true;
+        const close = () => { list.hidden = true; open.setAttribute('aria-expanded', 'false'); };
+        open.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (!list.hidden) { close(); return; }
+            const all = values();
+            list.replaceChildren(...(all.length ? all : [null]).map((v) => {
+                if (v === null) { const none = document.createElement('div'); none.className = 'chooser-none'; none.textContent = 'No group yet: type a name.'; return none; }
+                const o = document.createElement('button'); o.type = 'button'; o.className = 'chooser-option'; o.setAttribute('role', 'option'); o.textContent = v;
+                if (v === input.value) o.setAttribute('aria-selected', 'true');
+                o.addEventListener('click', () => { input.value = v; input.dispatchEvent(new Event('input', { bubbles: true })); close(); input.focus(); });
+                return o;
+            }));
+            list.hidden = false; open.setAttribute('aria-expanded', 'true');
+            list.querySelector('[aria-selected="true"], .chooser-option')?.focus();
+        });
+        list.addEventListener('keydown', (event) => {
+            const opts = [...list.querySelectorAll('.chooser-option')]; const i = opts.indexOf(document.activeElement);
+            if (event.key === 'Escape') { close(); open.focus(); event.preventDefault(); }
+            if (event.key === 'ArrowDown' && i < opts.length - 1) { opts[i + 1].focus(); event.preventDefault(); }
+            if (event.key === 'ArrowUp' && i > 0) { opts[i - 1].focus(); event.preventDefault(); }
+            event.stopPropagation();
+        });
+        document.addEventListener('click', (event) => { if (!wrap.contains(event.target)) close(); });
+        wrap.append(open, list);
+    }
     const groupsInOrder = () => [...new Set(conversations.filter((c) => c.group).sort((a, b) => (a.groupRank ?? 0) - (b.groupRank ?? 0)).map((c) => c.group))];
+    groupChooser($('group-name'), groupsInOrder); groupChooser($('newconv-group'), groupsInOrder);
     /* WHEN IT WAS LAST USED: what was said in its chat, and what its agent said it does (Parley) -- never what
        its terminal shows. A tool with no chat (a plain terminal): the keys typed in it by hand. */
     const activityOf = (c) => Math.max(...[c.talk?.lastAt, c.talk?.stepAt, c.talk ? null : c.lastActiveAt, c.createdAt].map((x) => (x ? new Date(x).getTime() : 0)));
     const whenWords = (t) => {
         if (!t) return '';
         const d = new Date(t); const now = new Date();
-        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        /* Today: how long ago, not the clock -- the list is sorted by it, so "2 min" reads better than "15:05". */
+        if (d.toDateString() === now.toDateString()) { const m = Math.max(0, Math.floor((now - d) / 60_000)); return m < 1 ? 'now' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h`; }
         const y = new Date(now); y.setDate(now.getDate() - 1);
         if (d.toDateString() === y.toDateString()) return 'yesterday';
         return now - d < 6 * 86_400_000 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
     };
+    /* ONE CONVERSATION, as the kit draws it everywhere (kit.js ConvCard): what is known of it, said once --
+       its name, its point, what it does now, its last words and when, its chips. `told`: its last words and
+       when (a row of Needs you or Recent; a card). */
+    const agentWho = (c) => [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' \u00b7 ');
+    function convModel(c, told = false) {
+        /* Under way: the step the panel shows, in its words (the tool named once). */
+        const under = c.phase === 'building' && /^(Copying|Taking|Putting|Giving)\b/.test(c.step ?? '') ? c.step : c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
+        /* What it is doing, when it says something: its tool is not named on every row. */
+        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? uiSaid('set-list-starting', 'starting') : uiSaid('set-list-restarting', 'restarting')) : c.phase === 'ready' ? (c.asleep ? uiSaid('set-list-asleep', 'asleep') : c.stopped === true ? uiSaid('set-list-stopped', 'stopped') : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? uiSaid('set-list-moving', 'moving its work') : c.phase === 'restarting' ? uiSaid('set-list-restarting', 'restarting') : uiSaid('set-list-failed', 'failed'));
+        /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
+        const plain = c.phase === 'ready' && !c.asleep && c.stopped !== true && !under && !holds(c);
+        const chips = [];
+        /* Found by a search while hidden: said. */
+        if (c.hidden === true && query) chips.push({ text: uiSaid('set-list-hidden', 'hidden'), cls: 'shared-mark', tone: 'note' });
+        /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
+        const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
+        if (waking > 0) chips.push({ text: uiSaid(waking > 1 ? 'set-list-wakeups' : 'set-list-wakeup', waking > 1 ? '{n} wake-ups' : '1 wake-up', { n: waking }), cls: 'shared-mark', tone: 'note' });
+        /* It talks through the app, and asks or waits for its owner there. */
+        if (!c.asleep && talkNeeds(c)) chips.push({ text: c.talk.waiting > 0 ? uiSaid('set-list-asks', 'asks you') : uiSaid('set-list-waits', 'waits for you'), cls: 'needs-mark', tone: 'need' });
+        if (c.answerer?.on) { const needs = c.answerer.needs && !c.asleep; chips.push({ text: needs ? uiSaid('set-list-asks-for', 'asks for you') : uiSaid('set-list-answered', 'answered in your place'), cls: needs ? 'needs-mark' : 'shared-mark', tone: needs ? 'need' : 'note' }); }
+        /* Where else it speaks: its rooms, its voice boxes (said on a card). */
+        for (const r of roomsNow()) if (r.members?.some((m) => m.kind === 'ai' && m.ref === c.name)) chips.push({ text: r.name, icon: 'room', wide: true });
+        for (const b of boxesNow()) if (b.conversation === c.name) chips.push({ text: b.name, icon: 'box', wide: true });
+        /* Its last message. The agent is the usual speaker, so its name is left off (just the words); only
+           the person's own last word is marked "You:", which tells you it is your move. */
+        let last = told && c.talk?.lastText ? (c.talk.lastFrom === 'person' ? uiSaid('set-list-you', 'You: {text}', { text: c.talk.lastText }) : c.talk.lastText) : '';
+        const state = rollup(c);
+        /* IDLE 12 H OR MORE (07-11): « rien depuis 14 h », in grey, in place of its last words; never on one that
+           waits for you. Asleep: after « asleep ». */
+        const idle = c.phase === 'ready' && !under && !holds(c) ? KIT.idleFor(activityOf(c), { waits: needsYou(c) }) : 0;
+        let said = plain ? '' : now;
+        if (idle && c.asleep) said = `${said} \u00b7 ${KIT.idleWords(idle)}`;
+        else if (idle && !said) { said = KIT.idleWords(idle); last = ''; }
+        return { title: shownName(c), state, stateLabel: STATE_WORDS[state], avatar: { name: shownName(c) }, when: told ? whenWords(activityOf(c)) : '', last, now: said, idle: Boolean(idle && !c.asleep && said), who: agentWho(c), chips };
+    }
     /* `copy`: a row of Needs you or Recent, beside its place in its group: it is not moved by hand.
        `told`: it says what was said last, and when (a copy always; the one list when there is no group). */
     function itemButton(c, copy = false, told = copy) {
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = copy ? 'item copy' : 'item'; b.dataset.phase = c.phase; b.dataset.name = c.name;
+        const b = KIT.ConvCard(convModel(c, told), { size: 'row', cls: copy ? 'item copy' : 'item' });
+        b.dataset.phase = c.phase; b.dataset.name = c.name;
         if (c.group) b.dataset.group = c.group;
         /* Ready, but its tool not there yet: it still reads as under way. */
         if (holds(c)) b.dataset.busy = 'true';
-        if (c.name === current) b.setAttribute('aria-current', 'true');
-        const title = document.createElement('b');
-        title.append(shownName(c));
+        /* The one open: never a conversation while a room is (06-11: the conversation left before stayed marked). */
+        if (c.name === current && !roomOpenNow()) b.setAttribute('aria-current', 'true');
         if (c.title) b.title = c.name;
         if (c.hidden === true) b.dataset.hidden = 'true';
-        const sub = document.createElement('small');
-        /* Under way: the step the panel shows, in its words (the tool named once). */
-        const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
-        /* What it is doing, when it says something: its tool is not named on every row. */
-        sub.textContent = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? 'starting' : 'restarting') : c.phase === 'ready' ? (c.asleep ? 'asleep, wakes when opened' : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? 'moving its work' : c.phase === 'restarting' ? 'restarting' : 'failed');
         if (c.asleep) b.dataset.asleep = 'true';
-        /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
-        const plain = c.phase === 'ready' && !c.asleep && !under && !holds(c);
-        if (told) {
-            /* In words, not a symbol: what a tap on it will do. */
-            /* Beside its name, never in it: the name reads (and is read) as it is. */
-            const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(activityOf(c));
-            b.append(title);
-            /* Its last message, and who said it: so it reads as the last message, not as a subject. */
-            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; const who = c.talk.lastFrom === 'person' ? 'You' : (c.chatName || (c.ai ? 'Agent' : c.toolLabel)); last.textContent = `${who}: ${c.talk.lastText}`; b.append(last); }
-            if (!plain) b.append(sub);
-            b.append(when); b.dataset.when = 'true';
-        } else b.append(title, ...(plain ? [] : [sub]));
-        /* Its state: one point, on the right. */
-        const point = statePoint(stateOf(c)); point.title = STATE_WORDS[point.dataset.state]; b.append(point); b.dataset.state = point.dataset.state;
-        /* Found by a search while hidden: said. */
-        if (c.hidden === true && query) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = 'hidden'; b.append(mark); }
-        /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
-        const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
-        if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
-        /* It talks through the app, and asks or waits for its owner there. */
-        if (talkNeeds(c)) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
-        if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
+        if (told) b.dataset.when = 'true';
         /* Who else holds it is said in its Access, not in the list (where it said the same on every row). */
         b.addEventListener('click', () => select(c.name, { step: true }));
         return b;
@@ -1062,7 +1514,68 @@
     /* `label`: the name shown; the conversations in no group are one of their own ("Not filed", key NONE). */
     const NONE = '\u0000none';
     /* The two sections above the groups, folded or not like a group (never a group's name: those are plain words). */
-    const NEEDS = '\u0001needs'; const RECENT = '\u0001recent'; const GROUPS = '\u0001groups';
+    const NEEDS = '\u0001needs'; const RECENT = '\u0001recent'; const GROUPS = '\u0001groups'; const ROOMS = '\u0001rooms';
+    /* A ROOM IN THE LIST (03-11): like a conversation's row -- its name, its last words, when -- a room's chips before it. */
+    /* The rooms known, even before their part of this page has run (a list painted early). */
+    const roomsNow = () => { try { return Array.isArray(rooms) ? rooms : []; } catch { return []; } };
+    /* The voice boxes known (read with the deck and a room's settings): the chips of whom they speak for. */
+    const boxesNow = () => { try { return Array.isArray(boxesKnown) ? boxesKnown : []; } catch { return []; } };
+    const roomOpenNow = () => { try { return place === 'salon' ? salonId : ''; } catch { return ''; } };
+    /* Words of the screen's language (Parley's texts, /api/talk/words) once read; English till then. */
+    /* A declaration (hoisted): any painting, however early, may ask for its words. */
+    function uiSaid(key, fallback, vars = {}) {
+        let words = null; try { words = chatWords; } catch { /* not read yet */ }
+        return (typeof words?.[key] === 'string' ? words[key] : fallback).replace(/\{(\w+)\}/g, (all, k) => (k in vars ? String(vars[k]) : all));
+    }
+    /* The kit says its few words in the screen's language too (Holders' "nobody", the rights, the list's). */
+    KIT.setWords((key, fallback) => uiSaid(key, fallback));
+    /* Who of a room speaks now (#282, an AI given a message and not done): « Cuisine parle… ». */
+    const speaking = (who) => (who.length > 1 ? uiSaid('room-speaking-many', '{names} are speaking\u2026', { names: who.join(', ') }) : uiSaid('room-speaking', '{name} is speaking\u2026', { name: who[0] }));
+    const thinkingOf = (r) => (Array.isArray(r?.thinking) ? r.thinking.filter((x) => typeof x === 'string' && x) : []);
+    /* ROOMS ONLY (a filter of the list): kept on this device. */
+    let roomsOnly = false;
+    try { roomsOnly = localStorage.getItem('clavarium-list-show') === 'rooms'; } catch { /* a private window */ }
+    /* A ROOM, drawn as a conversation (kit.js ConvCard): its sign for an initial, its last words or who speaks,
+       when; its point: new words waiting (the colour of what waits for you), else at work while one speaks, else fine. */
+    /* A ROOM MUTED by a tidy-up (07-11): no point, at the bottom of the rooms -- until new words come, or it is opened. */
+    const roomMuted = (r) => r.quiet === true && !(r.unread > 0) && thinkingOf(r).length === 0;
+    const roomAt = (r) => Date.parse(r.last?.at ?? r.at ?? '') || 0;
+    function roomModel(r) {
+        const who = thinkingOf(r);
+        const sign = document.createElement('span'); sign.className = 'room-sign';
+        const muted = roomMuted(r);
+        const idle = KIT.idleFor(roomAt(r), { waits: r.unread > 0 || who.length > 0 });
+        if (muted || idle) {
+            const words = [muted ? uiSaid('set-list-asleep', 'asleep') : '', idle ? KIT.idleWords(idle) : ''].filter(Boolean).join(' \u00b7 ');
+            return { title: r.name, state: muted ? 'sleep' : 'ok', stateLabel: muted ? STATE_WORDS.sleep : 'Room', avatar: { name: r.name, glyph: sign }, last: '', when: r.last ? whenWords(Date.parse(r.last.at)) : '', now: words, idle: !muted, chips: [] };
+        }
+        const state = r.unread > 0 ? 'wait' : who.length ? 'work' : 'ok';
+        const chips = [];
+        if (r.unread > 0) chips.push({ text: r.unread > 99 ? '99+' : String(r.unread), tone: 'count', title: `${r.unread} new` });
+        for (const b of boxesNow()) if (b.conversation === `room:${r.id}`) chips.push({ text: b.name, icon: 'box', wide: true });
+        return {
+            title: r.name, state, stateLabel: r.unread > 0 ? `${r.unread} new` : who.length ? speaking(who) : 'Room', avatar: { name: r.name, glyph: sign },
+            last: who.length || r.last ? (who.length ? speaking(who) : `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`) : '',
+            when: r.last ? whenWords(Date.parse(r.last.at)) : '',
+            now: r.last || who.length ? '' : `Room \u00b7 ${countOf(r.members ?? [])}`,
+            chips,
+        };
+    }
+    function roomItem(r) {
+        /* The same row as a conversation's (03-11: « de même nature »), told apart by its room sign. */
+        const b = KIT.ConvCard(roomModel(r), { size: 'row', cls: 'item room-item' }); b.dataset.room = r.id;
+        /* One of its AIs speaking now: said instead of its last message (a conversation at work: its dot, gold). */
+        if (thinkingOf(r).length) b.dataset.live = 'true';
+        if (roomMuted(r)) b.dataset.asleep = 'true';
+        if (r.last) b.dataset.when = 'true';
+        if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
+        b.addEventListener('click', () => {
+            /* Opened: a muted room is a room again (it has no machine to wake). */
+            if (r.quiet) { r.quiet = false; void post(`${API}/rooms/${r.id}`, { quiet: false }).catch(() => {}); }
+            void openSalon(r.id, true, { step: true });
+        });
+        return b;
+    }
     /* What was just unfolded comes in gently, once (the next paints show it as it is). */
     let justOpened = null;
     const unfolding = (key, els) => { if (justOpened === key) { for (const e of els) e.classList.add('unfolding'); justOpened = null; } return els; };
@@ -1083,8 +1596,97 @@
             keepFolded(); paint();
         });
         box.append(head);
+        /* A conversation added right here, in this group (01-11): the same form as anywhere, its group filled. */
+        if (!DEVICE && !String(g).startsWith('\u0001')) {
+            const add = document.createElement('button'); add.type = 'button'; add.className = 'group-add'; add.textContent = '+';
+            const where = g === NONE ? '' : g;
+            add.title = where ? `New conversation in ${label}` : 'New conversation';
+            add.setAttribute('aria-label', add.title);
+            add.addEventListener('click', (event) => { event.stopPropagation(); void openNew({ group: where }); });
+            box.append(add);
+        }
         if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map((c) => itemButton(c))); unfolding(g, [body]); box.append(body); }
         return box;
+    }
+    /* THE LIST'S FILTER (All | Rooms only): the same pressed buttons as the other views' (Files: List | Icons). */
+    let wordsAsked = false;
+    function paintListShow() {
+        const box = $('list-show'); if (!box) return;
+        box.hidden = DEVICE || roomsNow().length === 0;
+        /* Its words (and a room's « … parle… ») in the screen's language: read once, then painted again. */
+        if (!box.hidden && !wordsAsked) { wordsAsked = true; void readWords().then(() => paint(), () => { wordsAsked = false; }); }
+        for (const b of box.querySelectorAll('button')) {
+            b.textContent = b.dataset.show === 'rooms' ? uiSaid('list-rooms-only', 'Rooms only') : uiSaid('list-all', 'All');
+            b.setAttribute('aria-pressed', String((b.dataset.show === 'rooms') === roomsOnly));
+        }
+        box.setAttribute('aria-label', uiSaid('list-show', 'Show'));
+    }
+    for (const b of $('list-show')?.querySelectorAll('button') ?? []) {
+        b.addEventListener('click', () => {
+            roomsOnly = b.dataset.show === 'rooms';
+            try { localStorage.setItem('clavarium-list-show', roomsOnly ? 'rooms' : 'all'); } catch { /* a private window */ }
+            paint();
+        });
+    }
+    /* WHAT A TIDY-UP OFFERS: the conversations and rooms idle 12 h or more, neither waiting for you nor asleep
+       already, nor hidden, nor under way; the longest idle first (kit.js tidyList). */
+    const tidyNow = () => KIT.tidyList([
+        ...conversations.filter((c) => c.phase === 'ready' && !holds(c)).map((c) => ({ kind: 'conversation', id: c.name, name: shownName(c), at: activityOf(c), waits: needsYou(c), asleep: c.asleep === true, hidden: c.hidden === true })),
+        ...roomsNow().map((r) => ({ kind: 'room', id: r.id, name: r.name, at: roomAt(r), waits: r.unread > 0 || thinkingOf(r).length > 0, asleep: r.quiet === true })),
+    ]);
+    /* « Mettre en veille ? » (07-11): one question, the list all ticked (untick to keep one), one button. A
+       conversation is put to sleep (its machine too: it wakes only when you open it and touch « Wake it »);
+       a room is muted in the list. No undo: a machine asleep takes a while to come back. */
+    function openTidy() {
+        document.getElementById('tidy')?.remove();
+        const list = tidyNow(); if (!list.length) return;
+        const wrap = document.createElement('div'); wrap.className = 'lk-sheet-wrap tidy-wrap'; wrap.id = 'tidy';
+        const box = document.createElement('div'); box.className = 'lk-sheet tidy'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', 'tidy-title');
+        const top = document.createElement('div'); top.className = 'lk-sheet-top';
+        const title = document.createElement('b'); title.id = 'tidy-title'; title.className = 'lk-tx'; title.textContent = uiSaid('set-tidy-title', 'Put to sleep?');
+        const x = document.createElement('button'); x.type = 'button'; x.className = 'icon-btn'; x.textContent = '\u00d7'; x.setAttribute('aria-label', uiSaid('set-close', 'Close'));
+        top.append(title, x);
+        const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = uiSaid('set-tidy-hint', 'Nothing for 12 h or more.');
+        const rows = document.createElement('div'); rows.className = 'tidy-list';
+        const go = document.createElement('button'); go.type = 'button'; go.className = 'primary tidy-go';
+        const said = document.createElement('p'); said.className = 'hint tidy-said'; said.hidden = true;
+        const boxes = list.map((t) => {
+            const row = document.createElement('label'); row.className = 'tidy-row'; row.dataset.kind = t.kind; row.dataset.id = t.id;
+            const tick = document.createElement('input'); tick.type = 'checkbox'; tick.checked = true;
+            const name = document.createElement('span'); name.className = 'tidy-name';
+            name.append(Object.assign(document.createElement('b'), { textContent: t.name }), document.createTextNode(` \u2014 ${KIT.idleWords(t.idle)}`));
+            row.append(tick, name); rows.append(row);
+            tick.addEventListener('change', count);
+            return { t, tick };
+        });
+        function count() { const n = boxes.filter((b) => b.tick.checked).length; go.disabled = n === 0; go.textContent = uiSaid('set-tidy-go', 'Put to sleep ({n})', { n }); }
+        count();
+        const close = () => { wrap.remove(); document.removeEventListener('keydown', esc, true); };
+        const esc = (event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); shut(); } };
+        const shut = () => { if (!nav.close('tidy')) close(); };
+        x.addEventListener('click', shut);
+        wrap.addEventListener('click', (event) => { if (event.target === wrap) shut(); });
+        document.addEventListener('keydown', esc, true);
+        go.addEventListener('click', async () => {
+            const chosen = boxes.filter((b) => b.tick.checked).map((b) => b.t);
+            go.disabled = true; for (const b of boxes) b.tick.disabled = true;
+            if (chosen.some((t) => t.kind === 'conversation' && t.id === current)) disconnect();
+            const done = await Promise.allSettled(chosen.map((t) => (t.kind === 'room'
+                ? post(`${API}/rooms/${t.id}`, { quiet: true })
+                : post(`${API}/conversations/${encodeURIComponent(t.id)}/sleep`))));
+            const failed = done.map((r, i) => (r.status === 'rejected' ? `${chosen[i].name}: ${r.reason?.message ?? ''}` : '')).filter(Boolean);
+            await refresh().catch(() => {});
+            try { await loadRooms(); } catch { /* read again later */ }
+            if (chosen.some((t) => t.kind === 'conversation' && t.id === current)) enter();
+            paint();
+            if (failed.length) { said.hidden = false; said.textContent = failed.join(' \u00b7 '); count(); for (const b of boxes) b.tick.disabled = false; return; }
+            shut();
+        });
+        box.append(top, hint, rows, go, said);
+        wrap.append(box);
+        document.body.append(wrap);
+        nav.push('tidy', () => close());
+        go.focus();
     }
     function paint() {
         if (listHeld) { paintLater = true; return; }
@@ -1098,7 +1700,11 @@
         const shown = conversations.filter((c) => (query ? matches(c) : c.hidden !== true || showHidden || c.name === current)).sort(byRank);
         const heading = (text) => { const h = document.createElement('h3'); h.className = 'list-head'; h.textContent = text; return h; };
         const groups = groupsInOrder();
-        if (query || DEVICE) {
+        /* ROOMS ONLY: the rooms alone (a search among them); offered once there is one. */
+        const onlyRooms = roomsOnly && !DEVICE && roomsNow().length > 0;
+        paintListShow();
+        if (onlyRooms) groupsOpen = false;
+        else if (query || DEVICE) {
             /* A search: everything found, in its place. */
             items.append(...shown.filter((c) => !c.group).map((c) => itemButton(c)));
         } else {
@@ -1117,20 +1723,30 @@
             };
             /* NEEDS YOU: whatever its date, until its owner acts; hidden ones too (they said so). */
             const needs = conversations.filter(needsYou).sort((a, b) => activityOf(b) - activityOf(a));
-            if (needs.length && section(NEEDS, 'Needs you', needs)) top.append(...unfolding(NEEDS, needs.map((c) => itemButton(c, true))));
-            /* RECENT: by when it was last used; the last four, then all. Never a hidden one. Only once there
+            if (needs.length && section(NEEDS, uiSaid('set-list-needs', 'Needs you'), needs)) top.append(...unfolding(NEEDS, needs.map((c) => itemButton(c, true))));
+            /* RECENT: by when it was last used; up to seven awake, then all. Never a hidden one. Only once there
                are groups: before, the one list below says the same, in the order chosen by hand. */
             /* One in Needs you just above is not said twice. */
             /* The last day only: what is older is found in its group. */
             const dayAgo = Date.now() - 24 * 3600_000;
-            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo).sort((a, b) => activityOf(b) - activityOf(a));
-            const few = 4;
-            if (recent.length && groups.length && section(RECENT, 'Recent', recent)) {
-                top.append(...unfolding(RECENT, recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true))));
+            /* Asleep ones go to the bottom of Recent: they are frozen, not what you came back to. */
+            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo)
+                .sort((a, b) => (Number(a.asleep === true) - Number(b.asleep === true)) || (activityOf(b) - activityOf(a)));
+            /* In sight (03-11, his rule): up to seven awake ones, and the one open even asleep (it never vanishes
+               under the eyes); the rest -- asleep, or past seven -- under the arrow. */
+            const inSight = recent.filter((c) => c.asleep !== true).slice(0, 7);
+            const openOne = recent.find((c) => c.name === current);
+            if (openOne && !inSight.includes(openOne)) inSight.push(openOne);
+            const few = inSight.length;
+            /* The rooms used in the last day, among them by when (03-11: « dans le récent, indifféremment »). */
+            const recentRooms = roomsNow().filter((r) => r.last && Date.parse(r.last.at) >= dayAgo && !roomMuted(r));
+            const rowsOfRecent = (list) => [...list.map((c) => ({ at: activityOf(c), el: () => itemButton(c, true) })), ...recentRooms.map((r) => ({ at: Date.parse(r.last.at), el: () => roomItem(r) }))].sort((a, b) => b.at - a.at).map((x) => x.el());
+            if ((recent.length || recentRooms.length) && groups.length && section(RECENT, uiSaid('set-list-recent', 'Recent'), recent)) {
+                top.append(...unfolding(RECENT, rowsOfRecent(showAllRecent ? recent : recent.filter((c) => inSight.includes(c)))));
                 if (recent.length > few) {
                     const more = document.createElement('button'); more.type = 'button'; more.className = 'inline more-recent';
                     /* A chevron, centred: the words for the pointer and for a screen reader. */
-                    const words = showAllRecent ? 'Show fewer' : `Show ${recent.length - few} more`;
+                    const words = showAllRecent ? uiSaid('set-list-fewer', 'Show fewer') : uiSaid('set-list-more', 'Show {n} more', { n: recent.length - few });
                     more.replaceChildren(Object.assign(document.createElement('span'), { className: 'more-chevron', textContent: showAllRecent ? '\u2303' : '\u2304' }));
                     more.title = words; more.setAttribute('aria-label', words); more.setAttribute('aria-expanded', String(showAllRecent));
                     more.addEventListener('click', () => { showAllRecent = !showAllRecent; paint(); });
@@ -1140,15 +1756,15 @@
             /* GROUPS: the order chosen by hand, and those in no group as one of their own. */
             if (groups.length) {
                 const loose = shown.filter((c) => !c.group);
-                groupsOpen = section(GROUPS, 'Groups', conversations.filter((c) => c.hidden !== true));
-                if (loose.length && groupsOpen) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), 'Not filed'));
+                groupsOpen = section(GROUPS, uiSaid('set-list-groups', 'Conversation groups'), conversations.filter((c) => c.hidden !== true));
+                if (loose.length && groupsOpen) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), uiSaid('set-list-not-filed', 'Not filed')));
             } else {
                 /* No group yet: one list, each with what was said last and when -- without those in Needs you
                    just above (said once), under a heading of its own when Needs you is there. */
                 if (needs.length) top.append(heading('Conversations'));
                 items.append(...shown.filter((c) => !needsYou(c)).map((c) => itemButton(c, false, true)));
                 if (conversations.length > 1) {
-                    const tip = document.createElement('p'); tip.className = 'hint list-tip'; tip.textContent = 'Put conversations in groups to find them by subject: open one, then Settings, Group.';
+                    const tip = document.createElement('p'); tip.className = 'hint list-tip'; tip.textContent = uiSaid('set-list-tip', 'Put conversations in groups to find them by subject: open one, then Settings, Group.');
                     items.append(tip);
                 }
             }
@@ -1160,7 +1776,28 @@
             if (inside.length === 0) continue;
             items.append(groupBox(g, inside, conversations.filter((c) => c.group === g).sort(byRank), Boolean(query) || !folded.has(g)));
         }
-        if (groupsOpen) unfolding(GROUPS, [...items.children]);
+        if (groupsOpen && !onlyRooms) unfolding(GROUPS, [...items.children]);
+        /* ROOMS (03-11): their own list, after the groups of conversations; a search finds them by name. */
+        const roomsShown = roomsNow().filter((r) => !query || r.name.toLowerCase().includes(String(query).toLowerCase())).sort((a, b) => Number(roomMuted(a)) - Number(roomMuted(b)));
+        if (!DEVICE && roomsShown.length) {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = 'rooms';
+            const open = onlyRooms || !folded.has(ROOMS); b.setAttribute('aria-expanded', String(open));
+            const chevron = document.createElement('span'); chevron.className = 'list-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = open ? '\u25BE' : '\u25B8';
+            b.append(chevron, document.createTextNode(uiSaid('set-list-rooms', 'Rooms')));
+            b.addEventListener('click', () => { if (onlyRooms) return; if (folded.has(ROOMS)) folded.delete(ROOMS); else folded.add(ROOMS); keepFolded(); paint(); });
+            items.append(b);
+            if (open) items.append(...roomsShown.map((r) => roomItem(r)));
+        }
+        /* THE OPEN ONE, MARKED ONCE (07-11): at its first place in the list (À vous, Récent, then its group). */
+        for (const extra of [...top.querySelectorAll('[aria-current="true"]'), ...items.querySelectorAll('[aria-current="true"]')].slice(1)) extra.removeAttribute('aria-current');
+        /* FAIRE LE MÉNAGE (07-11): at the bottom, only when something has been idle 12 h or more. */
+        const tidy = !DEVICE && !query ? tidyNow() : [];
+        if (tidy.length) {
+            const b = document.createElement('button'); b.type = 'button'; b.id = 'tidy-open'; b.className = 'tidy-open';
+            b.textContent = uiSaid('set-tidy-open', 'Tidy up ({n})', { n: tidy.length });
+            b.addEventListener('click', () => openTidy());
+            items.append(b);
+        }
         /* The folders there are, offered where one is chosen. */
         $('group-names').replaceChildren(...groupsInOrder().map((g) => { const o = document.createElement('option'); o.value = g; return o; }));
         const hits = [...items.querySelectorAll('.item')];
@@ -1168,8 +1805,8 @@
         if (query) hits.forEach((h, i) => { h.toggleAttribute('data-chosen', i === chosenHit); if (i === chosenHit) h.scrollIntoView?.({ block: 'nearest' }); });
         $('search-none').hidden = !query || hits.length > 0;
         const toggle = $('hidden-toggle');
-        toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query);
-        toggle.textContent = showHidden ? `Hide ${hidden.length} hidden` : `${hidden.length} hidden`;
+        toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query) || onlyRooms;
+        toggle.textContent = showHidden ? uiSaid('set-list-hide-hidden', 'Hide {n} hidden', { n: hidden.length }) : uiSaid('set-list-n-hidden', '{n} hidden', { n: hidden.length });
         toggle.setAttribute('aria-expanded', String(showHidden));
         const calling = hidden.some(needsYou);
         toggle.dataset.needs = String(calling);
@@ -1183,6 +1820,13 @@
     function openSearch() {
         if (DEVICE) return;
         /* Asked for: the keyboard comes with it, lock or not. */
+        /* The list folded away (a pick folds it, 14-11): it comes back, or the field would be typed in out of sight. */
+        /* At once, not slid: the slide ends by giving the terminal the keys, the search needs them. */
+        if (listFolded && !narrow()) {
+            listFolded = false;
+            try { localStorage.setItem('clavarium-list', 'open'); } catch { /* a private window */ }
+            applyFold(false); fit.fit?.();
+        }
         if (!$('search').hidden) { $('search-field').focus(); return; }
         $('search').hidden = false; $('search-open').setAttribute('aria-expanded', 'true');
         nav.push('search', () => closeSearch());
@@ -1327,10 +1971,22 @@
         $('items').querySelector(again)?.focus();
     });
 
-    async function refresh() {
+    /* One reading of the list at a time: one asked while one runs waits for it, then one more is made for all
+       who asked meanwhile (what they just changed is in it) -- never two side by side, nor two timers left armed. */
+    let refreshing = null;
+    let refreshAgain = null;
+    function refresh() {
+        if (refreshing) { refreshAgain ??= refreshing.then(() => { refreshAgain = null; return refresh(); }); return refreshAgain; }
+        refreshing = refreshOnce().finally(() => { refreshing = null; });
+        return refreshing;
+    }
+    /* A page out of sight (another tab, a tablet asleep) reads its list seldom; shown again, at once. */
+    const HIDDEN_POLL_MS = 30_000;
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && home) void refresh(); });
+    async function refreshOnce() {
         clearTimeout(pollTimer);
         try {
-            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}` : '');
+            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}/${Boolean(x.machine)}/${x.stopped === true}/${Boolean(x.lentTo)}` : '');
             const before = mark(conversations.find((x) => x.name === current));
             if (DEVICE) {
                 const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
@@ -1357,6 +2013,8 @@
                 if (leaving(r)) return;
                 if (!r.ok) throw new Error('no api');
                 conversations = await r.json();
+                /* The rooms, for the list (their rows, Recent). */
+                try { await loadRooms(); } catch { /* not set up yet */ }
                 await readDevices();
                 $('list').hidden = false; $('back').hidden = false; $('nav').hidden = false; $('list-resize').hidden = false;
             }
@@ -1365,16 +2023,84 @@
             paint();
             paintChips();
             paintHealth();
+            /* The desk shown: its cards say the states of now (its places are not read again). */
+            if (!DEVICE && place === 'deck') { try { paintDeskStates(); } catch { /* not set up yet */ } }
             if (!DEVICE) void paintGauge();
+            /* The chats of the others, kept for a switch at once (15-11): what moved, fetched in the background. */
+            if (!DEVICE) void keepChats();
             const now = mark(conversations.find((x) => x.name === current));
             paintActions();
             if (before !== now || now.startsWith('building') || now.startsWith('restarting') || now.startsWith('moving')) enter(true);
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         /* The panel is open: what the answerer did meanwhile is said there. */
         if (!DEVICE && panelShown) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
+        if (!DEVICE && home) void paintJobs();
         /* A start told step by step is asked about more often: its tool appears soon after its last step. */
-        if (home) pollTimer = setTimeout(refresh, conversations.some(holds) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
+        clearTimeout(pollTimer);
+        const every = conversations.some(holds) || conversations.some((c) => c.machine) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000;
+        if (home) pollTimer = setTimeout(refresh, document.hidden ? Math.max(every, HIDDEN_POLL_MS) : every);
     }
+
+    /* ---------- WHAT IT IS DOING (jobs.mjs, 14-11) ----------
+       A badge by the list's title while something runs (« ● 2 under way »), or when one failed since the list
+       was last opened (« ● 1 failed », red); nothing otherwise. Tapped: what runs, its step; then the day's ends,
+       done or failed with why. A line opens its conversation. Read with the list, nothing asked of the machines. */
+    let jobsNow = { running: [], done: [] };
+    /* The copies made from here (the wizard, #cm), watched until their job ends: their names, new each time. */
+    const copiesWatched = new Set();
+    const JOBS_SEEN = 'clavarium.jobsSeen';
+    const jobsSeen = () => { try { return localStorage.getItem(JOBS_SEEN) ?? ''; } catch { return ''; } };
+    async function paintJobs() {
+        try { const r = await fetch(`${API}/jobs`); if (!r.ok) return; jobsNow = await r.json(); } catch { return; }
+        const failed = jobsNow.done.filter((j) => j.result === 'failed' && String(j.endedAt) > jobsSeen()).length;
+        const n = jobsNow.running.length;
+        /* Two places, one state: by the list's title, and in the bar of the conversation open (its list folded
+           away, or a phone's, a screen of its own) -- shorter there, the bar is narrow. */
+        for (const [id, words] of [['jobs-open', n ? `${n} under way` : `${failed} failed`], ['jobs-room', n ? String(n) : '!']]) {
+            const badge = $(id);
+            badge.hidden = !n && !failed;
+            badge.dataset.tone = !n && failed ? 'bad' : '';
+            badge.textContent = words;
+            badge.title = n ? `Under way: ${jobsNow.running.map((j) => j.what).join(' · ')}` : 'Failed: tap to see what';
+            badge.setAttribute('aria-label', n ? `${n} under way` : `${failed} failed`);
+        }
+        if (n || failed) $('back').dataset.jobs = n ? 'on' : 'bad'; else delete $('back').dataset.jobs;
+        if (!$('jobs').hidden) paintJobsList();
+        cmJobsSeen();
+    }
+    function paintJobsList() {
+        const line = (j, mark, result) => {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'job'; b.dataset.result = result;
+            const when = j.endedAt ? new Date(j.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            b.append(Object.assign(document.createElement('span'), { textContent: mark }), Object.assign(document.createElement('span'), { textContent: j.what }),
+                Object.assign(document.createElement('small'), { textContent: result === 'running' ? (j.step || 'Starting') : [j.why, when].filter(Boolean).join(' · ') }));
+            if (j.conversation && conversations.some((c) => c.name === j.conversation)) b.addEventListener('click', () => { closeJobs(); select(j.conversation, { step: true }); });
+            else b.disabled = true;
+            return b;
+        };
+        const head = (text) => Object.assign(document.createElement('h3'), { textContent: text });
+        const parts = [];
+        if (jobsNow.running.length) parts.push(head('Under way'), ...jobsNow.running.map((j) => line(j, '⟳', 'running')));
+        if (jobsNow.done.length) parts.push(head('Today'), ...jobsNow.done.map((j) => line(j, j.result === 'done' ? '✓' : '✗', j.result === 'done' ? 'done' : 'failed')));
+        if (!parts.length) parts.push(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'Nothing under way.' }));
+        $('jobs').replaceChildren(...parts);
+    }
+    function closeJobs() { $('jobs').hidden = true; for (const id of ['jobs-open', 'jobs-room']) $(id).setAttribute('aria-expanded', 'false'); }
+    for (const id of ['jobs-open', 'jobs-room']) $(id).addEventListener('click', () => {
+        if (!$('jobs').hidden) { closeJobs(); return; }
+        paintJobsList();
+        /* Under the badge tapped, kept within the screen. */
+        const at = $(id).getBoundingClientRect(); const pop = $('jobs');
+        pop.hidden = false;
+        pop.style.top = `${Math.round(at.bottom + 6)}px`;
+        pop.style.left = `${Math.round(Math.max(8, Math.min(at.left, window.innerWidth - pop.offsetWidth - 8)))}px`;
+        $(id).setAttribute('aria-expanded', 'true');
+        try { localStorage.setItem(JOBS_SEEN, new Date().toISOString()); } catch { /* kept for this visit only */ }
+        if (!jobsNow.running.length) { $('jobs-open').hidden = true; $('jobs-room').hidden = true; delete $('back').dataset.jobs; }
+    });
+    document.addEventListener('click', (event) => { if (!$('jobs').hidden && !event.target.closest('#jobs, #jobs-open, #jobs-room')) closeJobs(); });
+    /* Escape closes the list, and only it: never the conversation under it too (14-11: the page went to « No conversation »). */
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('jobs').hidden) { event.stopImmediatePropagation(); event.preventDefault(); closeJobs(); } }, true);
 
     /* ---------- A NEW CONVERSATION: a page of its own, as Settings ----------
        "+ New" opens it beside the list (the whole screen on a phone), with an
@@ -1384,7 +2110,7 @@
     let chosenTool = '';
     let newTools = [];
     const ID_SHAPE = /^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/;
-    const NEW_FIELDS = ['name', 'group', 'id', 'memory'];
+    const NEW_FIELDS = ['name', 'group', 'id', 'memory', 'machine'];
     function newError(field, text) {
         const at = field && NEW_FIELDS.includes(field) ? field : '';
         for (const f of NEW_FIELDS) {
@@ -1418,6 +2144,15 @@
         select.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = sizeWords(m); return o; }));
         select.value = String(mems.includes(was) ? was : least);
         $('newconv-memory-least').textContent = tool ? `${tool.label} needs ${sizeWords(least)} at least` : '';
+        /* Cores: 1 to what this server has (learnt from any machine we know), default 1. */
+        const hostCpus = Math.max(1, ...conversations.map((c) => c.hostCpus ?? 1));
+        const cpus = $('newconv-cpus'); const wasCpus = Number(cpus.value) || 1;
+        cpus.replaceChildren(...Array.from({ length: hostCpus }, (_, i) => i + 1).map((n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = `${n}${n === 1 ? ' (default)' : ''}${n === hostCpus && n > 1 ? ' (all of this server)' : ''}`; return o; }));
+        cpus.value = String(wasCpus <= hostCpus ? wasCpus : 1);
+        /* Disk: from the default up; it only grows afterwards. */
+        const disk = $('newconv-disk'); const wasDisk = Number(disk.value) || 8;
+        disk.replaceChildren(...DISK_CHOICES.map((d) => { const o = document.createElement('option'); o.value = String(d); o.textContent = `${d} GB${d === 8 ? ' (default)' : ''}`; return o; }));
+        disk.value = String(DISK_CHOICES.includes(wasDisk) ? wasDisk : 8);
     }
     function paintNewTools() {
         const box = $('newconv-tools');
@@ -1429,19 +2164,87 @@
             b.addEventListener('click', () => {
                 chosenTool = t.id;
                 for (const other of box.children) other.setAttribute('aria-checked', String(other === b));
-                paintNewMemory();
+                paintNewMemory(); void paintOpenCode();
             });
             return b;
         }));
-        paintNewMemory();
+        paintNewMemory(); void paintOpenCode();
+    }
+    /* OPENCODE SET UP HERE (03-11): a provider and one of its models from OpenCode's own catalogue (models.dev),
+       its key one of the secrets (the one named as the provider reads it, when there is one) or a new one. */
+    let ocProviders = null; let ocMode = 'set';
+    const ocNew = '+';
+    async function paintOpenCode() {
+        const on = chosenTool === 'opencode';
+        $('newconv-oc').hidden = !on;
+        if (!on) return;
+        if (!ocProviders) { try { ocProviders = (await (await fetch(`${API}/catalog/models`)).json()).providers ?? []; } catch { ocProviders = []; } }
+        try { markSecrets(await (await fetch(`${API}/secrets`)).json()); } catch { /* the ones known */ }
+        const prov = $('newconv-oc-provider');
+        if (!prov.options.length) {
+            prov.replaceChildren(...ocProviders.map((p) => { const o = el('option', '', p.name); o.value = p.id; return o; }));
+            if (ocProviders.some((p) => p.id === 'mistral')) prov.value = 'mistral';
+        }
+        ocProvider();
+    }
+    function ocProvider() {
+        const p = (ocProviders ?? []).find((x) => x.id === $('newconv-oc-provider').value);
+        $('newconv-oc-model').replaceChildren(...(p?.models ?? []).map((m) => { const o = el('option', '', m.name); o.value = m.id; return o; }));
+        const names = (secretsKnown ?? []).map((x) => x.name);
+        const want = p?.env?.[0] ?? '';
+        const key = $('newconv-oc-key');
+        key.replaceChildren(...names.map((n) => { const o = el('option', '', `Secret: ${n}`); o.value = n; return o; }), Object.assign(el('option', '', want ? `+ New secret: ${want}` : '+ New secret'), { value: ocNew }));
+        key.value = names.includes(want) ? want : ocNew;
+        $('newconv-oc-new').hidden = key.value !== ocNew;
+    }
+    $('newconv-oc-provider').addEventListener('change', ocProvider);
+    $('newconv-oc-key').addEventListener('change', () => { $('newconv-oc-new').hidden = $('newconv-oc-key').value !== ocNew; });
+    for (const b of $('newconv-oc-mode').querySelectorAll('[data-m]')) b.addEventListener('click', () => {
+        ocMode = b.dataset.m;
+        for (const x of $('newconv-oc-mode').querySelectorAll('[data-m]')) x.setAttribute('aria-checked', String(x === b));
+        $('newconv-oc-set').hidden = ocMode !== 'set'; $('newconv-oc-raw').hidden = ocMode === 'set';
+    });
+    /* -> { provider, model, secret } for the server, a new secret made first; null: nothing to set up. */
+    async function openCodeChoice() {
+        if (chosenTool !== 'opencode' || ocMode !== 'set') return null;
+        const provider = $('newconv-oc-provider').value; const model = $('newconv-oc-model').value;
+        if (!provider || !model) return null;
+        let secret = $('newconv-oc-key').value;
+        if (secret === ocNew) {
+            const value = $('newconv-oc-value').value.trim();
+            const p = (ocProviders ?? []).find((x) => x.id === provider);
+            if (!value) throw new Error('Paste the API key, or choose « Install only ».');
+            secret = p?.env?.[0] ?? `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+            await post(`${API}/secrets`, { name: secret, value });
+            $('newconv-oc-value').value = '';
+        }
+        return { provider, model, secret };
     }
     for (const b of $('newconv-work').querySelectorAll('[data-work]')) {
         b.addEventListener('click', () => { for (const other of $('newconv-work').querySelectorAll('[data-work]')) other.setAttribute('aria-checked', String(other === b)); });
     }
     const newOnDisk = () => $('newconv-work').querySelector('[data-work="disk"]').getAttribute('aria-checked') === 'true';
-    async function openNew({ push = true } = {}) {
+    /* WHERE IT LIVES (#221): its own machine, or a shared one -- an existing one offered, or a new name. In a shared
+       machine its files are always kept here: that choice is hidden. */
+    const newShared = () => $('newconv-where').querySelector('[data-where="shared"]').getAttribute('aria-checked') === 'true';
+    const paintWhere = () => {
+        const shared = newShared();
+        $('newconv-machine-row').hidden = !shared;
+        $('newconv-files-card').hidden = shared;
+        const names = [...new Set(conversations.map((c) => c.sharedMachine).filter(Boolean))].sort();
+        $('machine-names').replaceChildren(...names.map((n) => Object.assign(document.createElement('option'), { value: n })));
+        if (shared && !$('newconv-machine').value && names.length) $('newconv-machine').value = names[0];
+        /* A new shared machine: its memory chosen here (12-11); one that is there keeps its own. */
+        $('newconv-machine-mb-row').hidden = !shared || names.includes($('newconv-machine').value.trim());
+    };
+    $('newconv-machine').addEventListener('input', () => paintWhere());
+    for (const b of $('newconv-where').querySelectorAll('[data-where]')) {
+        b.addEventListener('click', () => { for (const other of $('newconv-where').querySelectorAll('[data-where]')) other.setAttribute('aria-checked', String(other === b)); paintWhere(); });
+    }
+    async function openNew({ push = true, group = null } = {}) {
         if (DEVICE) return;
         newError('', '');
+        if (group !== null) $('newconv-group').value = group;
         if (place !== 'new') {
             /* From the map: a step over it, and back to it. Otherwise a place of its own. */
             if (place === 'access' && push) {
@@ -1468,7 +2271,7 @@
         if (!nav.close('create')) leavePlace();
     }
     $('hidden-toggle').addEventListener('click', () => { showHidden = !showHidden; paint(); });
-    $('new').addEventListener('click', () => { void openNew(); });
+    $('new').addEventListener('click', () => { foldOnOpen(); void openNew(); });
     $('newconv-cancel').addEventListener('click', closeNew);
     $('newconv-close').addEventListener('click', closeNew);
     /* From the map's "+" of Conversations: the same page. */
@@ -1486,14 +2289,17 @@
         const group = $('newconv-group').value.trim();
         if (!title) { newError('name', 'Give a name.'); return; }
         if (id && !ID_SHAPE.test(id)) { newError('id', 'Lower-case letters, digits, hyphens'); return; }
+        if (newShared() && !ID_SHAPE.test($('newconv-machine').value.trim())) { newError('machine', 'A name: lower-case letters, digits, hyphens'); return; }
         const least = newTools.find((t) => t.id === chosenTool)?.memoryMb;
         const memoryMb = Number($('newconv-memory').value);
+        const cpus = Number($('newconv-cpus').value); const diskGb = Number($('newconv-disk').value);
         newError('', '');
         creating = true; $('newconv-create').disabled = true;
         try {
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}) });
+            const opencode = await openCodeChoice();
+            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newShared() ? false : newOnDisk(), ...(newShared() ? { machine: $('newconv-machine').value.trim(), ...($('newconv-machine-mb-row').hidden ? {} : { machineMb: Number($('newconv-machine-mb').value) }) } : {}), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
-            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false;
+            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-where').querySelector('[data-where="own"]').click(); $('newconv-machine').value = ''; $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
             await refresh();
             /* The new one is selected: the page gives way to it, with no step of it left behind. */
             select(made.name);
@@ -1617,6 +2423,7 @@
     let voiceOn = false;
     const chatVoice = () => (voiceOn && window.clavariumVoice ? window.clavariumVoice : null);
     async function offerVoice() {
+        if (DEVICE && !pairing) return;          /* asked again by start(), once there is a pairing to ask with */
         voiceOn = window.clavariumVoice ? await window.clavariumVoice.available() : false;
         $('mic').hidden = $('auto').hidden = !voiceOn;
         keysForChat();
@@ -1630,7 +2437,6 @@
     void offerVoice();
 
     /* ---------- folders ---------- */
-    const LEVELS = [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
     /* THE BAR (G): Chat | Terminal | Assets N, then its settings. What was
        given to it is counted on "Assets", and shown there. */
     let assetsShown = false; let roomPick = '';
@@ -1643,14 +2449,20 @@
         secretsKnown = Array.isArray(list) ? list : []; secretsReadAt = Date.now();
         $('nav-assets').toggleAttribute('data-attention', secretsKnown.some(secretDue));
         $('view-assets').toggleAttribute('data-attention', secretsKnown.some((s) => secretDue(s) && s.conversations.includes(current)));
+        paintAssetsCount();
     }
     async function readSecretsNow() { if (!DEVICE) markSecrets(await (await fetch(`${API}/secrets`)).json().catch(() => [])); }
+    /* « Assets N »: N, the rows its tab lists (givenCount). */
+    function paintAssetsCount() {
+        if (DEVICE) return;
+        const n = givenCount(conversations.find((x) => x.name === current));
+        $('assets-count').textContent = n ? String(n) : '';
+    }
     function paintChips() {
         if (DEVICE) return;
         const c = conversations.find((x) => x.name === current);
         $('views').hidden = !c;
-        const n = (c?.resources?.length ?? 0) + (c?.secrets?.length ?? 0) + (c?.work === 'kept' ? 1 : 0);
-        $('assets-count').textContent = n ? String(n) : '';
+        paintAssetsCount();
         $('view-assets').toggleAttribute('data-attention', secretsKnown.some((s) => secretDue(s) && s.conversations.includes(current)));
         if (Date.now() - secretsReadAt > 60_000) { secretsReadAt = Date.now(); void readSecretsNow().catch(() => {}); }
         /* Its title names each of them, with what it may do. */
@@ -1670,6 +2482,9 @@
     function paintViews() {
         if (DEVICE) return;
         const now = tabNow();
+        /* The "Loading the terminal..." veil belongs to the terminal: leaving it for the chat (or
+           any other tab) takes the veil away, so a tab already there is not covered. */
+        if (notice.dataset.loading && now !== 'terminal') notice.hidden = true;
         for (const [id, tab] of [['view-chat', 'chat'], ['view-terminal', 'terminal'], ['view-assets', 'assets'], ['view-lists', 'lists'], ['folders', 'settings']]) $(id).setAttribute('aria-pressed', String(now === tab));
     }
     /* THE FOUR TABS: Chat, Terminal, Assets, Settings. The one it opened on
@@ -1680,7 +2495,7 @@
     const tabNow = () => (assetsShown ? 'assets' : listsShown ? 'lists' : panelShown ? 'settings' : simple ? 'chat' : 'terminal');
     const TAB_WORD = { chat: 'Chat', terminal: 'Terminal', assets: 'Assets', get lists() { return LISTS_WORD.many; }, settings: 'Settings' };
     function openPanelZone() { closeRoomLists(); if (panelShown) return; panelShown = true; $('panel').hidden = false; paintViews(); }
-    function closePanelZone() { if (!panelShown) return; panelShown = false; $('panel').hidden = true; $('attach-picker').hidden = true; paintViews(); }
+    function closePanelZone() { if (!panelShown) return; panelShown = false; $('panel').hidden = true; paintViews(); }
     function showTab(which, pick) {
         if (which === 'assets') { closePanelZone(); void openRoomAssets(pick); return; }
         if (which === 'settings') { closeRoomAssets(); openPanelZone(); return; }
@@ -1736,8 +2551,9 @@
         listsShown = true; $('clists').hidden = false; paintViews();
         if (listsView && listsOf === current) { if (at) await listsView.go(at); else void listsView.refresh(); listsAddress(listsView.place); return; }
         const name = current; listsOf = name;
-        listsView = null;
-        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]), { of: () => name, place: at, steps: listsSteps });
+        /* The binders of the one before go at once: never shown under this one's name while its own load. */
+        listsView?.destroy(); listsView = null; $('clists-binder').replaceChildren();
+        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]), { of: () => name, place: at, steps: listsSteps, still: () => listsOf === name && current === name });
         if (listsOf === name) listsView = view;
     }
     function closeRoomLists() {
@@ -1774,7 +2590,7 @@
             $(errorId).textContent = error.message; $(errorId).hidden = false;
             if (error.kind === 'confirm-shared') {
                 const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'danger attach-shared'; yes.textContent = 'Confirm and attach';
-                yes.addEventListener('click', async () => { yes.disabled = true; await attachTo(conversation, name, access, errorId, true); if (errorId === 'panel-error') await paintPanel(); else await paintAssets(); });
+                yes.addEventListener('click', async () => { yes.disabled = true; await attachTo(conversation, name, access, errorId, true); if (errorId === 'panel-error') await paintPanel(); else await repaintAsset(); });
                 $(errorId).append(' ', yes);
             }
         }
@@ -1811,7 +2627,7 @@
         const box = document.createElement('details'); box.className = 'auto-send'; box.dataset.repository = name;
         box.open = autoOpen.has(`${conversation}/${name}`);
         box.addEventListener('toggle', () => { if (box.open) autoOpen.add(`${conversation}/${name}`); else autoOpen.delete(`${conversation}/${name}`); });
-        const summary = document.createElement('summary'); summary.textContent = 'Automatic sending';
+        const summary = document.createElement('summary'); summary.textContent = uiSaid('set-auto-title', 'Automatic sending');
         const state = document.createElement('small'); state.className = 'hint auto-state'; summary.append(' ', state);
         const form = document.createElement('form'); form.autocomplete = 'off';
         const field = (text, input) => { const label = document.createElement('label'); label.textContent = text; label.append(input); return label; };
@@ -1828,23 +2644,23 @@
         const unknown = document.createElement('p'); unknown.className = 'hint auto-unknown'; unknown.hidden = true;
         unknown.textContent = 'The remote\'s default branch is not known yet (it is learnt at a refresh): until it is, nothing is sent by itself unless you confirm each branch or pattern of the list.';
         const shared = document.createElement('p'); shared.className = 'hint auto-shared'; shared.hidden = true;
-        const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger auto-sure'; sure.textContent = 'Confirm and save'; sure.hidden = true;
-        const save = document.createElement('button'); save.type = 'submit'; save.className = 'primary'; save.textContent = 'Save';
+        const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger auto-sure'; sure.textContent = uiSaid('set-auto-confirm', 'Confirm and save'); sure.hidden = true;
+        const save = document.createElement('button'); save.type = 'submit'; save.className = 'primary'; save.textContent = uiSaid('set-auto-save', 'Save');
         const said = document.createElement('span'); said.className = 'hint auto-said'; said.setAttribute('role', 'status');
         const actions = document.createElement('div'); actions.className = 'row'; actions.append(save, sure, said);
         /* Closed until the settings there are have arrived: a list typed
            before would be overwritten by them. */
         const fields = document.createElement('fieldset'); fields.disabled = true;
         form.append(fields);
-        fields.append(field('Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.', branches), hint,
-            field('Quiet delay, in seconds', quiet), field('Sendings an hour, at most (0: no cap)', perHour),
-            check('It may create a branch the remote does not have', create), check('Only after the checks passed in its machine', checks), unknown, shared, asking, actions);
+        fields.append(field(uiSaid('set-auto-branches', 'Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.'), branches), hint,
+            field(uiSaid('set-auto-quiet', 'Quiet delay, in seconds'), quiet), field(uiSaid('set-auto-hour', 'Sendings an hour, at most (0: no cap)'), perHour),
+            check(uiSaid('set-auto-create', 'It may create a branch the remote does not have'), create), check(uiSaid('set-auto-checks', 'Only after the checks passed in its machine'), checks), unknown, shared, asking, actions);
         box.append(summary, form);
         const fill = (about) => {
             const s = about.settings;
             branches.value = s.branches.join('\n'); quiet.value = String(s.quietSeconds); perHour.value = String(s.perHour);
             create.checked = s.create; checks.checked = s.checks;
-            state.textContent = s.branches.length ? `on: ${s.branches.join(', ')}` : 'off';
+            state.textContent = s.branches.length ? uiSaid('set-auto-on', 'on: {list}', { list: s.branches.join(', ') }) : uiSaid('set-auto-off', 'off');
             unknown.hidden = Boolean(about.defaultBranch);
             const others = about.sharedWith ?? [];
             shared.hidden = others.length === 0;
@@ -1859,7 +2675,7 @@
             const body = { branches: branches.value, quietSeconds: quiet.value === '' ? '' : Number(quiet.value), perHour: perHour.value === '' ? '' : Number(perHour.value), create: create.checked, checks: checks.checked, ...flags };
             const r = await fetch(where, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
             const j = await r.json().catch(() => ({}));
-            if (r.ok) { for (const k of Object.keys(flags)) delete flags[k]; fill(j); said.textContent = 'Saved.'; return; }
+            if (r.ok) { for (const k of Object.keys(flags)) delete flags[k]; fill(j); said.textContent = uiSaid('set-auto-saved', 'Saved.'); return; }
             /* Nothing was saved: the owner reads what it would allow, then confirms or changes the list. */
             if (j.kind === 'confirm-wide' || j.kind === 'confirm-shared') { asking.textContent = j.error; asking.hidden = false; sure.hidden = false; sure.dataset.kind = j.kind; return; }
             said.textContent = j.error || 'The request failed.';
@@ -1873,74 +2689,22 @@
     /* ---------- Access: this conversation ---------- */
     async function paintPanel() {
         const here = conversations.find((x) => x.name === current);
-        $('panel-title').textContent = `This conversation - ${current}`;
-        const all = await (await fetch(`${API}/resources`)).json();
-        const mine = new Map((here?.resources ?? []).map((r) => [r.name, r.access]));
-        const rows = $('panel-rows');
-        rows.replaceChildren();
-        for (const resource of all.filter((r) => mine.has(r.name))) {
-            const kind = kindOf(resource);
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = resource.name;
-            const label = document.createElement('b'); label.textContent = resource.name;
-            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${KIND_WORD[kind]}`; label.append(about);
-            const levels = kind === 'mailbox' ? fixedRight('mailbox')
-                : modes([['read', 'Read'], ['write', 'Write']], mine.get(resource.name), async (access) => { await attachTo(current, resource.name, access); await paintPanel(); }, `Access of this conversation to ${resource.name}`);
-            row.append(label, levels);
-            if (kind === 'git') {
-                const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
-                review.addEventListener('click', () => { void openGit(resource.name); });
-                row.append(review);
-            }
-            /* Detached, not removed: it stays in Assets. */
-            const detach = document.createElement('button'); detach.type = 'button'; detach.textContent = 'Detach'; detach.setAttribute('aria-label', `Detach ${resource.name} from this conversation`);
-            detach.addEventListener('click', async () => { detach.disabled = true; detach.textContent = 'Detaching...'; await attachTo(current, resource.name, 'none'); await paintPanel(); });
-            row.append(detach);
-            /* Right under the access it depends on: read-only, the agent has nothing of its own to send. */
-            if (kind === 'git' && mine.get(resource.name) === 'write' && !DEVICE) row.append(autoSending(current, resource.name));
-            rows.append(row);
-        }
-        $('panel-empty').hidden = mine.size > 0;
-        /* The secrets its tool is handed. */
-        const secrets = DEVICE ? [] : await (await fetch(`${API}/secrets`)).json().catch(() => []);
-        const handed = $('access-secrets'); handed.replaceChildren();
-        for (const secret of secrets.filter((x) => x.conversations.includes(current))) {
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = secret.name;
-            const label = document.createElement('b'); label.textContent = secret.name;
-            const off = document.createElement('button'); off.type = 'button'; off.textContent = 'Detach'; off.setAttribute('aria-label', `Stop handing ${secret.name} to this conversation`);
-            off.addEventListener('click', async () => {
-                await handTo(current, secret.name, false); await paintPanel();
-                $('secret-note').textContent = `${secret.name} will no longer be handed to the tool the next time it starts (leave the tool, then "Start it again").`;
-            });
-            row.append(label, fixedUse(), off); handed.append(row);
-        }
-        $('access-secrets-empty').hidden = handed.children.length > 0;
-        /* What can still be attached, for the picker. */
-        const picker = $('attach-rows'); picker.replaceChildren();
-        $('attach-title').textContent = `Attach to "${current}"`;
-        const offer = (name, kind, buttons) => {
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = name;
-            const label = document.createElement('b'); label.textContent = name;
-            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${kind}`; label.append(about);
-            row.append(label, ...buttons); picker.append(row);
-        };
-        const act = (text, run) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.addEventListener('click', async () => { b.disabled = true; b.textContent = '...'; await run(); await paintPanel(); }); return b; };
-        for (const resource of all.filter((r) => !mine.has(r.name))) {
-            const kind = kindOf(resource);
-            offer(resource.name, KIND_WORD[kind], kind === 'mailbox' ? [act('Read', () => attachTo(current, resource.name, 'read'))]
-                : [act('Read', () => attachTo(current, resource.name, 'read')), act('Write', () => attachTo(current, resource.name, 'write'))]);
-        }
-        for (const secret of secrets.filter((x) => !x.conversations.includes(current))) {
-            offer(secret.name, 'secret', [act('Use', async () => { await handTo(current, secret.name, true); $('secret-note').textContent = `${secret.name} will be handed to the tool the next time it starts (leave the tool, then "Start it again").`; })]);
-        }
-        $('attach-empty').hidden = picker.children.length > 0;
+        $('panel-title').textContent = uiSaid('set-this-conv', 'This conversation - {name}', { name: current });
+        /* ITS ASSETS (07-11, assets step 4): one line, « N assets · see », that opens its Assets tab -- what it was given
+           lives there only (given, its right set, taken back: « None »). Its sign-in mailbox (not an asset) stays below. */
+        const n = givenCount(here);
+        $('access-assets').textContent = uiSaid(n === 1 ? 'set-acc-assets-1' : 'set-acc-assets-n', n === 1 ? '1 asset · see' : '{n} assets · see', { n });
+        paintConvStates(here);
         /* Where the tool works, and the way to the other place. */
         const kept = here?.work === 'kept';
         $('work-box').hidden = DEVICE || !here;
-        $('work-now').textContent = kept
-            ? 'In a folder kept here: you see its files in Files, and they outlive the machine. It has a fixed size, and refuses symbolic links that point upwards or outside: a code project that installs packages belongs on the disk of its machine.'
-            : 'On the disk of its machine: faster for a large code project, but its files are not shown in Files and go with the machine.';
+        /* One short line; the why behind its ⓘ. */
+        $('work-now-text').textContent = kept ? 'Kept here · shown in Files' : 'On the disk of its machine';
+        $('work-now-why').textContent = kept
+            ? 'Its files outlive the machine. It has a fixed size, and refuses symbolic links that point upwards or outside: a code project that installs packages belongs on the disk of its machine.'
+            : 'Faster for a large code project, but its files are not shown in Files and go with the machine.';
         $('work-moved').textContent = here?.moved ?? ''; $('work-moved').hidden = !here?.moved;
-        $('work-move').textContent = kept ? 'Move its work to the disk of its machine...' : 'Keep its work here (shown in Files)...';
+        $('work-move').textContent = kept ? 'Move to its machine\'s disk...' : 'Keep it here...';
         $('work-move').onclick = () => {
             const to = kept ? 'disk' : 'kept';
             /* The question is asked over the terminal, not under this panel. */
@@ -1951,18 +2715,68 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; focusTerminal(); });
         };
+        /* Its tool's memory, exported as one file, or put back from one (#351): the person's own act, from here. */
+        $('carry-box').hidden = DEVICE || !here;
+        /* Its machine must run to be read: stopped or asleep, said there, with the one button that starts it
+           (14-11: a raw « Its machine is not running » came back as the file). */
+        const down = here?.stopped === true || here?.asleep === true;
+        $('carry-export').href = `${API}/conversations/${encodeURIComponent(current)}/export`;
+        $('carry-export').toggleAttribute('aria-disabled', down);
+        $('carry-export').onclick = down ? (event) => { event.preventDefault(); } : null;
+        /* Everything of it (14-11): its work is read here, so only when it is kept here. */
+        const allOff = down || here?.work !== 'kept';
+        $('carry-export-all').href = `${API}/conversations/${encodeURIComponent(current)}/export?all=1`;
+        $('carry-export-all').toggleAttribute('aria-disabled', allOff);
+        $('carry-export-all').title = here?.work !== 'kept' ? uiSaid('set-carry-all-off', 'Its work must be kept here.') : '';
+        $('carry-export-all').onclick = allOff ? (event) => { event.preventDefault(); } : null;
+        $('carry-import').disabled = down;
+        $('carry-reminders').checked = false; $('carry-reminders').disabled = down;
+        $('carry-said').hidden = !down;
+        if (down) {
+            const start = Object.assign(document.createElement('button'), { type: 'button', className: 'inline', textContent: here.asleep === true ? uiSaid('set-wake-it', 'Wake it') : uiSaid('set-m-start', 'Start') });
+            start.addEventListener('click', () => { leavePanel(); connect(); });
+            $('carry-said').replaceChildren(uiSaid('set-carry-down', 'It must run to export or import.'), ' ', start);
+        }
+        $('carry-import').onclick = () => $('carry-file').click();
+        /* Sent; a whole export into a work folder that holds files asks first, then is sent again to replace it.
+           What it was given that does not exist here is listed after, to link by hand. */
+        const carryImport = async (name, file, replaceWork, reminders) => {
+            try {
+                const query = [replaceWork ? 'replaceWork=1' : '', reminders ? 'reminders=1' : ''].filter(Boolean).join('&');
+                const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/import${query ? `?${query}` : ''}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                const said = await r.json().catch(() => ({}));
+                if (!r.ok && said.kind === 'work-not-empty') {
+                    show(uiSaid('set-carry-replace', 'Its work folder has files. Replace them all?'), uiSaid('set-carry-replace-go', 'Replace its work'),
+                        () => carryImport(name, file, true, reminders), () => { notice.hidden = true; focusTerminal(); });
+                    return;
+                }
+                if (!r.ok) throw new Error(said.error ?? `HTTP ${r.status}`);
+                const done = uiSaid('set-carry-done', 'Imported from « {from} ».', { from: said.from?.name ?? file.name });
+                const toLink = Array.isArray(said.toLink) ? said.toLink.filter(Boolean) : [];
+                show(toLink.length ? `${done} ${uiSaid('set-carry-tolink', 'To link by hand:')} ${toLink.join(', ')}` : done, 'OK', () => { notice.hidden = true; focusTerminal(); });
+            } catch (error) { show(error.message, 'Back to the terminal', enter); }
+        };
+        $('carry-file').onchange = () => {
+            const file = $('carry-file').files?.[0]; $('carry-file').value = '';
+            if (!file) return;
+            const name = current; const reminders = $('carry-reminders').checked;
+            leavePanel();
+            show(uiSaid('set-carry-ask', '« {file} » into « {name} »? Its memory is replaced.', { file: file.name, name }),
+                uiSaid('set-carry-go', 'Import'), () => carryImport(name, file, false, reminders), () => { notice.hidden = true; focusTerminal(); });
+        };
         void paintAnswerer(); paintWakeups(); void paintTalkBox(); void paintShareHere();
         paintMachine(here);
         void paintGuide(here);
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
+        void paintCompanionHere();
         await paintSignIn();
     }
     /* ---------- chapters (a conversation's settings, and Settings): folded or not ---------- */
     /* All folded when the app is opened: what the person opens stays open while this tab lives (a reload
        included), never from one day to the next -- a page that opens half-unfolded says nothing. What asks
        for them is said on the folded chapter instead (markAttention). */
-    const OPEN_AT_FIRST = {};
+    const OPEN_AT_FIRST = { 's-features': true, 'room-ais': true };
     let chapters = {};
     try { chapters = JSON.parse(sessionStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
     try { localStorage.removeItem('clavarium-chapters'); } catch { /* as above */ }
@@ -1976,13 +2790,13 @@
     }
     /* A chapter that holds something asking for the person -- a callout, or a state said as a warning or a
        fault -- wears a dot on its title, folded or not: one look at Settings says where to go. */
-    const asksForYou = (el2) => [...el2.querySelectorAll('.callout, .status-line[data-tone="warn"], .status-line[data-tone="bad"]')]
+    const asksForYou = (el2) => [...el2.querySelectorAll('.callout:not([data-tone="ok"]), .status-line[data-tone="warn"], .status-line[data-tone="bad"]')]
         .some((x) => !x.closest('[hidden]') && x.textContent.trim());
     let marking;
     const markAttention = () => { clearTimeout(marking); marking = setTimeout(() => {
         for (const chapter of document.querySelectorAll('details.chapter')) chapter.toggleAttribute('data-attention', asksForYou(chapter));
         /* And on its category, in the side list of Settings. */
-        for (const b of document.querySelectorAll('#settings-nav button[data-group]')) b.toggleAttribute('data-attention', Boolean(document.querySelector(`#settings-group-${b.dataset.group} details.chapter[data-attention]`)));
+        for (const b of document.querySelectorAll('.settings-tabs button[data-group]')) b.toggleAttribute('data-attention', Boolean(b.closest('.sheet')?.querySelector(`.settings-group[data-group="${b.dataset.group}"] details.chapter[data-attention]`)));
     }, 150); };
     new MutationObserver(markAttention).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-tone', 'class'] });
     /* Reached by a link (or a button that leads to it): opened, and said for a moment. */
@@ -1990,6 +2804,9 @@
     const openChapter = (key, { show = true } = {}) => {
         const chapter = document.querySelector(`details.chapter[data-chapter="${key}"]`);
         if (!chapter) return chapter;
+        /* In a tab not shown: that tab first. */
+        const group = chapter.closest('.settings-group.tab-off');
+        if (group) group.closest('.sheet')?.showTab?.(group.dataset.group);
         chapter.open = true;
         if (show) {
             for (const other of document.querySelectorAll('details.chapter.reached')) other.classList.remove('reached');
@@ -2100,13 +2917,17 @@
         /* Nothing over the screen to say it under: a long wait still says so. */
         /* The neutral word of a load is not a place to list troubles either, until the wait is long. */
         const quiet = notice.hidden || Boolean(notice.dataset.loading);
+        /* The chat (or any tab but the terminal) in front: a terminal slow to come back -- often only this page
+           reconnecting after an update -- is not put over it (03-11); it comes back by itself, behind. */
+        if (tabNow() !== 'terminal' && !['warn', 'bad'].includes(record?.level)) { if (notice.dataset.loading || /terminal/i.test($('notice-text').textContent)) notice.hidden = true; return; }
         if (quiet && !long) return;
-        if (quiet) show('Its terminal still does not come.');
+        if (quiet) show(record && record.level !== 'bad' && record.level !== 'warn' ? 'Reconnecting to its terminal\u2026' : 'Its terminal still does not come.');
         /* Waking it is what the page is doing: "it is asleep" would say the opposite. */
         const said = waiting && record ? { ...record, problems: (record.problems ?? []).filter((p) => p.kind !== 'state') } : record;
         const shown = healthLines($('notice-health'), said, { all: true, brief: true });
         $('notice-health').hidden = $('notice-health').childElementCount === 0;
-        $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn' || long));
+        /* A restart is offered only when its machine is not well: a machine that runs and looks well is not restarted for a slow page (03-11). */
+        $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn'));
         $('notice-restart').onclick = () => restartMachine(false);
         const text = $('notice-text').textContent.replace(/ This takes much longer than a start usually does\.$/, '');
         if (long) $('notice-text').textContent = `${text} This takes much longer than a start usually does.`;
@@ -2155,13 +2976,50 @@
         try { await post(`${API}/conversations/${encodeURIComponent(name)}/restart`, {}); healthDismissed = ''; await refresh(); enter(); }
         catch (error) { show(error.message, 'Back', enter); }
     }
-    $('restart').addEventListener('click', () => { void restartMachine(false); });
+    $('restart').addEventListener('click', () => askMachine('restart'));
     $('health-restart').addEventListener('click', () => { void restartMachine(false); });
     $('health-check').addEventListener('click', async () => {
         $('health-check').disabled = true; $('health-check').textContent = 'Looking...';
         try { const record = await post(`${API}/conversations/${encodeURIComponent(current)}/health`, {}); const c = conversations.find((x) => x.name === current); if (c) c.health = record; healthDismissed = ''; paintMachine(c); paintHealth(); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         finally { $('health-check').disabled = false; $('health-check').textContent = 'Look now'; }
+    });
+    /* "CHECK SHARED FOLDERS": each mounted and readable (put back when loose), each link the share cannot
+       serve (removed where safe), now; what was found or done, one line each (health.mjs, linkguard.mjs). */
+    const FOLDER_WHY = { loop: ['set-link-loop', 'loops'], dangling: ['set-link-dangling', 'target missing'], absolute: ['set-link-absolute', 'absolute target'], outside: ['set-link-outside', 'target outside the folder'] };
+    function folderLine(x) {
+        const why = FOLDER_WHY[x.why] ? uiSaid(...FOLDER_WHY[x.why]) : (x.why ?? '');
+        const at = x.folder ? `/resources/${x.folder}/${x.path ?? ''}`.replace(/\/$/, '') : x.path;
+        switch (x.kind) {
+            case 'mount-ok': return ['ok', uiSaid('set-fold-ok', '{path}: mounted, readable', { path: at })];
+            case 'mount-remounted': return ['info', uiSaid('set-fold-remounted', '{path}: had come loose, mounted again', { path: at })];
+            case 'mount-missing': return ['warn', uiSaid('set-fold-missing', '{path}: not reachable', { path: at })];
+            case 'mount-failed': return ['bad', uiSaid('set-fold-failed', '{path}: not reachable, not mounted again', { path: at })];
+            case 'link-removed': return ['info', uiSaid('set-fold-link-removed', '{path}: broken link removed ({why})', { path: at, why })];
+            case 'link-found': return ['warn', uiSaid('set-fold-link-found', '{path}: unusable link ({why})', { path: at, why })];
+            case 'links-cut': return ['info', uiSaid('set-fold-cut', '{path}: too large, looked at in part', { path: at })];
+            case 'machine-off': return ['info', uiSaid('set-fold-off', 'Its machine does not run: only links looked at')];
+            default: return ['info', x.kind];
+        }
+    }
+    $('folders-check').addEventListener('click', async () => {
+        const b = $('folders-check'); const list = $('folders-lines');
+        b.disabled = true; b.textContent = uiSaid('set-looking', 'Looking…');
+        try {
+            const r = await post(`${API}/conversations/${encodeURIComponent(current)}/folders/check`, {});
+            list.replaceChildren();
+            const items = r?.items ?? [];
+            if (items.length === 0) items.push({ kind: 'none' });
+            for (const x of items) {
+                const li = document.createElement('li');
+                const [level, text] = x.kind === 'none' ? ['ok', uiSaid('set-fold-none', 'No shared folder')] : folderLine(x);
+                li.dataset.level = level; li.textContent = text; list.append(li);
+            }
+            list.hidden = false;
+            const c = conversations.find((x) => x.name === current); if (c && r?.health) { c.health = r.health; paintMachine(c); paintHealth(); }
+        }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        finally { b.disabled = false; b.textContent = uiSaid('set-check-folders', 'Check shared folders'); }
     });
     const MEMORY_CHOICES = [768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384];
     const DISK_CHOICES = [8, 10, 16, 20, 32, 48, 64, 96, 128, 192, 256];
@@ -2181,6 +3039,36 @@
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/health-react`, { on: $('react-on').checked, message: $('react-message').value, command: $('react-command').value }); $('react-said').textContent = 'Saved.'; }
         catch (error) { $('react-said').textContent = error.message; }
     });
+    /* WHY ITS TOOL STOPPED, said plainly: cut for lack of memory (and what to do), else its log's
+       last lines. `last` was kept when it ended; `now` is read in the machine when it runs. */
+    function paintToolExit(r) {
+        const body = $('tool-exit-body'); body.replaceChildren();
+        const rep = r?.last ?? null; const now = r?.now ?? null;
+        if (!rep && !now) { body.hidden = !r; if (r) body.append(el('p', 'hint', 'Nothing kept yet: its tool has not ended since this was added, and its machine is not running.')); return; }
+        body.hidden = false;
+        const show = (title, x) => {
+            if (!x) return;
+            const box = el('div', 'tool-exit-one');
+            box.append(el('p', '', [title, x.at ? new Date(x.at).toLocaleString() : ''].filter(Boolean).join(' · ')));
+            if (x.oom?.length) {
+                box.append(el('p', 'error', `Stopped for lack of memory: the machine${x.memoryMb ? ` (${sizeWords(x.memoryMb)})` : ''} ran out. Give it more memory below, or start its tool fresh.`));
+                const pre = el('pre', 'tool-exit-lines'); pre.textContent = x.oom.join('\n'); box.append(pre);
+            } else box.append(el('p', 'hint', 'No program was stopped for lack of memory.'));
+            if (x.log?.length) {
+                const d = document.createElement('details'); const sm = document.createElement('summary'); sm.textContent = `Last lines of its own log${x.logFile ? ` (${x.logFile.split('/').pop()})` : ''}`;
+                const pre = el('pre', 'tool-exit-lines'); pre.textContent = x.log.join('\n'); d.append(sm, pre); box.append(d);
+            }
+            body.append(box);
+        };
+        show('Now, in its machine', now);
+        show('When its tool last ended', rep);
+    }
+    $('tool-exit-look').addEventListener('click', async () => {
+        const b = $('tool-exit-look'); b.disabled = true; b.textContent = 'Looking…';
+        try { paintToolExit(await post(`${API}/conversations/${encodeURIComponent(current)}/exit-report`, {})); }
+        catch (error) { $('tool-exit-body').replaceChildren(el('p', 'error', error.message)); $('tool-exit-body').hidden = false; }
+        b.disabled = false; b.textContent = 'Why did its tool stop?';
+    });
     function paintMachine(here) {
         void paintReact(here);
         /* Its curves: asked again when it changes, or once in a while (paintCurves). */
@@ -2198,6 +3086,7 @@
             fact('Works in', here.work === 'kept' ? 'a folder kept here (/work)' : 'the disk of its machine (/work)');
         }
         healthLines($('machine-health'), here?.health ?? null);
+        if ($('tool-exit').dataset.of !== (here?.name ?? '')) { $('tool-exit').dataset.of = here?.name ?? ''; paintToolExit(here?.lastExit ? { last: here.lastExit } : null); }
         $('machine-restarted').textContent = here?.restarted ?? ''; $('machine-restarted').hidden = !here?.restarted;
         /* The choices are not painted over while somebody is choosing. */
         const memory = $('machine-memory'); const disk = $('machine-disk'); const cores = $('machine-cpus');
@@ -2208,7 +3097,8 @@
             cores.replaceChildren(...Array.from({ length: most }, (_, i) => i + 1).map((n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = `${n}${n === (here.cpus ?? 1) ? ' (now)' : ''}${n === most && n > 1 ? ' (all of this server)' : ''}`; return o; }));
             cores.value = String(here.cpus ?? 1);
             const least = here.memoryMinMb ?? 512;
-            const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least), here.memoryMb])].sort((a, b) => a - b);
+            /* In a shared machine (#221): its limit there, up to the machine's own memory. */
+            const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least && (!here.sharedMachine || m <= (here.machineMb ?? m))), here.memoryMb])].sort((a, b) => a - b);
             memory.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = `${sizeWords(m)}${m === here.memoryMb ? ' (now)' : ''}${m === least ? ' (least for its tool)' : ''}`; return o; }));
             memory.value = String(here.memoryMb);
             const now = here.diskGb ?? 8;
@@ -2225,17 +3115,101 @@
         $('machine-size-wait').textContent = waiting; $('machine-size-wait').hidden = !waiting;
         /* Asleep: chosen now, applied as it wakes -- it is not woken for it. */
         $('machine-size-hint').textContent = here?.asleep === true
-            ? 'Asleep: kept and applied when it wakes. A disk only grows.'
-            : 'Restarts the machine; its work stays. A disk only grows.';
+            ? 'Asleep: applied when it wakes · a disk only grows'
+            : 'Restarts it · a disk only grows';
         $('machine-later-text').textContent = here?.sizeAtWake ? `Will be applied when it wakes: ${laterWords(here.sizeAtWake)}` : '';
         $('machine-later').hidden = !here?.sizeAtWake;
         $('machine-size-apply').textContent = here?.asleep === true ? 'Keep for its wake' : 'Apply...';
+        /* In a shared machine (#221): its memory is its limit there (no restart), cores and disk the machine's; the
+           machine's own memory below, which restarts all in it. */
+        const sharedHere = Boolean(here?.sharedMachine) && !DEVICE;
+        for (const id of ['machine-cpus', 'machine-disk']) { $(id).hidden = sharedHere; $(id).previousElementSibling.hidden = sharedHere; }
+        $('machine-memory').previousElementSibling.textContent = sharedHere ? 'Its limit' : 'Memory';
+        $('machine-size-title').textContent = sharedHere ? 'Memory' : 'Memory, cores and disk';
+        if (sharedHere) { $('machine-size-hint').textContent = 'Its limit in the shared machine · from its next start'; $('machine-size-apply').textContent = 'Apply'; }
+        $('shared-size').hidden = !sharedHere || here.phase !== 'ready';
+        /* Where it runs (#221, 14-11): its own machine, or a shared one and who else is there; Copy... and Move...
+           open the wizard, for one that is ready. */
+        $('where-row').hidden = DEVICE || !here;
+        if (here) {
+            $('where-now').textContent = whereWords(here);
+            /* Its machine shared with others: stopping or restarting it stops them too -- said where it runs. */
+            const sharers = here.sharedMachine ? conversations.some((x) => x.sharedMachine === here.sharedMachine && x.name !== here.name) : false;
+            $('where-now').title = sharers ? uiSaid('set-where-stops', 'Stopping it stops them too') : '';
+            if (sharers) $('where-now').append(' · ', uiSaid('set-where-stops', 'Stopping it stops them too'));
+            for (const id of ['where-copy', 'where-move']) $(id).disabled = here.phase !== 'ready';
+        }
+        if (sharedHere && document.activeElement !== $('shared-memory')) {
+            const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine);
+            const floor = Math.max(1024, ...inIt.map((x) => x.memoryMb ?? 0)); const now = here.machineMb ?? floor;
+            const sizes = [...new Set([now, ...MEMORY_CHOICES.filter((m) => m >= floor)])].sort((a, b) => a - b);
+            $('shared-memory').replaceChildren(...sizes.map((m) => Object.assign(document.createElement('option'), { value: String(m), textContent: `${sizeWords(m)}${m === now ? ' (now)' : ''}` })));
+            $('shared-memory').value = String(now);
+        }
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
+        /* A stop that hangs: forced by itself (the default), or asked first. */
+        for (const b of $('m-escalate').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.stopEscalate !== false)));
+        /* Its watchdog: off, or how long it waits (a custom one shown in its field). */
+        paintWatchdog(here);
         /* Whether its tool asks before acting -- for a tool that can be given every right in its machine. */
         $('rights-box').hidden = DEVICE || !here?.rights;
         for (const b of $('ask-first').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.askFirst === true)));
+        void paintConvHand(here);
+        paintConvStates(here);
+    }
+    /* A CONVERSATION'S AT HAND: its machine's three tiles, from its health (memory, disk) and its last hour
+       (/api/history, read at most every 30 s). */
+    const convHandAt = { of: '', at: 0, h: null };
+    /* Its tiles while they are read, at once as its settings open: never those of the one shown before. */
+    function convHandLoading(here) {
+        const box = $('panel-tiles');
+        if (DEVICE || !here || here.asleep || here.phase !== 'ready') return;
+        if (box.dataset.of === here.name && box.children.length) return;
+        box.dataset.of = here.name; box.replaceChildren(...handTilesLoading()); box.hidden = false; KIT.loading(box);
+    }
+    async function paintConvHand(here) {
+        const box = $('panel-tiles');
+        if (DEVICE || !here || here.asleep || here.phase !== 'ready') { box.hidden = true; return; }
+        convHandLoading(here);
+        /* One reading at a time, awaited by every painting meanwhile: never tiles drawn without it while it comes. */
+        if (convHandAt.of !== here.name || Date.now() - convHandAt.at > 30_000) { convHandAt.of = here.name; convHandAt.at = Date.now(); convHandAt.h = handHistory(here.name); }
+        const h = await convHandAt.h;
+        if (current !== here.name) return;
+        const health = here.health;
+        const tiles = [];
+        const mem = health?.memory;
+        const memUsed = mem?.totalMb ? 100 - (mem.availableMb / mem.totalMb) * 100 : lastOf(h?.memory);
+        if (memUsed !== null && memUsed !== undefined) tiles.push(handTile(uiSaid('set-memory', 'Memory'), memUsed, mem ? uiSaid('set-free-of', '{free} free of {total}', { free: GB(mem.availableMb), total: GB(mem.totalMb) }) : '', h?.memory, levelAt(memUsed)));
+        const diskLeft = health?.disks?.['/']?.availableMb;
+        const diskUsed = lastOf(h?.disk) ?? (diskLeft !== undefined && here.diskGb ? 100 - (diskLeft / (here.diskGb * 1024)) * 100 : null);
+        if (diskUsed !== null) tiles.push(handTile(uiSaid('set-disk', 'Disk'), diskUsed, diskLeft !== undefined ? uiSaid('set-left-of', '{free} left of {total}', { free: GB(diskLeft), total: `${here.diskGb} GB` }) : `${here.diskGb} GB`, h?.disk, levelAt(diskUsed)));
+        const cpu = lastOf(h?.cpu);
+        if (h) tiles.push(handTile(uiSaid('set-cpu', 'CPU'), cpu, uiSaid(here.cpus === 1 ? 'set-core' : 'set-cores', here.cpus === 1 ? '1 core' : '{n} cores', { n: here.cpus ?? 1 }), h.cpu, levelAt(cpu ?? 0)));
+        for (const t of tiles) t.addEventListener('click', () => { openChapter('machine')?.scrollIntoView({ block: 'start' }); });
+        box.replaceChildren(...tiles); box.hidden = tiles.length === 0;
+        KIT.loading(box, false);
+    }
+    /* What each folded chapter of a conversation says: its state now. */
+    function paintConvStates(here) {
+        if (DEVICE || !here) return;
+        const join = (...parts) => parts.filter(Boolean).join(' · ');
+        chapterNow('general', join(here.title || here.name, here.group, here.toolLabel ?? here.tool));
+        chapterNow('machine', join(sizeWords(here.memoryMb), uiSaid(here.cpus === 1 ? 'set-core' : 'set-cores', here.cpus === 1 ? '1 core' : '{n} cores', { n: here.cpus ?? 1 }), here.diskGb ? `${here.diskGb} GB` : ''));
+        const given = givenCount(here);
+        chapterNow('access', join(uiSaid(given === 1 ? 'set-acc-asset-1' : 'set-acc-asset-n', given === 1 ? '1 asset' : '{n} assets', { n: given }), here.offline ? uiSaid('set-offline', 'offline') : ''));
+        const shared = $('share-here').children.length;
+        chapterNow('sharing', shared ? uiSaid(shared === 1 ? 'set-device' : 'set-devices', shared === 1 ? '1 device' : '{n} devices', { n: shared }) : uiSaid('set-no-device', 'No device'));
+        const chatOn = levelsWord('talk-on');
+        chapterNow('chat', join(chatOn ? `${uiSaid('set-chat', 'Chat')} ${chatOn.toLowerCase()}` : '', here.chatName ? `“${here.chatName}”` : ''));
+        const w = here.wakeups?.items ?? [];
+        chapterNow('wakeups', w.length ? uiSaid('set-wakeups-on', '{on} of {n} on', { on: w.filter((x) => x.on).length, n: w.length }) : uiSaid('set-none', 'None'));
+        chapterNow('answerer', here.answerer ? (here.answerer.on ? uiSaid('set-on', 'On') : uiSaid('set-off', 'Off')) : '');
+        const hl = here.health;
+        const wrong = (hl?.problems ?? []).filter((p) => p.level === 'warn' || p.level === 'bad');
+        chapterNow('health', here.asleep ? uiSaid('set-asleep', 'Asleep') : !hl ? uiSaid('set-not-looked', 'Not looked at yet') : join(wrong.length ? wrong[0].text : hl.state === 'Running' ? uiSaid('set-running-well', 'Running · nothing wrong') : hl.state, hl.at ? agoSaid(hl.at) : ''));
+        chapterNow('advanced', uiSaid('set-conv-advanced', 'Archive · reset · delete'));
     }
     for (const b of $('ask-first').children) {
         b.addEventListener('click', async () => {
@@ -2263,6 +3237,15 @@
         if (!here) return;
         const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value); const cpus = Number($('machine-cpus').value) || (here.cpus ?? 1);
         if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8) && cpus === (here.cpus ?? 1)) { $('panel-error').textContent = 'Nothing to change: choose another memory, cores or disk first.'; $('panel-error').hidden = false; return; }
+        /* In a shared machine: its limit, set at once -- nothing stopped. */
+        if (here.sharedMachine) {
+            $('panel-error').hidden = true;
+            void (async () => {
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb }); await refresh(); paintMachine(conversations.find((x) => x.name === name)); }
+                catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+            })();
+            return;
+        }
         const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', cpus !== (here.cpus ?? 1) ? `${cpus} core${cpus > 1 ? 's' : ''} (now ${here.cpus ?? 1})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
         /* Asleep: kept for its wake, from Settings, where it is then said; nothing is stopped or woken now. */
         if (here.asleep === true) {
@@ -2279,6 +3262,204 @@
             'Change it', async () => {
                 disconnect(); say('restarting', 'connecting'); show('Changing its machine...'); $('notice-spin').hidden = false;
                 try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb, diskGb, cpus }); await refresh(); enter(); }
+                catch (error) { show(error.message, 'Back', enter); }
+            }, resume);
+    });
+
+    /* ---------- COPY OR MOVE (#221, 14-11): a wizard of two screens over the page ----------
+       1. Choose: Copy (this one stays as it is) or Move (the same conversation, another machine), and where it
+          runs -- its own machine, a shared machine there (who lives in it, its memory), or a new one (named, its
+          memory chosen). Moving out of a shared machine does not exist yet: said so, not offered.
+       2. Check: what goes and what does not; for a move, its own machine deleted, in red.
+       Confirmed, a copy closes it at once: the person stays where they are, the copy is a job « under way », and
+       its end is one line at the bottom (« Open it », or « See why » in Settings, Jobs). A move does as it did:
+       the page waits for it and reconnects. Work on its own machine's disk cannot go: kept here first. */
+    function whereWords(c) {
+        if (!c.sharedMachine) return uiSaid('set-where-own', 'Its own machine');
+        const others = conversations.filter((x) => x.sharedMachine === c.sharedMachine && x.name !== c.name).map((x) => x.title ?? x.name);
+        return others.length
+            ? uiSaid('set-where-shared', 'Shared machine « {m} », with {others}', { m: c.sharedMachine, others: others.join(', ') })
+            : uiSaid('set-where-alone', 'Shared machine « {m} », alone in it', { m: c.sharedMachine });
+    }
+    /* The shared machines there: their names, who lives in each, its memory. */
+    function sharedMachines() {
+        const by = new Map();
+        for (const c of conversations) {
+            if (!c.sharedMachine) continue;
+            const m = by.get(c.sharedMachine) ?? { name: c.sharedMachine, who: [], mb: c.machineMb };
+            m.who.push(c.title ?? c.name); m.mb ??= c.machineMb;
+            by.set(c.sharedMachine, m);
+        }
+        return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    /* What is chosen: of which conversation, copy or move, and where ('' its own machine, 'new', or a machine's name). */
+    const cm = { of: '', kind: 'copy', place: '' };
+    const cmHere = () => conversations.find((x) => x.name === cm.of);
+    const cmCard = (place, title, small, { disabled = false } = {}) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'cm-card'; b.setAttribute('role', 'radio');
+        b.dataset.place = place; b.disabled = disabled;
+        b.setAttribute('aria-checked', String(!disabled && cm.place === place));
+        b.append(Object.assign(document.createElement('b'), { textContent: title }));
+        if (small) b.append(Object.assign(document.createElement('small'), { textContent: small }));
+        b.addEventListener('click', () => { cm.place = place; paintCm(); if (place === 'new') $('cm-new-name').focus(); });
+        return b;
+    };
+    /* The places it may go, for a copy or a move of this one; the one chosen kept if it still is one. */
+    function cmPlaces(here) {
+        const machines = sharedMachines().filter((m) => !(cm.kind === 'move' && m.name === here.sharedMachine));
+        /* Out of a shared machine (15-11): into one of its own, first; or into another shared one. */
+        const own = cm.kind === 'copy' || Boolean(here.sharedMachine);
+        const open = [...(own ? [''] : []), ...(cm.kind === 'move' && here.sharedMachine ? [] : [...machines.map((m) => m.name), 'new'])];
+        if (!open.includes(cm.place)) cm.place = open[0];
+        const cards = [];
+        if (own) cards.push(cmCard('', uiSaid('set-where-own', 'Its own machine')));
+        if (cm.kind === 'move' && here.sharedMachine) return { cards, open };
+        for (const m of machines) {
+            const small = [m.who.length ? uiSaid('set-cm-with', 'With {who}', { who: m.who.join(', ') }) : '', m.mb ? sizeWords(m.mb) : ''].filter(Boolean).join(' · ');
+            cards.push(cmCard(m.name, uiSaid('set-cm-shared', 'Shared machine « {m} »', { m: m.name }), small));
+        }
+        cards.push(cmCard('new', uiSaid('set-cm-new', 'A new shared machine')));
+        return { cards, open };
+    }
+    /* Where it goes, as asked of the server: { machine?, machineMb? }, its words, or why it cannot. */
+    function cmTarget(here) {
+        if (cm.place === '') return { body: {}, said: uiSaid('set-where-own', 'Its own machine') };
+        const machine = cm.place === 'new' ? $('cm-new-name').value.trim() : cm.place;
+        if (cm.place === 'new' && !machine) return { why: uiSaid('set-cm-name-first', 'Name the shared machine first') };
+        if (!/^[a-z][a-z0-9-]{0,31}$/.test(machine)) return { why: uiSaid('set-cm-name-bad', 'Lower-case letters, digits, hyphens') };
+        if (conversations.some((x) => x.name === machine)) return { why: uiSaid('set-cm-name-taken', 'That is a conversation\'s name') };
+        /* A name typed that is a machine there already: that one, its memory its own. */
+        const known = sharedMachines().some((m) => m.name === machine);
+        if (cm.kind === 'move' && machine === here.sharedMachine) return { why: uiSaid('set-cm-there', 'It is there already') };
+        const machineMb = known ? undefined : Number($('cm-new-mb').value);
+        return { body: { machine, ...(machineMb ? { machineMb } : {}) }, machine, known, machineMb };
+    }
+    /* Screen 1, painted again as it is chosen. */
+    function paintCm() {
+        const here = cmHere();
+        if (!here) { closeCm(); return; }
+        const t = here.title ?? here.name;
+        for (const b of document.querySelectorAll('#cm .cm-kinds .cm-card')) b.setAttribute('aria-checked', String(b.dataset.kind === cm.kind));
+        $('cm-sheep').dataset.kind = cm.kind;
+        if (!$('cm-choose').hidden) {
+            $('cm-title').textContent = uiSaid('set-cm-title', 'Copy or move {t}', { t });
+            const { cards, open } = cmPlaces(here);
+            $('cm-places').replaceChildren(...cards);
+            $('cm-new').hidden = cm.place !== 'new' || !open.includes('new');
+            const typed = $('cm-new-name').value.trim();
+            $('cm-new-mb').hidden = sharedMachines().some((m) => m.name === typed);
+            const onDisk = here.work === 'disk';
+            $('cm-why').textContent = onDisk ? uiSaid('set-cm-disk', 'Its work is on its disk: keep it here first') : '';
+            $('cm-why').hidden = !onDisk;
+            $('cm-next').disabled = onDisk || !open.length;
+        }
+    }
+    function openCm(kind) {
+        const here = conversations.find((x) => x.name === current);
+        if (DEVICE || !here || here.phase !== 'ready') return;
+        if (cm.of !== here.name) { $('cm-new-name').value = ''; $('cm-copy-title').value = ''; }
+        Object.assign(cm, { of: here.name, kind, place: kind === 'copy' || here.sharedMachine ? '' : (sharedMachines().find((m) => m.name !== here.sharedMachine)?.name ?? 'new') });
+        $('machine-names').replaceChildren(...sharedMachines().map((m) => Object.assign(document.createElement('option'), { value: m.name })));
+        $('cm-copy-title').value = `${here.title ?? here.name} (copy)`;
+        $('cm-reminders').checked = false;
+        /* Its sheep: two for a copy (the second slides out of the first), one walking for a move. */
+        if (!$('cm-sheep').childElementCount) $('cm-sheep').innerHTML = `<div class="mascot cm-one">${MASCOTS[MASCOT]()}</div><div class="mascot cm-one">${MASCOTS[MASCOT]()}</div>`;
+        $('cm-choose').hidden = false; $('cm-check').hidden = true;
+        paintCm();
+        if (!$('cm').open) $('cm').showModal();
+        document.querySelector('#cm .cm-kinds .cm-card[aria-checked="true"]')?.focus();
+    }
+    function closeCm() { if ($('cm').open) $('cm').close(); }
+    $('where-copy').addEventListener('click', () => openCm('copy'));
+    $('where-move').addEventListener('click', () => openCm('move'));
+    for (const b of document.querySelectorAll('#cm .cm-kinds .cm-card')) b.addEventListener('click', () => { cm.kind = b.dataset.kind; paintCm(); });
+    $('cm-new-name').addEventListener('input', () => { $('cm-new-mb').hidden = sharedMachines().some((m) => m.name === $('cm-new-name').value.trim()); $('cm-why').hidden = true; });
+    $('cm-cancel').addEventListener('click', closeCm);
+    /* Escape closes the wizard, and only it: never the place under it too. */
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && $('cm').open) { event.stopImmediatePropagation(); event.preventDefault(); closeCm(); } }, true);
+    /* Screen 2: what it does, said for the copy or the move chosen. */
+    $('cm-next').addEventListener('click', () => {
+        const here = cmHere();
+        if (!here) return;
+        const goes = cmTarget(here);
+        if (goes.why) { $('cm-why').textContent = goes.why; $('cm-why').hidden = false; return; }
+        const t = here.title ?? here.name;
+        const where = goes.machine ? `« ${goes.machine} »` : uiSaid('set-cm-own-to', 'its own machine');
+        $('cm-title').textContent = cm.kind === 'copy' ? uiSaid('set-cm-copy-to', 'Copy {t} to {where}', { t, where }) : uiSaid('set-cm-move-to', 'Move {t} into {where}', { t, where });
+        $('cm-new-line')?.remove();
+        if (goes.machine && !goes.known) $('cm-check').prepend(Object.assign(document.createElement('p'), { id: 'cm-new-line', className: 'cm-not', textContent: uiSaid('set-cm-new-line', 'A new shared machine · {size}', { size: sizeWords(goes.machineMb) }) }));
+        $('cm-copy-part').hidden = cm.kind !== 'copy'; $('cm-move-part').hidden = cm.kind !== 'move';
+        /* Out of a shared machine (15-11): its own machine is built, its place there removed -- the machine itself with the last one in it. */
+        const out = cm.kind === 'move' && here.sharedMachine;
+        const alone = out && !conversations.some((x) => x.name !== here.name && x.sharedMachine === here.sharedMachine);
+        $('cm-stops').textContent = out ? uiSaid('set-cm-stops-out', 'Its tool stops for a few minutes') : uiSaid('set-cm-stops', 'Its tool stops for about a minute');
+        $('cm-deleted').textContent = !out ? uiSaid('set-cm-deleted', 'Its own machine is deleted') : alone ? uiSaid('set-cm-shared-deleted', 'The shared machine « {m} » is deleted', { m: here.sharedMachine }) : uiSaid('set-cm-place-deleted', 'Its place in « {m} » is deleted', { m: here.sharedMachine });
+        $('cm-go').textContent = cm.kind === 'copy' ? uiSaid('set-cm-copy-go', 'Copy it') : uiSaid('set-cm-move-go', 'Move it');
+        $('cm-go').className = 'primary';
+        $('cm-choose').hidden = true; $('cm-check').hidden = false;
+        (cm.kind === 'copy' ? $('cm-copy-title') : $('cm-go')).focus();
+    });
+    $('cm-back').addEventListener('click', () => { $('cm-check').hidden = true; $('cm-choose').hidden = false; paintCm(); $('cm-next').focus(); });
+    $('cm-go').addEventListener('click', async () => {
+        const name = cm.of;
+        const here = cmHere();
+        if (!here) return;
+        const goes = cmTarget(here);
+        if (goes.why) return;
+        closeCm();
+        if (cm.kind === 'move') {
+            /* As it was: the page waits for the move, then reconnects to it in its new machine. */
+            leavePanel();
+            disconnect(); say('moving', 'connecting'); show('Moving...'); $('notice-spin').hidden = false;
+            try { await post(`${API}/conversations/${encodeURIComponent(name)}/into-machine`, goes.body); await refresh(); enter(); }
+            catch (error) { show(error.message, 'Back', enter); }
+            return;
+        }
+        const title = $('cm-copy-title').value.trim() || `${here.title ?? here.name} (copy)`;
+        try {
+            const made = await post(`${API}/conversations/${encodeURIComponent(name)}/copy`, { title, ...goes.body, ...($('cm-reminders').checked ? { reminders: true } : {}) });
+            if (made?.name) copiesWatched.add(made.name);
+            await refresh();
+        } catch (error) { cmToast(`✗ ${error.message}`, 'bad'); }
+    });
+    /* Its end, read with the jobs (paintJobs): done, « Open it »; failed or removed, « See why ». */
+    function cmJobsSeen() {
+        for (const name of copiesWatched) {
+            const end = jobsNow.done.find((j) => j.conversation === name);
+            if (!end) continue;
+            copiesWatched.delete(name);
+            if (end.result === 'done') cmToast(`✓ ${uiSaid('set-cm-ready', 'Copy ready')}`, 'ok', uiSaid('set-cm-open', 'Open it'), () => select(name, { step: true }));
+            else cmToast(`✗ ${uiSaid('set-cm-failed', 'Not copied')}`, 'bad', uiSaid('set-cm-see-why', 'See why'), async () => { await openSettings(); openChapter('s-jobs')?.scrollIntoView({ block: 'start' }); });
+        }
+    }
+    let cmToastTimer;
+    function cmToast(text, tone, label, act) {
+        const toast = $('cm-toast');
+        $('cm-toast-text').textContent = text;
+        toast.dataset.tone = tone;
+        $('cm-toast-go').hidden = !label;
+        $('cm-toast-go').textContent = label ?? '';
+        $('cm-toast-go').onclick = () => { toast.hidden = true; void act?.(); };
+        toast.hidden = false;
+        clearTimeout(cmToastTimer); cmToastTimer = setTimeout(() => { toast.hidden = true; }, 60_000);
+    }
+    $('cm-toast-close').addEventListener('click', () => { $('cm-toast').hidden = true; });
+
+    /* ITS SHARED MACHINE'S MEMORY (#221): asked first, naming every conversation it interrupts. */
+    $('shared-size').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = current;
+        const here = conversations.find((x) => x.name === name);
+        if (!here?.sharedMachine) return;
+        const machineMb = Number($('shared-memory').value);
+        if (machineMb === here.machineMb) { $('panel-error').textContent = 'Nothing to change: choose another memory first.'; $('panel-error').hidden = false; return; }
+        const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine).map((x) => x.title ?? x.name);
+        leavePanel();
+        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
+        show(`Give the shared machine « ${here.sharedMachine} » ${sizeWords(machineMb)} of memory (now ${sizeWords(here.machineMb ?? 0)})? IT IS STOPPED AND STARTED AGAIN: ${inIt.join(', ')} ${inIt.length > 1 ? 'are' : 'is'} interrupted.`,
+            'Change it', async () => {
+                disconnect(); say('restarting', 'connecting'); show('Changing the shared machine...'); $('notice-spin').hidden = false;
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { machineMb }); await refresh(); enter(); }
                 catch (error) { show(error.message, 'Back', enter); }
             }, resume);
     });
@@ -2406,7 +3587,8 @@
                 : state === 'live' ? 'It is there. Below: what is ready, and what it says now.' : `Its screen: ${state}.`;
         $('simple-state').dataset.needs = String(Boolean(c?.answerer?.needs));
         $('simple-says').textContent = saysNow() || 'Nothing on its screen yet.';
-        if (Date.now() - simpleFilesAt > 8000) void paintSimpleFiles();
+        /* Its files are under the plain screen: not read while the chat covers it. */
+        if (Date.now() - simpleFilesAt > 8000 && !$('simple-plain').hidden) void paintSimpleFiles();
     }
     $('simple-toggle').addEventListener('click', () => toggleSimple());
     function toggleSimple() {
@@ -2423,14 +3605,57 @@
        send, the words of this device's language, and how a file is opened. */
     let talk = { on: false, messages: [] };
     let talkOf = '';
+    /* KEPT CHATS (15-11): another conversation opened shows its chat at once, never a blank one while it
+       comes. This page keeps, in memory only, each one's chat state and the end of its thread: fetched in
+       the background, one at a time, for those of the list whose chat is on; again only when the list says
+       it moved, and then only what changed (the server's cursor). The chat open keeps its own copy as it
+       looks again. Opened, the copy is drawn at once, then the whole window is fetched and put in its place. */
+    const KEPT_LAST = 50;
+    const KEPT_EVERY_MS = 10_000;
+    const kept = new Map();
+    /* Kept once loaded: an import() asked again resolves only after the next frame, a blank one. */
+    let parleyLoaded = null;
+    const parleyUi = () => (parleyLoaded ? Promise.resolve(parleyLoaded) : import(new URL('vendor/parley-ui.js', new URL(DEVICE ? '/c/' : '/', location.href)).href).then((m) => { parleyLoaded = m; return m; }));
+    const keptOf = (name) => { if (!kept.has(name)) kept.set(name, { state: null, thread: null, mark: '' }); return kept.get(name); };
+    let keeping = false;
+    async function keepChats() {
+        if (DEVICE || keeping || document.hidden) return;
+        keeping = true;
+        try {
+            for (const n of [...kept.keys()]) if (!conversations.some((x) => x.name === n && x.talk)) kept.delete(n);
+            const { since } = await parleyUi();
+            for (const c of [...conversations]) {
+                if (!c.talk || c.phase !== 'ready' || c.name === threadOf) continue;
+                const mark = JSON.stringify(c.talk);
+                const was = kept.get(c.name);
+                if (was?.mark === mark && was.thread) continue;
+                /* Moved again soon after (the list read every 1.5 s while a machine works): its copy waits a little. */
+                if (was?.thread && Date.now() - (was.at ?? 0) < KEPT_EVERY_MS) continue;
+                const cursor = typeof was?.thread?.cursor === 'string' && was.thread.cursor ? was.thread.cursor : null;
+                const ask = (params) => fetch(talkPath(c.name, '', params)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+                const [state, got] = await Promise.all([ask({ state: 1 }), ask({ last: KEPT_LAST, ...(cursor ? { since: cursor } : {}) })]);
+                /* Opened meanwhile: its chat keeps its own copy. */
+                if (c.name === threadOf) continue;
+                if (state && state.on !== true) { kept.delete(c.name); continue; }
+                if (!state || !Array.isArray(got?.messages)) continue;
+                kept.set(c.name, { state, thread: cursor ? since(was.thread, got) : got, mark, at: Date.now() });
+            }
+        } finally { keeping = false; }
+    }
     let chatView = 'simple';
     try { chatView = localStorage.getItem('clavarium-chat-view') === 'detailed' ? 'detailed' : 'simple'; } catch { /* a private window */ }
     /* "Send when I stop", for dictation in the chat: kept by this device. */
     let chatAuto = false;
     try { chatAuto = localStorage.getItem('clavarium-chat-auto') === '1'; } catch { /* as above */ }
+    /* The silence before it sends by itself, chosen on this device (Parley's menu, under the switch). */
+    let chatAutoMs;
+    try { chatAutoMs = Number(localStorage.getItem('clavarium-chat-auto-ms')) || undefined; } catch { /* as above */ }
+    const keepAutoMs = (ms) => { chatAutoMs = ms; try { localStorage.setItem('clavarium-chat-auto-ms', String(ms)); } catch { /* as above */ } };
     const deviceLang = () => (navigator.language || 'en');
     let chatWords = null;
     async function readWords() {
+        /* A device asks its own door only once it has its pairing (start): asked before, it was refused (401), and kept empty. */
+        if (DEVICE && !pairing) return {};
         if (!chatWords) chatWords = await fetch(`${API}/talk/words?${new URLSearchParams({ lang: deviceLang() })}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
         return chatWords;
     }
@@ -2451,20 +3676,29 @@
         /* Whether it is on, nothing of the thread: asked every few seconds. */
         /* No answer (the network cut for a moment, the server restarting): what was known is kept. Taken
            for "off", the chat would be taken down and drawn again -- its box with it, and a tablet's keyboard. */
-        const known = talkOf === current ? talk : null;
+        const name = current;
+        const known = talkOf === name ? talk : null;
         const off = { on: false, messages: [] };
-        talk = await fetch(talkPath(current, '', { state: 1 })).then((r) => (r.ok ? r.json() : r.status >= 500 ? known ?? off : off)).catch(() => known ?? off);
-        talkOf = current;
+        const got = await fetch(talkPath(name, '', { state: 1 })).then((r) => (r.ok ? r.json() : r.status >= 500 ? known ?? off : off)).catch(() => known ?? off);
+        /* Asked for the one before, answered once another was open: not taken for this one's. */
+        if (name !== current) return talk;
+        talk = got; talkOf = name;
+        if (talk.on) keptOf(name).state = talk; else kept.delete(name);
         return talk;
     }
-    async function paintThread() {
+    /* `look`: false from the clock below -- the thread drawn already is not asked again (its own clock does). */
+    async function paintThread(look = true) {
         const box = $('simple-thread');
         const wanted = talk.on && talkOf === current;
         box.hidden = !wanted;
         /* Where the tool talks through the app, the chat is the whole screen: one box to write in. */
         /* Its chat off, on this server's own page: said, with the button that turns it on (a device's page keeps the plain screen). */
-        const offer = !DEVICE && !wanted && !noTerminal();
-        $('simple-plain').hidden = wanted || offer;
+        /* Not known yet -- the list not read, its chat not asked, or it is being built or moved: nothing said
+           rather than a wrong screen (14-11: « chat is off », then « Its screen: connecting », then the chat). */
+        const here = conversations.find((x) => x.name === current);
+        const unknown = !DEVICE && (!here || here.phase !== 'ready' || talkOf !== current);
+        const offer = !unknown && !DEVICE && !wanted && !noTerminal();
+        $('simple-plain').hidden = wanted || offer || unknown;
         $('chat-turn').hidden = !offer;
         if (offer) {
             const possible = !(talkOf === current && talk.possible === false);
@@ -2481,13 +3715,18 @@
         if ((wanted || offer) && simple && stopListening) stopVoice();
         paintSimple();
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
-        if (thread && threadOf === current) { void thread.refresh(); return; }
-        thread?.destroy();
-        /* From where this page is: a device's page lives under /c/, and nothing else is open to it. */
-        const [{ mount }, words] = await Promise.all([import(new URL('vendor/parley-ui.js', new URL(DEVICE ? '/c/' : '/', location.href)).href), readWords()]);
+        if (thread && threadOf === current) { if (look !== false) void thread.refresh(); return; }
+        thread?.destroy(); thread = null; threadOf = '';
         const name = current;
+        /* From where this page is: a device's page lives under /c/, and nothing else is open to it. */
+        const [{ mount, since }, words] = await Promise.all([parleyUi(), readWords()]);
         if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
+        /* The short-lived secrets live in this conversation now (secret-scan.mjs): the chat shows each as
+           stars with its time left and a way to forget it. Kept current on each reload, read on each repaint. */
+        const chatSecrets = {}; const goneSecrets = new Set();
+        const refreshSecrets = () => { for (const k of Object.keys(chatSecrets)) delete chatSecrets[k]; for (const s of conversations.find((x) => x.name === name)?.ephemeralSecrets ?? []) chatSecrets[s.name] = { expiresInMs: s.expiresInMs }; for (const k of goneSecrets) chatSecrets[k] = { gone: true }; };
+        refreshSecrets();
         /* The lines of its machine seen so far: what changed comes alone, and their buttons are worked out on all of them. */
         const lines = new Map();
         const withLines = (data, asked) => {
@@ -2496,35 +3735,65 @@
             for (const m of data.messages) if (m.from === 'system') lines.set(m.id, m);
             return data.since === true ? { ...data, messages: [...data.messages.filter((m) => m.from !== 'system'), ...lines.values()] } : data;
         };
+        let first = true;
+        const shaped = (data, asked) => Promise.resolve(withLines(data, asked)).then(machineLines).then((d) => withMachine(d, name)).then((d) => { refreshSecrets(); if (first) { first = false; fadeIn(box); } return d; });
+        /* Kept (15-11): its first look is the copy this page kept, drawn at once; the next one asks the whole
+           window again (the copy may be a shorter one, or old), and it takes its place. Then as before. */
+        let keptFirst = kept.get(name)?.thread ?? null;
+        let whole = false;
+        const keepThread = (data, asked) => {
+            if (!Array.isArray(data?.messages) || asked.before || threadOf !== name) return data;
+            const k = keptOf(name);
+            k.thread = data.since === true ? (k.thread ? since(k.thread, data) : null) : data;
+            k.mark = '';
+            return data;
+        };
         thread = mount(box, {
             words, view: chatView,
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             /* A part of the thread: its end at first, then what changed, the page before on demand (Parley's window). */
             window: windowFor(chatWindow),
-            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)),
+            load: (asked = {}) => {
+                if (keptFirst && !asked.since && !asked.before) {
+                    const data = keptFirst; keptFirst = null; whole = true;
+                    setTimeout(() => { if (thread && threadOf === name) void thread.refresh(); }, 0);
+                    return shaped(data, asked);
+                }
+                const { since: _since, ...all } = asked;
+                const ask = whole && asked.since ? all : asked;
+                whole = false;
+                return fetch(talkPath(name, '', ask)).then((r) => r.json()).then((data) => keepThread(data, ask)).then((data) => shaped(data, ask));
+            },
             /* The whole thread searched, however little of it is shown. */
             search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
-            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}),
+            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, quick: true, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}),
                 /* The choices ticked, the answers of a group, the zone of a picture the answer is about. */
                 ...(extra?.picked ? { picked: extra.picked } : {}), ...(extra?.replies ? { replies: extra.replies } : {}), ...(extra?.about ? { about: extra.about } : {}) }),
             /* Formulas: Parley's own KaTeX, served here. Zones and people may point to a file of a shared folder (file:/work/...). */
             math: { url: new URL('vendor/katex/katex.mjs', new URL(DEVICE ? '/c/' : '/', location.href)).href },
             refs: {
                 label: (ref) => (/^file:\/(work|resources)\//.test(ref) ? 'Open' : null),
-                open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void preview(tab, m[2], m[2].split('/').pop(), 0); },
+                open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void openFromChat(tab, m[2]); },
             },
+            /* A mail it cites ([Subject](mail:TARGET/ID), Parley's schemes), what a request answers, the mail that came back:
+               a chip that opens the mail viewer, read when tapped, by whoever may read that mailbox (else the viewer says so). */
+            schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: name }); } } },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
+            /* A message pinned at the top of the chat (5 at most, either side): wherever the chat may be written in. */
+            ...(!DEVICE || deviceParts.chat === 'write' ? { pin: (to, on) => post(talkPath(name, '/pin'), { to, on }) } : {}),
+            /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
+            ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen-done') return; if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id === 'signinlink') void signinLinkToMe(); else if (tetherAct(id, () => thread?.refresh?.())) return; else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { attach: { upload: (file) => attachToChat(name, file) } } : {}),
             /* Its terminal, when this device was given it. */
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
-            open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
+            open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void openFromChat(tab, inner); },
             ...(noTerminal() ? {} : { terminal: () => seeTerminal() }),
             /* What the tool writes is rendered (Parley builds it element by element), and named by its tool. */
             /* Named as its owner chose, else by the neutral word of the dictionary; its tool, small, in the detailed view. */
@@ -2534,9 +3803,13 @@
             /* Its pictures, from the shared folders only, by the same route as the thumbnails of Files (type proved by the bytes, never SVG). */
             picture: (file) => { if (!file.open) return null; const at = file.open.indexOf(':'); return `${API}/files/thumb?${new URLSearchParams({ c: name, r: file.open.slice(0, at), p: file.open.slice(at + 1) })}`; },
             diagram: drawDiagram, highlight: colourCode,
-            remind: () => post(talkPath(name, '/remind'), {}),
+            /* Short-lived secrets of this conversation: the stars say their time left and offer to forget them. */
+            secrets: chatSecrets,
+            /* Its chip says « deleted » (kept marked gone), or why not -- the error goes back to it (19-11: it said nothing). */
+            forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { goneSecrets.add(secretName); chatSecrets[secretName] = { gone: true }; if (thread && threadOf === name) void thread.refresh(); }),
+            remind: (o) => post(talkPath(name, '/remind'), o?.urgent ? { urgent: true } : {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
-            voice: chatVoice(), autoSend: chatAuto,
+            voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs,
             onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
             touch: touchScreen,
         });
@@ -2553,11 +3826,16 @@
     let tasksTimer = null; let tasksChanges = -1;
     const tasksFolded = (name) => { try { const v = JSON.parse(localStorage.getItem('clavarium-tasks-folded') ?? '{}')[name]; return typeof v === 'boolean' ? v : null; } catch { return null; } };
     const keepTasksFolded = (name, on) => { try { const all = JSON.parse(localStorage.getItem('clavarium-tasks-folded') ?? '{}'); all[name] = on; localStorage.setItem('clavarium-tasks-folded', JSON.stringify(all)); } catch { /* a private window */ } };
-    /* Its binder of batches: the first of that template it was given, not archived. */
+    /* Its binder beside the chat: the one chosen for it (its settings, the same on every
+       device), else the first binder of batches it was given; '-' chosen: none. A chosen binder
+       it no longer has, or archived, gives way to the automatic choice. */
     async function batchesOf(name) {
+        const chosen = conversations.find((x) => x.name === name)?.tasksBinder ?? '';
+        if (chosen === '-') return null;
         const lists = await binderCall('lists', {});
         if (!lists.ok || !Array.isArray(lists.data)) return undefined;
-        return lists.data.find((l) => !l.archived && l.template === TASKS_TEMPLATE && l.grants?.[`conversation:${name}`]) ?? null;
+        const given = lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${name}`]);
+        return (chosen && given.find((l) => l.id === chosen)) || given.find((l) => l.template === TASKS_TEMPLATE) || null;
     }
     /* A card's description, as the panel shows it: plain words, no Markdown signs. */
     const plainText = (md) => String(md ?? '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '').replace(/^\s*[-*]\s+/gm, '').replace(/\s+/g, ' ').trim();
@@ -2593,7 +3871,7 @@
         tasksTimer = setInterval(async () => {
             if (!thread) { clearInterval(tasksTimer); tasksTimer = null; return; }
             if (document.hidden) return;
-            const now = await getJson('/binder/people', null);
+            const now = await peopleNow();
             if (!now || now.changes === tasksChanges) return;
             tasksChanges = now.changes; binderPeople = now.people;
             void paintTasks(threadOf);
@@ -2643,8 +3921,13 @@
     /* "commits:<repository>.<to>.<from>.<n>": those commits, in the review ("See the 3 commits"). A commit a
        line names (7 to 40 hexadecimal characters, a digit among them) is a link to its review, on a line about
        a repository; the agent's own messages are never read for this. */
-    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: '\u2713 Seen' };
+    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', signinlink: 'Show me the link', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse', flash: 'Plug it in and start' };
     const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
+    /* A Tether call an agent asked the owner to allow, offered right in the thread: allow:<id> / deny:<id>. */
+    const DEMANDE = /^(allow|deny|always|flash):[0-9a-f-]{36}$/;
+    const DECISION = { allow: 'yes', deny: 'no', always: 'always' };
+    /* Accept / Refuse a Tether call from a line that asks (a conversation's chat, a room): decided as the owner, then `after`. */
+    const tetherAct = (id, after) => { const m = /^(allow|deny|always):(.+)$/.exec(String(id)); if (!m) return false; void decideTether(m[2], DECISION[m[1]], after); return true; };
     const COMMIT = /^commit:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})$/;
     function openCommits(id) {
         if (DEVICE) return;
@@ -2655,7 +3938,7 @@
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
-        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || id === 'seen-done' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
+        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || id === 'seen-done' || id === 'signinlink' || DEMANDE.test(id) || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
         const label = (id) => { const n = Number(COMMITS.exec(id)?.[4] ?? 0); return n ? (n === 1 ? 'See the commit' : `See the ${n} commits`) : ACTIONS[kindOf(id)]; };
         const linksOf = (m) => {
             const repo = DEVICE ? null : (m.actions ?? []).map((id) => /^review:([a-z0-9][a-z0-9-]*)$/.exec(id)?.[1]).find(Boolean);
@@ -2667,9 +3950,27 @@
         const seenWords = seenAt ? `\u2713 Seen ${new Date(seenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
         /* Restart, offered by a line, is offered no more once its machine was restarted after it. */
         const restartedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'restarted').map((m) => String(m.at ?? '')).sort().pop() ?? '';
-        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt))
+        /* A problem of its machine that went away since (machine-ok): nothing left to see or to do on its line. */
+        const fixedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'machine-ok').map((m) => String(m.at ?? '')).sort().pop() ?? '';
+        const FIXED_GOES = new Set(['seen', 'room', 'disk', 'memory']);
+        /* "Show me the link" on a sign-in handed over, until the next line of that sign-in says how it went. */
+        const signinAt = data.messages.filter((m) => m.from === 'system' && m.event === 'signin-help').map((m) => String(m.at ?? '')).sort().pop() ?? '';
+        /* A Tether demande decided (here, from Assets, or by the agent) is marked done in the thread,
+           carrying its id: Accept / Refuse are then offered no more on the line that asked. */
+        const settled = new Map(data.messages.filter((m) => m.from === 'system' && m.event === 'tether-done' && m.brief).map((m) => [String(m.brief), m]));
+        /* Its card (Parley's request, demandes.mjs): decided, it folds to one line -- accepted, refused, or no longer
+           waiting (timed out, taken back by the agent, stopped); where this screen may not decide, no buttons. */
+        const requestOf = (m) => {
+            const r = m.request;
+            const id = /^allow:(.+)$/.exec(String(r.yes?.id ?? ''))?.[1] ?? '';
+            const done = id ? settled.get(id) : null;
+            if (done) { const o = String(done.outcome ?? ''); return { ...r, state: { decision: o === 'yes' || o === 'always' ? 'yes' : o === 'no' ? 'no' : 'ended', at: String(done.at ?? '') } }; }
+            if (!may(String(r.yes?.id ?? ''))) { const { yes: _y, no: _n, others: _o, ...shown } = r; return shown; }
+            return r;
+        };
+        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1)))).filter((id) => !(id === 'signinlink' && String(m.at ?? '') < signinAt))
             .map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
-        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m) } : m)) };
+        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m), ...(m.request && typeof m.request === 'object' ? { request: requestOf(m) } : {}) } : m)) };
     }
     /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */
     function withMachine(data, name) {
@@ -2696,7 +3997,13 @@
         if (!current) return;
         const name = current;
         const mine = ++opening;
-        await readTalk();
+        /* Kept (15-11): its chat drawn at once from the copy this page has; its state asked meanwhile, and
+           the chat taken down only if it is off now. */
+        const k = kept.get(name);
+        if (k?.state?.on && k.thread) {
+            talk = k.state; talkOf = name;
+            void readTalk().then(() => { if (mine === opening && name === current && !talk.on) void paintThread(); });
+        } else await readTalk();
         if (mine !== opening || name !== current) return;
         const want = talk.on || noTerminal() ? true : simplePref;
         if (want !== simple) { simple = want; simpleFilesAt = 0; }
@@ -2709,6 +4016,8 @@
         if (DEVICE) { $('talk-box').hidden = true; $('voice-mark-box').hidden = true; return; }
         const here = conversations.find((x) => x.name === current);
         if (document.activeElement !== $('chat-name')) $('chat-name').value = here?.chatName ?? '';
+        void paintTasksBinder(here);
+        void paintChatSplit();
         if (document.activeElement !== $('title-name')) $('title-name').value = shownName(here);
         $('title-box').hidden = $('hide-box').hidden = $('group-box').hidden = DEVICE || !here;
         if (document.activeElement !== $('group-name')) $('group-name').value = here?.group ?? '';
@@ -2725,7 +4034,7 @@
         if (talk.on) $('talk-declare').textContent = talk.tools
             ? `Then "Ask the tool to use it": it is told to talk to you here, in ${languageName(deviceLang())}.`
             : 'The tools folder (/tools) is not in place yet: the tool cannot be asked.';
-        if (!talk.on && talk.possible === false) $('talk-about').textContent = 'Needs its work folder kept here (it works on its machine\'s disk)';
+        if (!talk.on && talk.possible === false) { $('talk-about').textContent = 'Needs its work folder kept here (it works on its machine\'s disk)'; $('talk-about').hidden = false; }
     }
     for (const b of $('talk-on').children) {
         b.addEventListener('click', async () => {
@@ -2767,6 +4076,51 @@
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
+    /* WHICH BINDER BESIDE ITS CHAT (#48): automatic, one of the binders it was given, or none.
+       Shown only once it was given a binder. */
+    async function paintTasksBinder(here) {
+        const row = $('tasks-binder-row'); const pick = $('tasks-binder');
+        if (DEVICE || !here) { row.hidden = true; return; }
+        const lists = await binderCall('lists', {});
+        const given = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${here.name}`]) : [];
+        row.hidden = given.length === 0;
+        if (row.hidden || document.activeElement === pick) return;
+        const option = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; return o; };
+        pick.replaceChildren(option('', 'Automatic'), ...given.map((l) => option(l.id, l.title)), option('-', 'None'));
+        const chosen = here.tasksBinder ?? '';
+        pick.value = chosen === '-' || given.some((l) => l.id === chosen) ? chosen : '';
+    }
+    $('tasks-binder').addEventListener('change', async () => {
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/tasks-binder`, { binder: $('tasks-binder').value }); await refresh(); void paintTasks(current); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
+    /* WHEN ITS THREAD IS ARCHIVED (server/talk.mjs setSplit): a choice of a few; another value set elsewhere is shown as it is. */
+    const CHAT_SPLITS = [
+        ['messages:2000', () => uiSaid('set-split-2000', 'Every 2,000 messages')],
+        ['messages:5000', () => uiSaid('set-split-5000', 'Every 5,000')],
+        ['days:7', () => uiSaid('set-split-week', 'Every week')],
+        ['days:1', () => uiSaid('set-split-day', 'Every day')],
+        ['off', () => uiSaid('set-split-never', 'Never')],
+    ];
+    const splitKey = (v) => (v === false ? 'off' : v?.days ? `days:${v.days}` : `messages:${v?.messages ?? 5000}`);
+    async function paintChatSplit() {
+        const name = current;
+        const t = talkOf === name ? talk : await readTalk();
+        if (name !== current) return;
+        $('chat-split-row').hidden = !t?.on || t.split === undefined;
+        if ($('chat-split-row').hidden || document.activeElement === $('chat-split')) return;
+        const now = splitKey(t.split);
+        const choices = CHAT_SPLITS.some(([v]) => v === now) ? CHAT_SPLITS : [...CHAT_SPLITS, [now, () => now.replace(':', ' ')]];
+        $('chat-split').replaceChildren(...choices.map(([v, text]) => { const o = document.createElement('option'); o.value = v; o.textContent = text(); o.selected = v === now; return o; }));
+    }
+    $('chat-split').addEventListener('change', async () => {
+        const [kind, n] = $('chat-split').value.split(':');
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk/split`, kind === 'off' ? { off: true } : { [kind]: Number(n) }); await readTalk(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        $('chat-split').blur(); await paintChatSplit();
+    });
     $('chat-name-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;
@@ -2854,7 +4208,10 @@
         ['docket-failed', 'Could not be handled', 'Said failed by the tool, with why'],
         ['docket-unhandled', 'Not handled', 'Told three times, never said done'],
         ['docket-reminder', 'Reminder set', 'A reminder the tool set itself'],
+        ['signin-help', 'Sign-in', 'Signed in through another conversation'],
+        ['tether-notice', 'Later news', 'A mail came back, an invitation was declined'],
         ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
+        ['machine-ok', 'Machine well again', 'What was wrong with it went away'],
         ['restarted', 'Machine restarted', 'Restarted or built again'],
         ['tools-updated', 'New tools', 'After an update: a restart gives its tool all of them'],
     ];
@@ -2874,6 +4231,29 @@
             return [label, select];
         }));
     }
+    /* BINDERS (#49): Binder's own settings -- how many binders an agent may make, whether
+       agents may add columns, fields or change a binder's type -- read and set through it. */
+    async function paintBinderSettings() {
+        if (DEVICE) return;
+        const got = await binderCall('settings', {});
+        if (!got.ok) return;
+        const s = got.data;
+        if (document.activeElement !== $('binders-agent-lists')) $('binders-agent-lists').value = String(s.agentLists ?? '');
+        for (const [id, on] of [['binders-agent-columns', s.agentColumns === true], ['binders-agent-fields', s.agentFields === true]]) {
+            for (const b of $(id).children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === on));
+        }
+    }
+    async function saveBinderSetting(change) {
+        $('binders-error').hidden = true;
+        const done = await binderCall('edit-settings', change);
+        if (done.ok) { $('binders-saved').textContent = 'Saved.'; setTimeout(() => { $('binders-saved').textContent = ''; }, 2500); }
+        else { $('binders-error').textContent = done.text; $('binders-error').hidden = false; }
+        await paintBinderSettings();
+    }
+    $('binders-agent-lists').addEventListener('change', () => void saveBinderSetting({ agentLists: $('binders-agent-lists').value }));
+    for (const [id, key] of [['binders-agent-columns', 'agentColumns'], ['binders-agent-fields', 'agentFields']]) {
+        for (const b of $(id).children) b.addEventListener('click', () => void saveBinderSetting({ [key]: b.dataset.on === 'true' }));
+    }
     async function saveThreadLevel(kind, level) {
         $('thread-error').hidden = true;
         try {
@@ -2889,7 +4269,9 @@
         all.hidden = !all.hidden;
         if (!all.hidden && wordsSettings) all.textContent = JSON.stringify(Object.fromEntries(Object.entries(wordsSettings.english).filter(([key]) => key !== 'lang')), null, 2);
     });
-    setInterval(() => { if (!document.hidden && current) void readTalk().then(() => { if (simple) void paintThread(); paintSimple(); }); }, 5000);
+    /* Its chat drawn already: Parley's own clock looks at its thread (every 3 s) -- not asked again here,
+       which made two looks side by side (paintThread(false)). */
+    setInterval(() => { if (!document.hidden && current) void readTalk().then(() => { if (simple) void paintThread(false); paintSimple(); }); }, 5000);
 
     $('simple-say').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -2921,7 +4303,8 @@
         $('alerts-on').hidden = Boolean(mine); $('alerts-off').hidden = $('alerts-test').hidden = !mine;
         state.textContent = said ?? (mine ? `On · ${about.devices.length} device${about.devices.length === 1 ? '' : 's'} in all` : `Off${about.devices.length > 0 ? ` · ${about.devices.length} other device${about.devices.length === 1 ? '' : 's'} on` : ''}`);
     }
-    $('alerts-on').addEventListener('click', async () => {
+    /* Turned on for this device: asked by its button, and by the next step of Features (features.js). */
+    async function alertsOn() {
         try {
             if ((await Notification.requestPermission()) !== 'granted') { await paintAlerts('Refused in this browser\'s settings'); return; }
             const { key } = await fetch(`${API}/alerts`).then((r) => r.json());
@@ -2930,7 +4313,8 @@
             await post(`${API}/alerts`, { subscription: subscription.toJSON(), label: /Android/.test(navigator.userAgent) ? 'Android' : /iPad|iPhone/.test(navigator.userAgent) ? 'iPhone or iPad' : 'Computer' });
             await paintAlerts();
         } catch (error) { await paintAlerts(`Could not be set up: ${error.message}`); }
-    });
+    }
+    $('alerts-on').addEventListener('click', () => { void alertsOn(); });
     $('alerts-off').addEventListener('click', async () => {
         const registration = await navigator.serviceWorker.ready;
         const mine = await registration.pushManager.getSubscription();
@@ -2956,7 +4340,7 @@
             const row = document.createElement('div'); row.className = 'wakeup'; row.dataset.kind = w.kind;
             const what = document.createElement('b'); what.textContent = wakeupSays(w);
             const said = document.createElement('p'); said.className = 'hint'; said.textContent = `Typed: ${w.message}`;
-            const last = document.createElement('p'); last.className = 'hint wakeup-last'; last.textContent = w.last ? `Last, ${new Date(w.last.at).toLocaleString()}: ${w.last.what}` : 'Not yet.';
+            const last = document.createElement('p'); last.className = 'hint wakeup-last'; last.textContent = w.last ? `Last: ${agoSaid(w.last.at)} · ${w.last.what}` : 'Not yet.'; last.title = w.last ? new Date(w.last.at).toLocaleString() : '';
             const acts = document.createElement('div'); acts.className = 'row';
             acts.append(modes([['on', 'On'], ['off', 'Off']], w.on ? 'on' : 'off', async (value) => { await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups/${w.id}`, { on: value === 'on' }); await refresh(); paintWakeups(); }, `This wake-up: ${wakeupSays(w)}`));
             const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
@@ -3044,6 +4428,8 @@
         const about = platformSaid.answerer;
         const mine = conversations.find((x) => x.name === current)?.answerer;
         $('answerer-fields').hidden = !about || !mine;
+        /* None set on this installation: its chapter hidden (an empty section is hidden). */
+        $('chapter-answerer').hidden = !about;
         if (!about || !mine) { $('answerer-about').textContent = 'While you are away, several models can answer the simple questions of the tool. None is set on this installation (CLAVARIUM_ANSWERER_URL, CLAVARIUM_ANSWERER_MODELS).'; return; }
         $('answerer-about').textContent = `While you are away, ${about.models.length > 1 ? `${about.models.length} models answer the simple questions of the tool, when they ALL give the same answer` : 'one model answers the simple questions of the tool'}; otherwise you are asked. Turned on, THE SCREEN OF THIS CONVERSATION IS SENT to: ${about.models.join(', ')}.`;
         /* What is being written is not painted over by a refresh. */
@@ -3091,7 +4477,6 @@
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/answerer/resume`, {}); await refresh(); await paintAnswerer(); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
     });
-    const fixedUse = () => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = 'Use'; return s; };
     for (const b of $('network').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
@@ -3101,21 +4486,31 @@
             await paintPanel();
         });
     }
-    /* `picking`: open on what can be attached (the "+ Attach" of the bar). */
-    async function openAccess(picking = false) {
+    /* Its settings, on the Access chapter. `giving`: « Give… » instead, in its Assets tab (07-11, assets step 4). */
+    /* `atAccess`: on its Access chapter (a link that asks for it). The settings button keeps the tab the person was
+       on (14-11: it jumped from Resources to Access by itself, each time the settings were opened or painted again). */
+    async function openAccess(giving = false, { atAccess = true } = {}) {
         if (DEVICE || !current) return;
         if (place !== 'conversations') leavePlace();
+        if (giving) { openGive(); return; }
         goTab('settings');
-        /* What is attached may have changed from another screen: asked again before it is shown. */
+        /* Shown at once with what is known (14-11): its rows do not come one by one while it is asked again. */
+        if (!giving && $('panel').dataset.painted !== current) { $('panel').dataset.painted = current; void paintPanel().catch(() => {}); }
+        if (!giving) { convHandLoading(conversations.find((x) => x.name === current)); curvesLoading($('machine-curves'), current); }
+        /* What it has may have changed from another screen: asked again before it is shown. */
+        const tabShown = $('panel').dataset.tab;
         await refresh();
         await paintPanel();
-        $('attach-picker').hidden = !picking;
-        if (picking) { openChapter('access'); $('attach-picker').scrollIntoView({ block: 'nearest' }); }
+        /* A tab picked by hand while it was asked again is kept: it no longer jumps to Access under the finger. */
+        if (atAccess && $('panel').dataset.tab === tabShown) openChapter('access');
     }
-    $('folders').addEventListener('click', () => { void openAccess(false); });
-    $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
-    $('attach-close').addEventListener('click', () => { $('attach-picker').hidden = true; });
-    $('attach-manage').addEventListener('click', () => { void openAssets(); });
+    $('folders').addEventListener('click', () => {
+        /* A tab chosen before on this device: that one. Never chosen: its Access chapter, as it always opened. */
+        let kept = null; try { kept = localStorage.getItem('clavarium-tab-panel'); } catch { /* a private window */ }
+        void openAccess(false, { atAccess: !kept });
+    });
+    /* « N assets · see »: its Assets tab. */
+    $('access-assets').addEventListener('click', () => { goTab('assets'); });
 
     /* ---------- ASSETS: one design, two pages (G and H) ----------
        The server's (a place, beside Access and Settings): everything kept
@@ -3127,8 +4522,53 @@
     /* BINDER'S LISTS, AS THIS PAGE NAMES THEM: the one place for the word (Assets, a conversation's tab). */
     const LISTS_WORD = { many: 'Binders', one: 'Binder', a: 'a binder', its: 'Its binders' };
     $('view-lists-word').textContent = LISTS_WORD.many; $('listnew-head').textContent = `New ${LISTS_WORD.one.toLowerCase()}`;
-    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
-    const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
+    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['agenda', 'Calendars', 'calendar'], ['contacts', 'Contacts', 'users'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, ''], ['acces', 'Accesses', 'link']];
+    /* The same kinds, their titles in the screen's language (asked at each painting: the words may come late). */
+    const assetKinds = () => ASSET_KINDS.map(([k, title, icon]) => [k, uiSaid(`set-as-k-${k}`, title), icon]);
+    /* A live Tether target shows in the category of its kind (a mailbox among the
+       mailboxes), not apart. Its connecting account is the rest of its id. */
+    const TETHER_CAT = { mail: 'mailbox', calendar: 'agenda', contacts: 'contacts' };
+    const tetherCat = (k) => TETHER_CAT[k] ?? 'acces';
+    const tetherAccount = (id) => String(id).replace(/^(mail|calendar|contacts|files|ssh|browser|screen|computer)-/, '');
+    /* Adding to a type category of live links (a calendar, an address book, an
+       access) is connecting an account: they all open the connect-account form. */
+    const addForm = (k) => (['agenda', 'contacts', 'acces'].includes(k) ? 'connexion' : k);
+    /* Its answer, or { state: 'error', message }: the server's own words, or busy (asked again first). */
+    const readOrSay = async (path) => {
+        for (let i = 0; i < 3; i++) {
+            try {
+                const r = await fetch(`${API}${path}`);
+                const j = await r.json().catch(() => ({}));
+                if (r.ok) return j;
+                /* Down for a moment, or its repository busy (another read holds it): asked again. */
+                if (!(r.status === 503 && (j.down === true || j.kind === 'busy'))) return { state: 'error', message: j.error || 'It could not be read.' };
+            } catch { return { state: 'error', message: 'It could not be read.' }; }
+            await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));
+        }
+        return { state: 'error', message: BUSY };
+    };
+    const getJson = async (path, fallback) => {
+        for (let i = 0; i < 3; i++) {
+            try {
+                const r = await fetch(`${API}${path}`);
+                if (r.ok) return await r.json();
+                if (r.status !== 503) return fallback;
+            } catch { return fallback; }
+            await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));   /* busy a moment: asked again */
+        }
+        return fallback;
+    };
+    /* WHO MAY OWN A CARD, and the binders' count of changes (GET /binder/people): asked by two clocks (the chat's
+       batches, the Binders tab) and a binder opened. One question at a time, and its answer kept a moment, under
+       the 4 s of those clocks: each still sees a change at its next turn, without asking twice. */
+    const PEOPLE_KEPT_MS = 3000;
+    let peopleAsked = null; let peopleAt = 0;
+    const peopleNow = () => {
+        if (peopleAsked && (peopleAt === 0 || Date.now() - peopleAt < PEOPLE_KEPT_MS)) return peopleAsked;
+        const asking = getJson('/binder/people', null).then((got) => { if (peopleAsked === asking) { if (got) peopleAt = Date.now(); else peopleAsked = null; } return got; });
+        peopleAsked = asking; peopleAt = 0;
+        return asking;
+    };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     /* A commit: its line, and the rest of its message under it, opened by a click. */
     function commitRow(c) {
@@ -3139,7 +4579,7 @@
         line.append(summary, el('pre', '', rest));
         return line;
     }
-    const kindIcon = (kind) => { const name = kind === 'send' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : kind === 'mcp' ? 'link' : kind === 'browser' ? 'globe' : kind === 'machine' ? 'square-terminal' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
         const SVG = 'http://www.w3.org/2000/svg';
@@ -3147,48 +4587,247 @@
         for (const d of ['m3 17 2 2 4-4', 'm3 7 2 2 4-4', 'M13 6h8', 'M13 12h8', 'M13 18h8']) { const path = document.createElementNS(SVG, 'path'); path.setAttribute('d', d); svg.append(path); }
         return svg;
     }
-    const roundPlus = (label, onclick) => { const b = el('button', 'as-add', '+'); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', onclick); return b; };
-    /* The rows, by kind. items: [{key, kind, name, sub, badge, badgeTitle, tone}]. */
-    function paintAsList(holder, items, { chosen, choose, add, empty }) {
-        holder.replaceChildren();
-        for (const [kind, title] of ASSET_KINDS) {
-            const mine = items.filter((i) => i.kind === kind);
-            if (mine.length === 0 && !add) continue;
-            const section = el('section', 'as-kind'); section.dataset.kind = kind;
-            const head = el('div', 'as-kind-head'); head.append(el('h3', '', title));
-            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
-            section.append(head);
-            if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
-            for (const item of mine) {
-                const row = el('button', 'as-row'); row.type = 'button'; row.dataset.asset = item.key; row.dataset.name = item.name;
-                if (item.key === chosen) row.setAttribute('aria-current', 'true');
-                const name = el('b', '', item.name);
-                if (item.badge) { const badge = el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badge); if (item.badgeTitle) badge.title = item.badgeTitle; name.append(badge); }
-                const sub = el('small', item.tone ? `as-sub ${item.tone}` : 'as-sub', item.sub ?? '');
-                if (item.dot) { sub.classList.add('status-line'); sub.dataset.tone = item.dot; }
-                const words = el('span', 'as-words'); words.append(name, sub);
-                row.append(kindIcon(kind), words);
-                row.addEventListener('click', () => choose(item.key));
-                section.append(row);
-            }
-            holder.append(section);
-        }
-        if (items.length === 0 && empty) holder.append(el('p', 'hint', empty));
+    /* AN ITEM OF THESE LISTS, as the kit's AssetCard takes it (06-11, assets step 2): its point when it asks for
+       you (a secret soon or past, a mailbox failing), the shade of its line, who has it or its right. */
+    const cardOf = (item) => ({ key: item.key, kind: item.kind, name: item.name, sub: item.sub ?? '', live: item.live,
+        state: item.dot === 'bad' || item.tone === 'bad' ? 'problem' : item.dot === 'warn' ? 'wait' : '', tone: item.dot || item.tone || '',
+        holders: item.holders, right: item.right, count: item.count });
+    /* Who has an asset, for its row: the conversations (their name as shown), then the devices given it. */
+    const holdersOf = (names, key) => [...names.map((n) => ({ name: shownName(conversations.find((c) => c.name === n)) || n })), ...sharedDevices.filter((d) => (d.grants ?? []).some((g) => g.asset === key)).map((d) => ({ name: d.name ?? d.id }))];
+    /* Who uses it, for the list (its holders) and for its panel's title (the number, as before: step 3 redraws it). */
+    const usedBy = (names, key) => ({ holders: holdersOf(names, key), badge: String(names.length), badgeTitle: `Used by ${names.length} conversation${names.length === 1 ? '' : 's'}`, badgeTone: 'count' });
+    /* A row pinned above the list (To send, Demandes): the same card, its number on its right. */
+    const pinnedCard = (entry, { chosen, onOpen, extra = '' }) => KIT.AssetCard({ key: entry.key, kind: entry.kind, name: entry.name, sub: entry.sub, count: entry.count },
+        { cls: `as-row ts-entry${extra ? ` ${extra}` : ''}`, current: entry.key === chosen, onOpen });
+    /* THE ONE LIST (kit AssetList), in `holder`: the Assets menu (scope 'all') or a conversation's tab. */
+    function paintAssetList(holder, model, opts) {
+        holder.replaceChildren(KIT.AssetList(model, { rowCls: 'as-row', ...opts }));
     }
-    /* The top of a detail: "All assets" (a phone), the icon, the name, a badge. */
-    function asTitle(item, back) {
-        const top = el('div', 'as-title');
-        const all = el('button', 'as-link as-back', '‹ Assets'); all.type = 'button'; all.addEventListener('click', () => { if (!nav.close('asset')) back(); });
-        const h = el('h2'); h.append(kindIcon(item.kind), el('span', '', item.name));
-        if (item.badge) h.append(el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badgeLong ?? item.badge));
-        top.append(all, h);
-        return top;
+    /* The group an asset is in, or '' for none. */
+    const groupOf = (key, groups) => groups.find((g) => (g.members ?? []).includes(key))?.id ?? '';
+    /* Groups the owner has folded shut in the by-group view (a convenience). */
+    const groupsFolded = (() => { try { const v = JSON.parse(localStorage.getItem('clavarium-groups-folded') ?? '[]'); return new Set(Array.isArray(v) ? v : []); } catch { return new Set(); } })();
+    const keepGroupsFolded = () => { try { localStorage.setItem('clavarium-groups-folded', JSON.stringify([...groupsFolded])); } catch { /* a private window */ } };
+    /* DRAGGING AN ASSET ONTO A GROUP (#111), like a binder's Kanban: a mouse drags once it
+       has moved a little; a finger after a short hold (so a swipe still scrolls). The row
+       follows the pointer as a light copy; the group under it lights up; let go on it, and
+       the asset is placed there ("No group" takes it out). A tap still opens the asset. */
+    function dragToGroups(holder) {
+        /* Wired once: the list is drawn again and again inside the same holder. */
+        if (holder.dataset.dragWired) return;
+        holder.dataset.dragWired = 'true';
+        let drag = null;
+        const sectionAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('.kit-aslist-group[data-drop]') ?? null;
+        const end = () => { if (!drag) return; clearTimeout(drag.hold); drag.ghost?.remove(); drag.over?.classList.remove('as-drop-over'); document.body.classList.remove('as-dragging'); drag = null; };
+        const start = (d) => {
+            d.on = true;
+            const r = d.row.getBoundingClientRect();
+            d.ghost = d.row.cloneNode(true); d.ghost.classList.add('as-drag-ghost');
+            Object.assign(d.ghost.style, { width: `${r.width}px`, left: `${r.left}px`, top: `${r.top}px` });
+            d.dx = d.x0 - r.left; d.dy = d.y0 - r.top;
+            document.body.append(d.ghost); document.body.classList.add('as-dragging');
+        };
+        holder.addEventListener('pointerdown', (e) => {
+            const row = e.target.closest('.as-row[data-asset]:not(.ts-entry)');
+            /* Only in the view by group, once there is a group to drag to. */
+            if (!row || !holder.contains(row) || e.button > 0 || !holder.querySelector('.kit-aslist-group[data-drop]:not([data-drop=""])')) return;
+            drag = { row, id: e.pointerId, x0: e.clientX, y0: e.clientY, on: false, touch: e.pointerType !== 'mouse', from: row.closest('.kit-aslist-group')?.dataset.drop };
+            if (drag.touch) { const d = drag; d.hold = setTimeout(() => { if (drag === d) { start(d); try { row.setPointerCapture(d.id); } catch { /* still heard */ } } }, 350); }
+        });
+        holder.addEventListener('pointermove', (e) => {
+            if (!drag || e.pointerId !== drag.id) return;
+            const far = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 6;
+            if (!drag.on) { if (drag.touch) { if (far) end(); return; } if (!far) return; start(drag); try { drag.row.setPointerCapture(drag.id); } catch { /* still heard */ } }
+            e.preventDefault();
+            drag.ghost.style.left = `${e.clientX - drag.dx}px`; drag.ghost.style.top = `${e.clientY - drag.dy}px`;
+            const over = sectionAt(e.clientX, e.clientY);
+            if (over !== drag.over) { drag.over?.classList.remove('as-drop-over'); drag.over = over; over?.classList.add('as-drop-over'); }
+        });
+        holder.addEventListener('pointerup', async (e) => {
+            if (!drag || e.pointerId !== drag.id) return;
+            const d = drag; const target = d.on ? sectionAt(e.clientX, e.clientY) : null;
+            const was = d.on; end();
+            if (!was) return;
+            /* A drag is not a tap: the click that follows does not open the asset. */
+            d.row.addEventListener('click', (c) => { c.stopImmediatePropagation(); c.preventDefault(); }, { capture: true, once: true });
+            if (!target || target.dataset.drop === d.from) return;
+            $('assets-error').hidden = true;
+            try { await post(`${API}/asset-groups/place`, { asset: d.row.dataset.asset, group: target.dataset.drop || null }); }
+            catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+            void paintAssets();
+        });
+        holder.addEventListener('pointercancel', end);
+        /* Once a finger's drag has begun, the page must not scroll under it. */
+        holder.addEventListener('touchmove', (e) => { if (drag?.on) e.preventDefault(); }, { passive: false });
+    }
+    async function applyMemberGrant(item, conversationName, value) {
+        if (item.target) return grantTarget(item.target.id, conversationName, value);
+        if (item.kind === 'secret') return handTo(conversationName, item.name, value === 'use', asErrId());
+        if (item.kind === 'list') return grantList(item.list.id, conversationName, value);
+        return attachTo(conversationName, item.name, value, asErrId());
+    }
+    function memberCurrent(item, conversationName) {
+        const id = `conversation:${conversationName}`;
+        if (item.target) return item.target.grants?.[id]?.level ?? 'none';
+        if (item.kind === 'secret') return item.secret.conversations.includes(conversationName) ? 'use' : 'off';
+        if (item.kind === 'list') return item.list.grants?.[id] ?? 'none';
+        return item.resource?.attachments?.[conversationName] ?? 'none';
+    }
+    /* The toggle above the rows: the owner's groups or the types (kit Segmented); `view`, the one shown. */
+    function paintAssetsView(view) {
+        const bar = $('assets-view'); if (!bar) return;
+        bar.replaceChildren(KIT.Segmented({ options: [{ value: 'group', label: uiSaid('set-as-by-group', 'Groups') }, { value: 'type', label: uiSaid('set-as-by-type', 'Types') }], value: view, label: 'Arrange assets',
+            onChange: (by) => { if (by === view) return; assetsBy = by; keepAssetsBy(); groupAdding = false; void paintAssets(); } }));
+    }
+    /* "+ New group", above the list in either view (05-11, step 5: groups are made from any view): a name in place,
+       then made and opened. */
+    function newGroupBar() {
+        const addBar = el('div', 'as-group-new');
+        if (groupAdding) {
+            const form = el('form', 'as-group-form'); form.autocomplete = 'off';
+            const input = el('input'); input.placeholder = uiSaid('set-group-name', 'Group name'); input.maxLength = 40; input.setAttribute('aria-label', input.placeholder);
+            const make = el('button', 'primary', uiSaid('set-group-add', 'Add')); make.type = 'submit';
+            const cancel = el('button', '', uiSaid('set-group-cancel', 'Cancel')); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
+            form.append(input, make, cancel);
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault(); $('assets-error').hidden = true;
+                try { const made = await post(`${API}/asset-groups`, { label: input.value.trim() }); groupAdding = false; assetOpen = `group:${made.id}`; remember(); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                void paintAssets();
+            });
+            addBar.append(form);
+            queueMicrotask(() => input.focus());
+        } else {
+            const word = uiSaid('set-group-new', 'New group');
+            const go = el('button', 'as-group-add'); go.type = 'button';
+            go.append(el('span', 'as-add', '+'), el('span', 'hint', word));
+            go.addEventListener('click', () => { groupAdding = true; void paintAssets(); });
+            addBar.append(go);
+        }
+        return addBar;
+    }
+    /* AN ASSET'S GROUP, a chip on its head in the menu (kit GroupChip: « Home ▾ »): moving it is a folder move (it leaves any
+       other group); « New group… » makes one in place and puts it there. */
+    function groupChip(chosen, groups) {
+        const place = async (group) => {
+            $('assets-error').hidden = true;
+            try { await post(`${API}/asset-groups/place`, { asset: chosen.key, group }); }
+            catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+            void paintAssets();
+        };
+        return KIT.GroupChip({ groups, value: groupOf(chosen.key, groups), name: chosen.name, onPlace: place,
+            onMake: async (label) => {
+                $('assets-error').hidden = true;
+                let made;
+                try { made = await post(`${API}/asset-groups`, { label }); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; return false; }
+                await place(made.id);
+                return true;
+            } });
+    }
+    /* A GROUP OPENED (05-11, assets step 5): the same panel as an asset (kit AssetPanel). Who has it: a conversation or a
+       device given a level gets it on every member that takes it, « None » takes it from every member (kit groupFanOut);
+       those skipped are said once. A right stays stored asset by asset: the group is only a label. Then its members (each
+       opens), Rename, Remove (the assets stay). */
+    let groupSaid = null;
+    /* One holder's level of each member: { [key]: level }. */
+    function groupCurrent(members, row) {
+        if (String(row.id).startsWith('device:')) {
+            const grants = sharedDevices.find((d) => `device:${d.id}` === row.id)?.grants ?? [];
+            return Object.fromEntries(members.map((m) => [m.key, KIT.rightOf(KIT.rightsKey(m), grants.find((g) => g.asset === m.key)?.rights, 'device')]));
+        }
+        const name = String(row.id).slice('conversation:'.length);
+        return Object.fromEntries(members.map((m) => [m.key, KIT.rightOf(KIT.rightsKey(m), memberCurrent(m, name))]));
+    }
+    function groupHolders(members) {
+        const rows = [];
+        const has = (g) => (g.level === 'some' ? uiSaid('set-group-has', '{has} of {of}', { has: g.has, of: g.of }) : '');
+        /* Given in part: each member it has, with its right (as the old screen showed each one's level). */
+        const parts = (g, now) => (g.level === 'some' ? members.filter((m) => (now[m.key] ?? 'none') !== 'none').map((m) => ({ name: m.name, key: KIT.rightsKey(m), level: now[m.key] })) : undefined);
+        for (const c of conversations) {
+            const id = `conversation:${c.name}`;
+            const now = groupCurrent(members, { id });
+            const g = KIT.groupLevel(members, now, 'conversation');
+            if (c.phase !== 'ready' && g.level === 'none') continue;
+            rows.push({ id, name: shownName(c) || c.name, sub: has(g) || (c.toolLabel ?? ''), level: g.level, ready: c.phase === 'ready', parts: parts(g, now) });
+        }
+        for (const d of sharedDevices) {
+            if (!(d.grants ?? []).some((x) => members.some((m) => m.key === x.asset))) continue;
+            const id = `device:${d.id}`;
+            const now = groupCurrent(members, { id });
+            const g = KIT.groupLevel(members, now, 'device');
+            rows.push({ id, name: d.label ?? d.name ?? d.id, sub: has(g) || undefined, level: g.level, parts: parts(g, now) });
+        }
+        return rows;
+    }
+    async function setGroupAccess(group, members, row, level) {
+        const err = $('assets-error'); err.hidden = true;
+        const fan = KIT.groupFanOut({ members, level, holder: row.holder, current: groupCurrent(members, row) });
+        let ok = true;
+        for (const x of fan.give) {
+            if (row.holder === 'device') {
+                const id = String(row.id).slice('device:'.length);
+                try { if (x.stored) await post(`${API}/devices/${id}/give`, { asset: x.key, rights: x.stored }); else await post(`${API}/devices/${id}/take`, { asset: x.key }); }
+                catch (error) { sayAsErr(error); ok = false; }
+            } else await applyMemberGrant(x.m, String(row.id).slice('conversation:'.length), x.stored ?? x.level);
+            /* The first refusal stops it, said (a repository shared for writing asks its confirmation there). */
+            if (!ok || !err.hidden) { ok = false; break; }
+        }
+        if (row.holder === 'device') await readDevices();
+        groupSaid = { id: group.id, text: KIT.skippedSaid(fan.skip) };
+        await paintAssets();
+        return ok;
+    }
+    function groupPanel(detail, group, items, { back, choose }) {
+        const members = (group.members ?? []).map((k) => items.find((i) => i.key === k)).filter(Boolean);
+        if (groupSaid?.id !== group.id) groupSaid = null;
+        const parts = [];
+        if (members.length) {
+            const levels = { conversation: KIT.groupLevels(members, 'conversation'), device: KIT.groupLevels(members, 'device') };
+            const model = KIT.accessModel({ key: 'group', holders: groupHolders(members), levels });
+            parts.push(KIT.AccessList(model, { key: 'group', name: group.label, levels, onChange: (row, level) => setGroupAccess(group, members, row, level) }));
+            if (groupSaid?.text) parts.push(el('p', 'hint as-group-skipped', groupSaid.text));
+            parts.push(el('p', 'hint as-group-note', uiSaid('set-group-per-asset', 'A right stays on each asset.')));
+        }
+        const rows = el('div', 'as-group-members');
+        for (const m of members) rows.append(KIT.AssetCard(cardOf(m), { cls: 'as-row', onOpen: choose }));
+        if (!members.length) rows.append(el('p', 'hint', uiSaid('set-group-empty-hint', 'Empty: pick this group on an asset.')));
+        parts.push({ title: uiSaid('set-group-in', 'In the group'), body: [rows], cls: 'as-group-in' });
+        /* Rename in place; remove, asked in place: the assets stay, only the label goes. */
+        const rename = el('button', 'as-link as-group-rename-open', uiSaid('set-group-rename', 'Rename…')); rename.type = 'button';
+        rename.addEventListener('click', () => {
+            const form = el('form', 'as-group-rename'); form.autocomplete = 'off';
+            const name = el('input'); name.value = group.label; name.maxLength = 40; name.setAttribute('aria-label', uiSaid('set-group-name', 'Group name'));
+            const go = el('button', 'primary', uiSaid('set-group-save', 'Rename')); go.type = 'submit';
+            const keep = el('button', '', uiSaid('set-group-cancel', 'Cancel')); keep.type = 'button';
+            keep.addEventListener('click', () => { form.replaceWith(rename); });
+            form.append(name, go, keep);
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault(); $('assets-error').hidden = true;
+                try { await post(`${API}/asset-groups/${group.id}/rename`, { label: name.value.trim() }); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; return; }
+                void paintAssets();
+            });
+            rename.replaceWith(form); focusField(name);
+        });
+        const remove = KIT.AssetDelete({ label: uiSaid('set-group-remove', 'Remove group…'), lost: uiSaid('set-group-remove-q', 'Its assets stay; only the group goes.'), yes: uiSaid('set-group-remove-yes', 'Remove'),
+            onYes: async () => {
+                $('assets-error').hidden = true;
+                try { await post(`${API}/asset-groups/${group.id}/remove`, {}); assetOpen = ''; groupSaid = null; remember(); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                void paintAssets();
+            } });
+        const n = members.length;
+        const card = { key: `group:${group.id}`, kind: 'group', name: group.label, sub: uiSaid(n === 1 ? 'set-acc-asset-1' : 'set-acc-asset-n', n === 1 ? '1 asset' : '{n} assets', { n }) };
+        detail.append(KIT.AssetPanel(card, { back: { onBack: () => { if (!nav.close('asset')) back(); } }, parts, foot: [rename, remove], cls: 'as-group-panel' }));
     }
     const chapter = (title, ...extra) => { const head = el('div', 'as-chapter'); head.append(el('h3', '', title), ...extra); return head; };
-    const boxSub = (box) => (!box ? 'mailbox' : box.failure ? box.failure : `${box.messages} message${box.messages === 1 ? '' : 's'}`);
-    const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
+    const boxSub = (box) => (!box ? '' : box.failure ? box.failure : uiSaid(box.messages === 1 ? 'set-as-message' : 'set-as-messages', box.messages === 1 ? '1 message' : '{n} messages', { n: box.messages }));
+    const gitSub = (r) => (r.from ? uiSaid('set-as-from', 'from {host}', { host: hostOf(r.from) }) : '');
+    const cardsSub = (n) => uiSaid(n === 1 ? 'set-as-card' : 'set-as-cards', n === 1 ? '1 card' : '{n} cards', { n });
     /* A secret's expiry, as said: `due` when it asks for the person (near, or past). */
     const secretState = (s) => {
+        /* Short-lived, lifted from a message (secrets.mjs): minutes, not days -- shown so it can be seen and let go. */
+        if (s.ephemeral) { const mins = Math.max(0, Math.round((s.expiresInMs ?? 0) / 60_000)); return s.expired || mins <= 0 ? { text: 'Expired', tone: 'bad', due: true } : { text: `Short-lived, ${mins} min left`, tone: 'warn', due: true }; }
         if (s.expired) return { text: 'Expired', tone: 'bad', due: true };
         if (s.days === null || s.days === undefined) return { text: 'No expiry', tone: '', due: false };
         if (secretDue(s)) return { text: s.days === 1 ? 'Expires tomorrow' : `Expires in ${s.days} days`, tone: 'warn', due: true };
@@ -3211,7 +4850,8 @@
         const send = el('button', 'primary', 'Send...'); send.type = 'button'; send.dataset.act = 'send'; send.hidden = true;
         acts.append(review, send);
         /* In a conversation, its files too, below. */
-        if (!place) { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name); files.disabled = true; }); acts.prepend(files); }
+        /* Its files too, below: in a conversation, through it; in the Assets menu, with the owner's rights. */
+        { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name, { owner: place }); files.disabled = true; }); acts.prepend(files); }
         const diagram = el('div', 'as-graph'); diagram.append(el('p', 'hint busy', 'Drawing the branches...'));
         holder.append(facts, chapter('Branches', acts), diagram);
         const back = place ? { label: name, go: () => { void paintAssets(); } } : { label: name, go: () => { void paintRoomAssets(); } };
@@ -3278,11 +4918,17 @@
        of them all; one button sends them one after the other, each by the same route as its own review (the same commit,
        the same target, the same guards). One refused does not hold the
        others back: each says what became of it. */
-    const STATE_SAID = { 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
-    /* How many other branches of a repository are looked at. */
-    const BRANCHES_MORE = 7;
+    const STATE_SAID = { unknown: 'changed: reading…', 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
+    /* How many repositories are brought up to date with their remote at once, in the background. */
+    const TS_PARALLEL = 3;
+    /* `work(item)` for each, `n` at a time. */
+    const inTurns = async (items, n, work) => { let i = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) await work(items[i++]); })); };
+    /* When a known row was true: the time today, else the day. */
+    const asOfText = (at) => { const d = new Date(at); if (!at || Number.isNaN(d.getTime())) return 'not read yet'; return `as of ${d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : d.toLocaleDateString()}`; };
     /* What a row is, for the filter: a branch the remote has and that is ahead of it, a branch it does not have, nothing to send. */
     const kindOfRow = (out) => (out?.state !== 'ahead' ? 'none' : out.targetExists === false ? 'new' : 'update');
+    /* A branch that could not be read is not "nothing to send": it stays listed, under every filter, with why. */
+    const unread = (out) => out?.state === 'error' || out?.state === 'unreachable';
     const TS_FILTERS = [['update', 'To update'], ['new', 'New branches'], ['all', 'All']];
     /* Three steps: every branch read (said as it goes, nothing checked yet); filtered and ticked; the checks of what is
        ticked, on a click; then Send. */
@@ -3303,16 +4949,21 @@
         let filter = 'update';
         let sending = false; let checking = false;
         let sure = '';
-        let reposDone = 0; let reading = true;
-        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter;
-        const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead' && shownRow(r));
+        let reposDone = 0; let reading = true; const notLookedBy = new Map();
+        /* Known rows not read yet, or whose branch moved since, stay in sight until their read says. */
+        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter || unread(r.out) || (r.known && (!r.out || r.out.state === 'unknown'));
+        const picked = () => rows.filter((r) => r.picked && !r.known && r.out?.state === 'ahead' && shownRow(r));
         const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
         async function look(r) {
             const query = new URLSearchParams();
             if (r.branch) query.set('branch', r.branch);
             if (r.target) query.set('target', r.target);
-            const [out, keep] = await Promise.all([fetch(`${API}/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`).then(async (x) => { const j = await x.json().catch(() => ({})); return x.ok ? j : { state: 'error', message: j.error || 'It could not be read.' }; }).catch(() => ({ state: 'error', message: 'It could not be read.' })), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
-            r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
+            const [out, keep] = await Promise.all([readOrSay(`/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
+            apply(r, out, keep);
+        }
+        /* A row's fresh review: what the server knows of its checks comes with it. */
+        function apply(r, out, keep) {
+            r.out = out; r.keep = keep; r.known = false; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
             /* What the server knows of this very commit and target: a check still running is followed again; the last
                one that ran is shown with its age (left and come back, even the next day: nothing run again for nothing). */
             if (out.state === 'ahead' && out.head) {
@@ -3348,8 +4999,14 @@
             /* By repositories: how many there are is known from the start, how many branches each has is not. */
             meter.hidden = !reading; meterFill.style.width = `${names.length ? Math.round((reposDone / names.length) * 100) : 100}%`;
             progress.toggleAttribute('data-busy', reading);
-            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Reading the repositories: ${reposDone} of ${names.length}${rows.length ? ` · ${rows.length} branch${rows.length === 1 ? '' : 'es'} found` : ''}`; }
-            else { progress.dataset.tone = count('update') + count('new') ? 'ok' : ''; progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new · all read` : 'Nothing to send · all read'; }
+            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Checking: ${reposDone} of ${names.length}`; }
+            else {
+                const failed = rows.filter((r) => unread(r.out)).length;
+                const notLooked = [...notLookedBy.values()].reduce((n, x) => n + x, 0);
+                const tail = `${failed ? ` · ${failed} not read` : ' · all read'}${notLooked ? ` · ${notLooked} older branch${notLooked === 1 ? '' : 'es'} not looked at` : ''}`;
+                progress.dataset.tone = failed ? 'warn' : count('update') + count('new') ? 'ok' : '';
+                progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new${tail}` : `Nothing to send${tail}`;
+            }
             filters.replaceChildren(...TS_FILTERS.map(([key, word]) => {
                 const n = key === 'all' ? rows.length : count(key);
                 const b = el('button', '', `${word} ${n}`); b.type = 'button'; b.dataset.filter = key; b.setAttribute('aria-pressed', String(filter === key));
@@ -3388,13 +5045,18 @@
                 const out = r.out;
                 const ahead = out?.state === 'ahead';
                 row.classList.toggle('off', !ahead);
-                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
+                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || r.known || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
                 tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paint(); if (!review.hidden) paintReview(); });
-                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
+                /* The remote is not asked when the page opens (the server's clock keeps it): how old what is known of it is, said. */
+                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', `${out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''}${r.known ? ` · ${asOfText(r.asOf)}` : out?.remote && r.fetchedAt ? ` · remote ${asOfText(r.fetchedAt)}` : ''}`));
                 const way = el('div', 'ts-way');
-                if (out?.branch) {
-                    const code = el('code', 'ts-branch', out.branch); code.title = out.branch; way.append(code);
-                    if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
+                /* Its own name even when it could not be read: which branch is missing is said. */
+                const named = out?.branch ?? (unread(out) ? r.branch : '');
+                if (named) {
+                    const code = el('code', 'ts-branch', named); code.title = named; way.append(code);
+                    /* Known only: where it goes is said; it is chosen once the row is read. */
+                    if (r.known && out.target) way.append(el('span', 'ts-arrow', '→'), el('code', 'ts-branch', out.target));
+                    else if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
                         way.append(el('span', 'ts-arrow', '→'));
                         const to = el('select'); to.setAttribute('aria-label', `Where ${label(r)} goes`); to.disabled = sending || checking;
                         const names2 = [...(out.branches ?? [])]; if (!names2.includes(out.target)) names2.unshift(out.target);
@@ -3406,6 +5068,7 @@
                 }
                 const size = el('div', 'ts-size');
                 if (!out) size.append(el('span', 'hint busy', 'Reading...'));
+                else if (ahead && r.known) size.append(el('span', '', out.targetExists === false ? 'new branch' : out.count === null || out.count === undefined ? 'some commits' : `${out.count} commit${out.count === 1 ? '' : 's'}`));
                 else if (ahead) {
                     const files = diffFiles(out.diff);
                     /* A branch the remote does not have: "new", not a count against a branch that is not there. */
@@ -3416,6 +5079,7 @@
                 if (r.sending) { const s2 = el('span', 'ts-running'); s2.append(el('span', 'warn', 'Sending…')); state.append(s2); }
                 else if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '✗ Not sent'));
                 else if (!out) state.append('');
+                else if (r.known && out.state !== 'unknown') state.append(el('span', 'hint busy', ahead ? 'checking…' : `${STATE_SAID[out.state] ?? out.state} · checking…`));
                 else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
                 else if (!r.check) state.append(el('span', 'hint', r.picked ? 'to check' : ''));
                 else if (r.check.status === 'running') {
@@ -3568,7 +5232,16 @@
             for (const r of p) {
                 r.sending = true; paint();
                 try {
-                    const sent = await post(`${API}/git/${r.name}/push`, { head: r.out.head, target: r.out.target, ...(r.out.guards?.confirm ? { sure: true } : {}) });
+                    /* The push runs in the background: the first request starts it, and
+                       while it says "sending" the page asks again (join) until it ends --
+                       a long push never looks like a failure or a restart. */
+                    let sent;
+                    for (let first = true; ; first = false) {
+                        sent = await post(`${API}/git/${r.name}/push`, first
+                            ? { head: r.out.head, target: r.out.target, ...(r.out.guards?.confirm ? { sure: true } : {}) }
+                            : { head: r.out.head, target: r.out.target, join: true });
+                        if (sent?.status !== 'sending') break;
+                    }
                     r.sent = { ok: true, text: sent.already ? `✓ Already in ${sent.branch}` : sent.commits > 0 ? `✓ Sent to ${sent.branch}` : `✓ Made ${sent.branch}` };
                 } catch (error) { r.sent = { ok: false, text: /^Not sent/.test(error.message) ? error.message : `Not sent: ${error.message}` }; }
                 r.sending = false; paint();
@@ -3579,41 +5252,74 @@
             said.className = `status-line ts-said ${ok === p.length ? 'ok' : 'bad'}`; said.dataset.tone = ok === p.length ? 'ok' : 'bad'; said.hidden = false;
             if (reviewStep) nav.drop(reviewStep);
             /* What is left to send, read again; what became of each stays said. */
-            const kept = new Map(rows.map((r) => [r, r.sent]));
-            await Promise.all(rows.map((r) => look(r)));
+            await inTurns([...new Set(p.map((r) => r.name))], TS_PARALLEL, (name) => readRepo(name));
             /* What went is unticked: nothing is offered again for what is done. */
-            for (const r of rows) { r.sent = kept.get(r); if (r.sent?.ok) r.picked = false; }
+            for (const r of rows) if (r.sent?.ok) r.picked = false;
             paint();
             said.scrollIntoView({ block: 'nearest' });
         });
-        paint();
-        /* Each repository's branch that moved last, then up to BRANCHES_MORE others of its agent: each row shown as soon as it is read. */
-        await Promise.all(names.map(async (name) => {
-            const first = { name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null };
-            rows.push(first);
-            await look(first);
-            first.movedAt = (first.out?.agentBranches ?? []).find((b) => b.name === first.branch)?.movedAt ?? null;
-            first.picked = kindOfRow(first.out) === 'update';
-            const others = (first.out?.agentBranches ?? []).filter((b) => b.name !== first.branch).slice(0, BRANCHES_MORE);
+        /* ONE REPOSITORY READ AFRESH (its branches listed; only those that moved read and reviewed again, no fetch): its rows replaced
+           where they were, each keeping what was said or ticked of the same commit. A branch with nothing to send is
+           listed only when it is the one that moved last (or what became of its sending is said); one that could not be
+           read always, with why. */
+        async function readRepo(name) {
+            const [all, keep] = await Promise.all([readOrSay(`/git/${name}/outgoing-all`), getJson(`/git/${name}/keep`, null)]);
+            const before = rows.filter((x) => x.name === name);
+            const at = rows.findIndex((x) => x.name === name);
+            let fresh;
+            if (Array.isArray(all.rows) && all.rows.length) {
+                fresh = all.rows.filter((out, i) => i === 0 || out.state === 'ahead' || unread(out) || before.some((x) => x.branch === out.branch && x.sent)).map((out) => {
+                    const was = before.find((x) => x.branch === out.branch);
+                    const r = { name, out: null, keep, branch: out.branch, target: '', picked: false, check: null, sent: was?.sent ?? null, movedAt: (all.agentBranches ?? []).find((b) => b.name === out.branch)?.movedAt ?? null, fetchedAt: all.fetchedAt ?? null };
+                    apply(r, out, keep);
+                    /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
+                    r.picked = was && !was.known && was.out?.head === out.head ? was.picked && out.state === 'ahead' : kindOfRow(out) === 'update';
+                    if (was?.check && was.out?.head === out.head && !r.check) r.check = was.check;
+                    return r;
+                });
+                notLookedBy.set(name, all.more ?? 0);
+            } else {
+                /* Not read (the remote did not answer, the read failed) or nothing in it: each known branch says so. */
+                const out = { state: all.state ?? 'error', message: all.message, remote: all.remote ?? before[0]?.out?.remote ?? null };
+                const known = before.filter((x) => x.branch);
+                fresh = (known.length && unread(out) ? known : [{ name, branch: '' }]).map((x) => ({ name, out: { ...out, branch: x.branch || null }, keep, branch: x.branch, target: '', picked: false, check: null, sent: x.sent ?? null, known: false }));
+            }
+            rows.splice(at < 0 ? rows.length : at, before.length, ...fresh);
             paint();
-            await Promise.all(others.map(async (b) => {
-                const r = { name, out: null, keep: first.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt };
-                await look(r);
-                /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
-                if (r.out?.state === 'ahead') { r.picked = kindOfRow(r.out) === 'update'; rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
-                paint();
-            }));
+        }
+        /* AT ONCE: what is known here (the agent's branches as last read, the remote's as last fetched, the last review
+           of each), no remote asked, no repository read; each row says as of when. Not sendable as it is. */
+        paint();
+        const known = await Promise.all(names.map(async (name) => [name, await getJson(`/git/${name}/known`, null)]));
+        for (const [name, k] of known) {
+            const list = k?.rows ?? [];
+            if (list.length === 0) rows.push({ name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null, known: true });
+            for (const x of list) {
+                const out = { state: x.state, branch: x.branch, target: x.target, targetExists: x.targetExists, count: x.count, head: x.head, remote: k.remote, branches: k.branches };
+                /* As the full read lists them: the one that moved last, then those with something to send. */
+                if (x !== list[0] && x.state !== 'ahead' && x.state !== 'unknown') continue;
+                rows.push({ name, out, keep: null, branch: x.branch, target: x.target, picked: false, check: null, sent: null, movedAt: x.movedAt, known: true, asOf: x.state === 'unknown' ? k.readAt : (k.fetchedAt ?? x.lookedAt) });
+            }
+        }
+        paint();
+        /* THEN, IN THE BACKGROUND: each repository's branches listed, those that moved read again, a few at a time; its rows replaced as it comes. */
+        await inTurns(names, TS_PARALLEL, async (name) => {
+            try { await readRepo(name); } catch { /* said by its rows */ }
             reposDone++; paint();
-        }));
+        });
         reading = false;
         paint();
     }
     /* The files of a folder or a mailbox, in a conversation: the Files sheet, moved into the detail. */
     let filesHome = null;
-    function embedFiles(holder, name) {
+    /* A folder browsed from the Assets menu ('' : from a conversation), and the asset whose files stay open there on a repaint. */
+    let filesOwner = ''; let filesBrowsing = '';
+    /* `owner`: opened from the Assets menu -- that folder alone, with the owner's own rights (no conversation in between). */
+    function embedFiles(holder, name, { owner = false } = {}) {
         const f = $('files');
         if (!filesHome) filesHome = { parent: f.parentNode, next: f.nextSibling };
         holder.append(f); f.classList.add('embedded');
+        filesOwner = owner ? name : '';
         if (filesOf !== name) { filesOf = name; filesAt = ''; }
         f.hidden = false;
         void paintFiles();
@@ -3621,68 +5327,210 @@
     function unembedFiles() {
         const f = $('files');
         if (!f.classList.contains('embedded') || !filesHome) return;
-        f.classList.remove('embedded'); f.hidden = true;
+        f.classList.remove('embedded'); f.hidden = true; filesOwner = '';
         filesHome.parent.insertBefore(f, filesHome.next);
     }
 
     /* Nothing is opened by itself: the wide detail says what it is for. */
-    const noAssetChosen = () => el('p', 'hint as-none', 'Select an asset to see its detail.');
+    const noAssetChosen = () => el('p', 'hint as-none', uiSaid('set-as-pick', 'Select an asset to see its detail.'));
 
     /* ---- a conversation's own ---- */
-    async function paintRoomAssets() {
-        if (!assetsShown) return;
+    /* A conversation's tab, searched: its words, and whose they are. */
+    let cassetsQuery = ''; let cassetsFor = '';
+    $('cassets-search').addEventListener('input', () => { cassetsQuery = $('cassets-search').value.trim(); void paintRoomAssets(); });
+    $('cassets-attach').addEventListener('click', () => { openGive(); });
+    /* GIVE… (07-11, assets step 4): in its tab, in place of an asset opened -- the one list of what it has not yet
+       (kit AssetPicker), its right, then « Give »; a new asset below (the New asset box, given at its end). Its state:
+       the search typed, the one chosen, the kind of a new one being made. */
+    const GIVE = 'give:';
+    let giveQuery = ''; let giveChosen = ''; let giveNew = { kind: '', level: '' };
+    function openGive() {
+        if (DEVICE || !current) return;
+        giveQuery = ''; giveChosen = ''; giveNew = { kind: '', level: '' };
+        if (justMade?.to) justMade = null;
+        $('cassets-error').hidden = true;
+        if (tabNow() !== 'assets') goTab('assets');
+        pickRoomAsset(GIVE);
+    }
+    const closeGive = () => { giveNew = { kind: '', level: '' }; if (justMade?.to) justMade = null; if (roomPick === GIVE && !nav.close('asset')) { roomPick = ''; void paintRoomAssets(); } };
+    /* A secret given or taken back: its tool has it, or not, at its next start -- said under the tab a moment. */
+    let noteTimer = 0;
+    function secretNote(name, on) {
+        const p = $('cassets-note');
+        p.textContent = uiSaid(on ? 'set-secret-next-on' : 'set-secret-next-off', on ? '{name}: handed to its tool at its next start' : '{name}: no longer handed from its next start', { name });
+        p.hidden = false;
+        clearTimeout(noteTimer); noteTimer = setTimeout(() => { p.hidden = true; }, 12_000);
+    }
+    /* Every asset as a card, for Give…: what the Assets menu lists, without who has it. */
+    function everyCard({ all = [], boxes = [], secrets = [], tether = {}, lists = {} } = {}) {
+        const out = [];
+        for (const r of Array.isArray(all) ? all : []) {
+            const kind = kindOf(r); const box = kind === 'mailbox' ? (Array.isArray(boxes) ? boxes : []).find((m) => m.name === r.name) : undefined;
+            out.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : '', tone: box?.failure ? 'bad' : '' });
+        }
+        for (const s2 of Array.isArray(secrets) ? secrets : []) out.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...secretItem(s2, uiSaid('set-as-name-only', 'name only')) });
+        for (const tgt of Array.isArray(tether?.targets) ? tether.targets : []) out.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, live: true, sub: connexionOwnSub(tgt.kind) });
+        for (const l of lists?.ok && Array.isArray(lists.data) ? lists.data.filter((x) => !x.archived) : []) out.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, sub: cardsSub(l.count) });
+        return out;
+    }
+    /* Given from the picker: the same grant as « None » takes back (applyMemberGrant), then the list again. */
+    async function giveOne(item, level, stored) {
+        $('cassets-error').hidden = true;
+        await applyMemberGrant(item, current, stored ?? level);
+        if (!$('cassets-error').hidden) return false;
+        if (item.kind === 'secret') secretNote(item.name, true);
+        giveChosen = '';
+        await paintRoomAssets();
+        return true;
+    }
+    /* The levels a new asset of that kind is given at (a live link made: Read watches, Write proposes -- targetLevel). */
+    const newLevels = (kind) => (['secret', 'box', 'device'].includes(kind) ? [] : kind === 'mailbox' ? ['read'] : ['read', 'write']);
+    function paintGive(detail, data, items) {
         const c = conversations.find((x) => x.name === current);
-        roomSig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
-        const [all, secrets, boxes] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', [])]);
+        const who = shownName(c) || current;
+        const made = justMade?.to === current ? justMade : null;
+        const kind = made ? '' : giveNew.kind;
+        const levels = newLevels(kind);
+        /* An MCP server made here is given at Write (« propose »: each action asked, 16-11); the rest at the first. */
+        if (kind && !levels.includes(giveNew.level)) giveNew.level = (kind === 'mcp' ? 'write' : levels[0]) ?? '';
+        const level = levels.length ? { options: levels.map((l) => ({ value: l, label: KIT.rightWord(l, 'pick') })), value: giveNew.level, label: uiSaid('set-na-level', 'What it may do'), onChange: (v) => { giveNew.level = v; } } : null;
+        const box = newAssetBox({
+            kind, title: '',
+            context: kind && !made ? { line: uiSaid('set-na-will', 'Will be given to {name}', { name: who }), level } : null,
+            made: made ? { said: uiSaid('set-na-made-to', '{name} created and given to {to}', { name: made.name, to: who }), note: made.note } : null,
+            onKind: (k) => {
+                giveNew.kind = k; giveNew.level = ''; justMade = null; $('cassets-error').hidden = true; void paintRoomAssets();
+                /* Its keys, read here too: Assets may not have been opened yet. */
+                if (k === 'git' || k === 'machine') void getJson('/git-keys', []).then((keys) => paintKeys(keys));
+            },
+            onBack: () => { giveNew.kind = ''; $('cassets-error').hidden = true; void paintRoomAssets(); },
+            onAnother: () => { giveNew.kind = made.kind; justMade = null; void paintRoomAssets(); },
+            onDone: () => { closeGive(); },
+            boxHost: { where: current, repaint: () => { void paintRoomAssets(); }, close: () => closeGive() },
+        });
+        const body = kind || made ? box : KIT.AssetPicker({ items: everyCard(data).map((i) => ({ ...cardOf(i), item: i })), given: items.map((i) => i.key), kinds: assetKinds(), query: giveQuery, chosen: giveChosen,
+            newAsset: box, words: { who }, onPick: (key) => { giveChosen = key; }, onQuery: (q) => { giveQuery = q; }, onGive: (card, l, stored) => giveOne(card.item, l, stored) });
+        detail.append(KIT.AssetPanel({ key: GIVE, kind: 'give', name: uiSaid('set-as-give', 'Give…'), sub: who }, { back: { onBack: () => { if (!nav.close('asset')) { roomPick = ''; void paintRoomAssets(); } } }, parts: [body] }));
+        if (kind) focusFirst(detail);
+    }
+    /* WHAT A CONVERSATION WAS GIVEN, the rows of its Assets tab (each with its right): its work folder, its folders,
+       repositories and mailboxes, its secrets, what it was given live (Tether) and its binders. The tab draws them,
+       its bar counts them, a room's settings show them for each of its AIs: the same rows everywhere. */
+    function givenItems(name, { all = [], secrets = [], boxes = [], tether = {}, lists = {} } = {}) {
+        const c = conversations.find((x) => x.name === name);
         const mine = new Map((c?.resources ?? []).map((r) => [r.name, r.access]));
         const items = [];
-        if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: 'where its tool works', badge: 'write', badgeTone: 'write' });
-        for (const r of all.filter((x) => mine.has(x.name))) {
+        if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: uiSaid('set-as-work', 'where its tool works'), badge: 'write', badgeTone: 'write', right: { level: 'write' } });
+        for (const r of (Array.isArray(all) ? all : []).filter((x) => mine.has(x.name))) {
             const kind = kindOf(r); const access = mine.get(r.name);
-            const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
-            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only',
-                sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
+            const box = kind === 'mailbox' ? (Array.isArray(boxes) ? boxes : []).find((m) => m.name === r.name) : undefined;
+            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only', right: { key: kind, value: access },
+                sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : '', tone: box?.failure ? 'bad' : '' });
         }
+        for (const s2 of (Array.isArray(secrets) ? secrets : []).filter((x) => (x.conversations ?? []).includes(name))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, right: { level: 'use' }, ...secretItem(s2, uiSaid('set-as-secret-used', 'name only · used by its agent')) });
+        /* WHAT IT WAS GIVEN LIVE AND ITS BINDERS (06-11, assets step 3): a calendar, contacts, a mailbox or an access
+           connected (Tether), its binders -- shown at last, the same rows, each with its right. */
+        const allTargets = Array.isArray(tether?.targets) ? tether.targets : [];
+        for (const tgt of allTargets) {
+            const level = tgt.grants?.[`conversation:${name}`]?.level;
+            if (!level || level === 'none') continue;
+            const acct = tetherAccount(tgt.id);
+            const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
+            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true, right: { key: 'connexion', value: level }, sub: connexionOwnSub(tgt.kind) });
+        }
+        const givenLists = lists?.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${name}`]) : [];
+        for (const l of givenLists) items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, right: { key: 'list', value: l.grants[`conversation:${name}`] }, sub: cardsSub(l.count) });
+        return items;
+    }
+    /* What the bar's « Assets N » counts: the rows its tab lists (givenItems), from what this page last read of the live
+       links and the binders (read again at most once a minute, the tab's own reading keeps it fresh). */
+    let givenKnown = { tether: {}, lists: {}, at: 0 };
+    const keepGiven = (tether, lists) => { givenKnown = { tether: tether ?? {}, lists: lists ?? {}, at: Date.now() }; };
+    function givenCount(c) {
+        if (!c) return 0;
+        try { return givenCountNow(c); } catch { return (c.resources?.length ?? 0) + (c.secrets?.length ?? 0) + (c.work === 'kept' ? 1 : 0); }   /* painted before this part of the page ran */
+    }
+    function givenCountNow(c) {
+        if (Date.now() - givenKnown.at > 60_000 && !DEVICE) {
+            givenKnown.at = Date.now();
+            void Promise.all([getJson('/tether', {}), binderCall('lists', {})]).then(([tether, lists]) => { keepGiven(tether, lists); paintAssetsCount(); }).catch(() => {});
+        }
+        const all = (c.resources ?? []).map((r) => ({ name: r.name, type: r.type }));
+        const secrets = secretsKnown.length ? secretsKnown : (c.secrets ?? []).map((n) => ({ name: n, conversations: [c.name] }));
+        return givenItems(c.name, { all, secrets, tether: givenKnown.tether, lists: givenKnown.lists }).length;
+    }
+    /* Painted again while a paint reads (a right changed, then the list refreshed): only the last one draws. */
+    let roomPainting = 0;
+    async function paintRoomAssets() {
+        if (!assetsShown) return;
+        const mine = ++roomPainting; const stale = () => mine !== roomPainting || !assetsShown;
+        watchTether();
+        const c = conversations.find((x) => x.name === current);
+        roomSig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
+        const [all, secrets, boxes, tether, lists] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {}), binderCall('lists', {}), readDevices()]);
+        keepGiven(tether, lists); paintAssetsCount();
+        if (stale()) return;
+        /* The calls this conversation's agent asked the owner to allow: validated here,
+           in the parloir, without leaving for the Assets page. */
+        const mineDemandes = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.agent?.id ?? '') === `conversation:${current}`);
+        /* Approved calls only this browser can do (a device to flash over USB): Tether's jobs. */
+        const mineJobs = (Array.isArray(tether.jobs) ? tether.jobs : []).filter((j) => j.agent === `conversation:${current}`);
         markSecrets(secrets);
-        for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...secretItem(s2, 'name only · used by its agent') });
+        const items = givenItems(current, { all, secrets, boxes, tether, lists });
         /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
         const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
-        const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
-        const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? items.find((i) => i.key === roomPick) ?? null;
+        const outbox = gits.length ? { key: 'send:all', kind: 'send', name: uiSaid('set-as-to-send', 'To send'), sub: uiSaid('set-as-to-send-sub', 'every repository, reviewed and sent at once') } : null;
+        const waitingCount = mineDemandes.length + mineJobs.length;
+        const demandes = waitingCount ? { key: 'demandes:mine', kind: 'demandes', name: 'Demandes', sub: uiSaid('set-as-waiting', '{n} waiting for you', { n: waitingCount }) } : null;
+        const giving = roomPick === GIVE;
+        const chosen = giving ? null : (outbox && roomPick === outbox.key ? outbox : null) ?? (demandes && roomPick === demandes.key ? demandes : null) ?? items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
-        as.dataset.open = chosen ? 'detail' : 'list';
-        paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => pickRoomAsset(key), empty: 'Nothing is given to it yet.' });
-        const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus('Attach an asset', () => { void openAccess(true); }));
-        if (outbox) {
-            const row = el('button', 'as-row ts-entry'); row.type = 'button'; row.dataset.asset = outbox.key;
-            if (chosen === outbox) row.setAttribute('aria-current', 'true');
-            const words = el('span', 'as-words'); words.append(el('b', '', outbox.name), el('small', 'as-sub', outbox.sub));
-            row.append(kindIcon('send'), words);
-            row.addEventListener('click', () => pickRoomAsset(outbox.key));
-            $('cassets-rows').prepend(row);
-        }
-        $('cassets-rows').prepend(top);
+        as.dataset.open = chosen || giving ? 'detail' : 'list';
+        $('cassets-attach').setAttribute('aria-pressed', String(giving));
+        /* THE ONE LIST (kit AssetList), scope this conversation: by type, its right on each row; To send and
+           Demandes pinned above. Its search is its own, emptied when another conversation is shown. */
+        if (cassetsFor !== current) { cassetsFor = current; cassetsQuery = ''; $('cassets-search').value = ''; }
+        const model = KIT.assetListModel({ items: items.map(cardOf), scope: `conversation:${current}`, query: cassetsQuery, kinds: assetKinds() });
+        const pinned = cassetsQuery ? [] : [
+            demandes && pinnedCard({ ...demandes, count: waitingCount }, { chosen: chosen?.key, onOpen: pickRoomAsset, extra: 'demande-entry' }),
+            outbox && pinnedCard(outbox, { chosen: chosen?.key, onOpen: pickRoomAsset }),
+        ];
+        paintAssetList($('cassets-rows'), model, { chosen: chosen?.key, onOpen: pickRoomAsset, pinned, empty: uiSaid('set-as-none-given', 'Nothing is given to it yet.'), noMatch: uiSaid('set-as-no-match', 'Nothing by that name.') });
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
-        if (!chosen) { unembedFiles(); detail.replaceChildren(); if (items.length) detail.append(noAssetChosen()); return; }
-        const keepFiles = (chosen.kind === 'folder' || chosen.kind === 'mailbox') && $('files').classList.contains('embedded') && detail.contains($('files')) && detail.dataset.asset === chosen.key;
-        if (!keepFiles) { unembedFiles(); detail.replaceChildren(); }
-        detail.dataset.asset = chosen.key;
+        /* The New asset forms wait in Assets: put back before the detail is drawn again (Give… may hold one). */
+        const parkForms = () => { for (const f of detail.querySelectorAll('.as-form')) $('assets-forms').append(f); };
+        if (giving) {
+            /* Drawn again only when what it shows changed: a form being filled, a search typed, keep their place. */
+            const sig = JSON.stringify([GIVE, giveNew.kind, justMade?.to === current ? justMade.key : '', items.map((i) => i.key), [all, secrets, tether?.targets, lists?.data].map((x) => (Array.isArray(x) ? x.length : 0))]);
+            if (detail.dataset.asset === GIVE && detail.dataset.sig === sig) return;
+            unembedFiles(); parkForms(); detail.replaceChildren();
+            detail.dataset.asset = GIVE; detail.dataset.sig = sig;
+            paintGive(detail, { all, boxes, secrets, tether, lists }, items);
+            return;
+        }
+        if (!chosen) { unembedFiles(); parkForms(); detail.replaceChildren(); delete detail.dataset.asset; if (items.length) detail.append(noAssetChosen()); return; }
+        /* The same folder still shown, nothing changed in who has it: only its files are read again (no blink). */
+        const sig = JSON.stringify([chosen.key, chosen.own ? '' : chosen.kind === 'send' || chosen.kind === 'demandes' ? waitingCount : accessHolders(chosen)]);
+        const keepFiles = (chosen.kind === 'folder' || chosen.kind === 'mailbox') && !chosen.target && $('files').classList.contains('embedded') && detail.contains($('files')) && detail.dataset.asset === chosen.key && detail.dataset.sig === sig;
+        if (!keepFiles) { unembedFiles(); parkForms(); detail.replaceChildren(); }
+        detail.dataset.asset = chosen.key; detail.dataset.sig = sig;
         const back = () => { roomPick = ''; void paintRoomAssets(); };
         if (keepFiles) { void paintFiles(); return; }
-        detail.append(asTitle(chosen, back));
-        if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
-            if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
-            embedFiles(detail, chosen.name);
-        } else if (chosen.kind === 'send') await sendDetail(detail, gits);
-        else if (chosen.kind === 'git') await gitDetail(detail, chosen.name, { others: gits.length > 1 });
-        else {
-            if (chosen.secret.expires) detail.append(secretLine(chosen.secret, 'not given to its tool'));
-            detail.append(el('p', 'hint', 'Handed to its tool as a variable and a file, the next time it starts. Its value is never shown.'), chapter('Used by'));
-            const list = el('div', 'as-chips');
-            for (const who of chosen.secret.conversations) list.append(el('span', 'as-chip', shownName(conversations.find((x) => x.name === who)) || who));
-            detail.append(list);
+        if (chosen.kind === 'demandes' || chosen.kind === 'send') {
+            /* What waits (To send, Demandes): the same head, its own content. */
+            const body = el('div', 'as-waits');
+            detail.append(KIT.AssetPanel({ key: chosen.key, kind: chosen.kind, name: chosen.name, sub: chosen.sub }, { back: { onBack: () => { if (!nav.close('asset')) back(); } }, parts: [body] }));
+            if (chosen.kind === 'demandes') {
+                for (const j of mineJobs) body.append(jobCard(j, () => paintRoomAssets()));
+                if (mineDemandes.length) {
+                    body.append(el('p', 'hint', 'Its agent asked you to allow these Tether calls. Accept, and it runs; refuse, and it is told so.'));
+                    body.append(demandesList(mineDemandes, { withWho: false, after: () => paintRoomAssets() }));
+                }
+            } else await sendDetail(body, gits);
+            return;
         }
+        await assetPanel(detail, chosen, { from: current, back, tether, gits, stale });
     }
     /* One asset opened: a step (another one opened takes its place); Back, the list. */
     const assetStep = () => { if (nav.last(['asset']) < 0) nav.push('asset', ({ quiet }) => { roomPick = ''; if (!quiet && assetsShown) void paintRoomAssets(); }); };
@@ -3711,6 +5559,8 @@
     function closeRoomAssets() {
         if (!assetsShown) return;
         assetsShown = false; $('cassets').hidden = true; unembedFiles(); paintViews();
+        for (const f of $('cassets-detail').querySelectorAll('.as-form')) $('assets-forms').append(f);
+        if (roomPick === GIVE) { roomPick = ''; giveNew = { kind: '', level: '' }; delete $('cassets-detail').dataset.asset; }
         if ($('cassets').contains($('gitview'))) shutGit();
     }
 
@@ -3766,16 +5616,128 @@
 
     /* ---- the server's ---- */
     let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false; let listOpen = ''; let listsSig = '';
+    /* How the Assets list is arranged: by the owner's groups or by type. A per-viewer convenience, kept in the
+       browser once chosen; never chosen (''), groups as soon as one exists, else types (kit assetListModel). */
+    let assetsBy = '';
+    try { const kept = localStorage.getItem('clavarium-assets-by'); if (kept === 'group' || kept === 'type') assetsBy = kept; } catch { /* a private window */ }
+    const keepAssetsBy = () => { try { localStorage.setItem('clavarium-assets-by', assetsBy); } catch { /* as above */ } };
+    /* The "+ New group" inline form being shown above the list. */
+    let groupAdding = false;
     /* A binder opened in Assets: its screen, the card of the address (a reload); a card, a step (binderSteps). */
     let assetsView = null; let assetsAt = null;
     const assetsSteps = binderSteps(() => assetsView, { address: () => remember() });
     /* A list given to a conversation, or taken back: a grant of Binder's. */
     const givenTo = (l) => Object.keys(l.grants ?? {}).filter((id) => id.startsWith('conversation:'));
     async function grantList(list, name, value) {
-        $('assets-error').hidden = true;
+        $(asErrId()).hidden = true;
         const done = await binderCall('grant', { list, to: `conversation:${name}`, access: value === 'none' ? null : value });
-        if (!done.ok) { $('assets-error').textContent = done.text; $('assets-error').hidden = false; }
+        if (!done.ok) sayAsErr(new Error(done.text));
         await refresh();
+    }
+    /* The plain word for a Tether target's kind, in a Connexion's sub-line. */
+    const CONNEXION_SUB = { mail: 'mailbox', calendar: 'calendar', contacts: 'address book', files: 'online folder', ssh: 'machine', computer: 'computer', browser: 'browser', screen: 'screen', device: 'device', mcp: 'MCP server' };
+    const connexionSub = (kind) => (kind in CONNEXION_SUB ? uiSaid(`set-cx-${kind}`, CONNEXION_SUB[kind]) : kind);
+    const connexionOwnSub = (kind) => (tetherCat(kind) === 'acces' ? connexionSub(kind) : '');
+    /* Give a Tether target to a conversation at a level, or take it back (none). */
+    async function grantTarget(id, name, level) {
+        $(asErrId()).hidden = true;
+        try { await post(`${API}/tether/level`, { target: id, agent: `conversation:${name}`, level }); }
+        catch (error) { sayAsErr(error); }
+        await refresh();
+    }
+    /* Accept or refuse a Tether call that is waiting for a person. `after` repaints the
+       surface the row sits in (the Assets page by default; the room passes its own). */
+    async function decideTether(id, decision, after, args) {
+        $(asErrId()).hidden = true;
+        try { await post(`${API}/tether/decide`, { id, decision, ...(args ? { args } : {}) }); }
+        catch (error) { sayAsErr(error); }
+        if (after) await after(); else await repaintAsset();
+    }
+    /* Every call waiting for the owner, on one surface. `withWho`: name who asks. */
+    /* A JOB: a call the owner approved that only this browser can do -- a device to flash
+       over USB. The browser lets only a click reach a USB device, so it waits for one; then
+       Tether's own module runs here (/vendor/tether/jobs.js) and its end is the agent's answer.
+       Its element is kept from one paint to the next: the module draws in it while it runs. */
+    const jobPlaces = new Map();
+    /* The same, from its button in the thread: the module draws in a panel over the page, closed once done. */
+    async function flashFromThread(id) {
+        const tether = await getJson('/tether', {});
+        const job = (Array.isArray(tether.jobs) ? tether.jobs : []).find((j) => j.id === id);
+        let panel = $('job-panel');
+        if (!panel) { panel = el('div', 'card job-panel'); panel.id = 'job-panel'; panel.setAttribute('role', 'dialog'); document.body.append(panel); }
+        panel.hidden = false;
+        if (!job) { panel.replaceChildren(el('p', '', 'This flash ended already, or was cancelled.')); setTimeout(() => { panel.hidden = true; }, 3000); return; }
+        const close = el('button', '', 'Close'); close.type = 'button'; close.addEventListener('click', () => { panel.hidden = true; });
+        const card = jobCard(job, () => { void paintRoomAssets(); });
+        panel.replaceChildren(card, close);
+        card.querySelector('.action-row button.primary')?.click();
+    }
+    function jobCard(job, after) {
+        if (!jobPlaces.has(job.id)) {
+            const card = el('div', 'card job-card'); card.dataset.job = job.id;
+            const what = job.args?.name ? `Flash ${job.args.name}` : 'Flash a device';
+            card.append(el('b', '', `${what} from this browser`), el('p', 'hint', 'Plug it into this computer (or this Android phone) by USB, then start. Chrome or Edge.'));
+            const place = el('div', 'job-place');
+            const start = el('button', 'primary', 'Plug it in and start'); start.type = 'button';
+            const cancel = el('button', '', 'Cancel'); cancel.type = 'button';
+            const row = el('div', 'action-row'); row.append(start, cancel);
+            start.addEventListener('click', async () => {
+                row.hidden = true;
+                const call = async (op, args) => { try { return { ok: true, data: await post(`${API}/tether/${op}`, args) }; } catch (error) { return { ok: false, text: error.message }; } };
+                /* A device that pairs (a voice box): a one-use code for the conversation that asked, made here. */
+                const pair = async (room) => { const r = await pairCode({ conversation: String(job.agent).replace(/^conversation:/, ''), name: room }); return { url: location.origin, code: r.code }; };
+                try { const { runJob } = await import('/vendor/tether/jobs.js'); await runJob(job, { call, root: place, pair }); }
+                catch (error) { place.textContent = `It could not start: ${error.message}`; }
+                setTimeout(() => { jobPlaces.delete(job.id); after?.(); }, 4000);
+            });
+            cancel.addEventListener('click', async () => { await post(`${API}/tether/job-done`, { id: job.id, ok: false, text: 'cancelled by the owner' }).catch(() => {}); jobPlaces.delete(job.id); after?.(); });
+            card.append(row, place);
+            jobPlaces.set(job.id, card);
+        }
+        return jobPlaces.get(job.id);
+    }
+    /* EVERY CALL WAITING FOR THE OWNER, AS CARDS: Parley's own request card (requestCard), the very one
+       the thread shows, from the same data (`q.view`, server/demandes.mjs) -- one gesture, one
+       implementation. Accept waits a few seconds with Undo (Parley holds it), then goes to Tether.
+       `withWho`: name the conversation that asks. `after` repaints the surface it sits in. */
+    let cardSteps = null;
+    function demandesList(approvals, { withWho = false, after } = {}) {
+        const box = el('div', 'demandes-box');
+        const act = (id) => { const m = /^(allow|deny|always):(.+)$/.exec(id); if (m) void decideTether(m[2], DECISION[m[1]], after); };
+        void Promise.all([import(new URL('vendor/parley-ui.js', new URL('/', location.href)).href), readWords()]).then(([P, words]) => {
+            if (typeof P.requestCard !== 'function') return;
+            cardSteps ??= P.stepper({ open: (name, close) => nav.over(`demande-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } });
+            for (const q of approvals) {
+                if (!q.view) continue;
+                const view = withWho && q.agent?.name ? { ...q.view, sub: [q.agent.name, ...(Array.isArray(q.view.sub) ? q.view.sub : [q.view.sub])].filter(Boolean) } : q.view;
+                /* The mail it answers (its `re`): opened in the mail viewer, Reply writing in the chat of the conversation that asks. */
+                const schemes = { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: String(q.agent?.id ?? '').startsWith('conversation:') ? q.agent.id.slice('conversation:'.length) : current }); } } };
+                box.append(P.requestCard(view, { act, words, steps: cardSteps, host: document.body, schemes }));
+            }
+        });
+        return box;
+    }
+    /* While the owner is on Assets or a room, the calls waiting for them appear and update
+       on their own: nothing on this page is polled for Tether otherwise, so a new call or
+       a decided one would wait for the next click. A light watch of the one number that
+       moves with every change (tethers.changes) repaints the open surface when it moves. */
+    let tetherSeen = null; let tetherTimer = 0;
+    const tetherViewOpen = () => !DEVICE && (place === 'assets' || assetsShown);
+    function watchTether() {
+        if (tetherTimer || !tetherViewOpen()) return;
+        const tick = async () => {
+            if (!tetherViewOpen()) { tetherTimer = 0; tetherSeen = null; return; }
+            const t = await getJson('/tether', null);
+            if (t && typeof t.changes === 'number') {
+                if (tetherSeen !== null && t.changes !== tetherSeen) {
+                    if (place === 'assets') void paintAssets();
+                    else if (assetsShown) void paintRoomAssets();
+                }
+                tetherSeen = t.changes;
+            }
+            tetherTimer = setTimeout(tick, 2500);
+        };
+        tetherTimer = setTimeout(tick, 0);
     }
     /* A new list: Binder's templates, read once. */
     async function fillTemplates() {
@@ -3785,179 +5747,1330 @@
         if (!names.ok || pick.options.length) return;
         for (const [key, name] of Object.entries(names.data)) { const o = document.createElement('option'); o.value = key; o.textContent = name[binderLang()] ?? name.en; pick.append(o); }
     }
-    async function paintAssets() {
-        if (place !== 'assets' || DEVICE) return;
-        const [all, boxes, secrets, keys, lists] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), readDevices()]);
-        if (place !== 'assets') return;
-        paintKeys(keys);
-        markSecrets(secrets);
-        const items = [];
-        for (const r of all) {
-            const kind = kindOf(r); const users = Object.keys(r.attachments ?? {}).length;
-            const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
-            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count',
-                sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
+    /* NEW ASSET (05-11, step 3): ONE BOX (kit.js NewAsset) wherever an asset is made -- Assets (the "+" of a
+       kind, the map's "+"), a conversation's Attach: the same kinds, the same forms (#assets-forms, moved in
+       when asked for), one ending. The words, once each. */
+    const newKinds = () => [['folder', uiSaid('set-na-k-folder', 'Folder')], ['git', uiSaid('set-na-k-git', 'Git repository')], ['mailbox', uiSaid('set-na-k-mailbox', 'Mailbox')],
+        ['agenda', uiSaid('set-na-k-agenda', 'Calendar')], ['contacts', uiSaid('set-na-k-contacts', 'Contacts')], ['secret', uiSaid('set-na-k-secret', 'Secret')], ['list', uiSaid('set-na-k-list', LISTS_WORD.one)],
+        /* Step 4: a voice box (paired with a code) and a device (the share sheet, its code) are two kinds of it too. */
+        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')], ['mcp', uiSaid('set-na-k-mcp', 'MCP server')], ['machine', uiSaid('set-na-k-machine', 'Machine (SSH)')], ['browser', uiSaid('set-na-k-browser', 'Browser')]]
+        .map(([kind, label]) => ({ kind, label, icon: kindIcon(kind) }));
+    /* A voice box's steps after its kind (the flow: "A NEW VOICE BOX", with the boxes), and the one under way. */
+    const BOX_STEPS = ['where', 'plug', 'pair'];
+    let boxFlow = null;
+    /* `boxHost` { where, repaint, close }: the frame a voice box is added in -- where it speaks (preselected),
+       how that frame draws itself again, and closes. A device is the share sheet itself, opened on `where`. */
+    function newAssetBox(opts) {
+        const host = opts.boxHost ?? { where: '', repaint: () => {}, close: () => {} };
+        const box = opts.kind === 'box' && !opts.made;
+        const boxMade = box && boxFlow?.made ? boxFlow.made : null;
+        const speaks = box && host.where ? { line: speaksLine(host.where) } : null;
+        return KIT.NewAsset({
+            kinds: newKinds(), ...opts,
+            ...(box ? { context: boxMade ? null : speaks, at: boxFlow ? 1 + BOX_STEPS.indexOf(boxFlow.step) : 1,
+                made: boxMade ? { said: uiSaid('set-na-box-made', '{name} answers in {where}', { name: boxMade.name, where: whereName(boxMade.where) }) } : null,
+                onAnother: () => { startBoxFlow(host); host.repaint(); }, onDone: () => { stopBoxWait(); boxFlow = null; host.close(); } } : {}),
+            onKind: (k) => {
+                if (k === 'device') { newDevice(host.where); return; }
+                if (k === 'box') startBoxFlow(host);
+                opts.onKind?.(k);
+            },
+            words: { title: opts.title ?? uiSaid('set-na-new', 'New asset'), there: uiSaid('set-na-there', 'Already there'), orNew: uiSaid('set-na-or-new', 'or a new one'),
+                steps: box ? [uiSaid('set-na-step-kind', 'Kind'), uiSaid('set-na-step-where', 'Where'), uiSaid('set-na-step-plug', 'Plug it'), uiSaid('set-na-step-pair', 'Pair it'), uiSaid('set-na-step-answers', 'It answers')]
+                    : [uiSaid('set-na-step-kind', 'Kind'), uiSaid('set-na-step-set', 'Set up'), uiSaid('set-na-step-made', 'Created')],
+                back: uiSaid('set-na-back', 'Back'), another: uiSaid('set-na-another', 'Create another'), done: uiSaid('set-na-done', 'Done') },
+            form: (kind) => {
+                if (kind === 'box') return paintBoxFlow();
+                const form = $(`${addForm(kind)}-box`); form.hidden = false;
+                if (kind === 'git') { fillKeyChoice(); showVia(); }
+                if (kind === 'machine') { fillKeyChoice(); void getJson('/git-keys', []).then((keys) => paintKeys(keys)); }
+                if (kind === 'list') void fillTemplates();
+                if (kind === 'browser') $('browser-address').value = browserAddress();
+                return form;
+            },
+        });
+    }
+    /* The first field of the form shown in `holder`, focused. */
+    const focusFirst = (holder) => { const f = holder.querySelector('.as-form input:not([type=radio])'); if (f) focusField(f); };
+    /* What was just made: the box's ending ("✓ <name> created"), until Done. `to`: the conversation it was attached to. */
+    let justMade = null;
+    /* A form is in a conversation's Give… (its context), or in Assets. */
+    const inGive = (form) => $('cassets-detail').contains(form);
+    const newAssetError = (form, message) => { const e = inGive(form) ? $('cassets-error') : $('assets-error'); e.textContent = message; e.hidden = false; };
+    /* THE ONE ENDING. `give(conversation, level)` attaches it, when the box was opened from a conversation; in
+       Assets it is opened, the ending above it. */
+    async function assetMade(form, { key, name, give = null, note = '' }) {
+        if (inGive(form) && current) {
+            const kind = giveNew.kind;
+            if (give) await give(current, giveNew.level || 'read');
+            justMade = { kind, key, name, note, to: current };
+            giveNew.kind = '';
+            await refresh();
+            await paintRoomAssets();
+            return;
         }
-        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', ...secretItem(s2, 'name only') });
-        /* Binder's lists: given to a conversation (read, write) in Binder itself. */
-        const shownLists = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived) : [];
-        listsSig = binderSig(lists.data);
-        for (const l of shownLists) {
-            const users = givenTo(l).length;
-            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count', sub: `${l.count} card${l.count === 1 ? '' : 's'}` });
+        justMade = { kind: assetsAdding, key, name, note };
+        assetOpen = key; assetsAdding = '';
+    }
+    /* Another kind asked from inside a form (New mailbox's Google, Microsoft: the account's form). */
+    async function newAssetKind(form, kind) {
+        if (inGive(form)) { giveNew.kind = kind; await paintRoomAssets(); return; }
+        assetsAdding = kind; await paintAssets();
+    }
+    /* A Tether target made in Give…: Read watches, Write proposes (asks before each action). */
+    const targetLevel = (level) => (level === 'write' ? 'propose' : 'watch');
+    /* ONE ASSET OPENED (06-11, assets step 3): the same panel (kit AssetPanel, AccessList) in the Assets menu and in a
+       conversation's tab. Seen from the menu (`from` ''), the asset itself is changed there too: its group, its name, its
+       value, its settings, deleted. Seen from a conversation, what it is, who has it (its own row first, then "Also
+       with"), what is in it (its files at once), and "Open in Assets" for the rest. */
+    const asErrId = () => (place === 'assets' ? 'assets-error' : 'cassets-error');
+    const sayAsErr = (error) => { const e = $(asErrId()); if (e) { e.textContent = error.message; e.hidden = false; } };
+    const repaintAsset = () => (place === 'assets' ? paintAssets() : paintRoomAssets());
+    /* Who has it: every conversation (the ready ones offered, any other that has it kept), then the devices given it. */
+    function accessHolders(chosen) {
+        const rows = [];
+        for (const c of conversations) {
+            const value = memberCurrent(chosen, c.name);
+            if (c.phase !== 'ready' && ['none', 'off'].includes(value)) continue;
+            rows.push({ id: `conversation:${c.name}`, name: shownName(c) || c.name, sub: c.toolLabel ?? '', value, ready: c.phase === 'ready' });
         }
-        const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
-        const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
-        $('assets-as').dataset.open = chosen || assetsAdding ? 'detail' : 'list';
-        paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose: (key) => { placeAssetStep(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); }, add: (kind) => { placeAssetStep(); assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
-        const detail = $('assets-detail');
-        /* The forms go back to where they wait before the detail is drawn again. */
-        for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
-        detail.replaceChildren();
-        const back = () => { assetOpen = ''; assetsAdding = ''; remember(); void paintAssets(); };
-        if (assetsAdding === 'choose' || (assetsAdding && assetsFromMap)) {
-            /* From the map's "+" of Assets: which kind, then its form; "<" goes back to the map. */
-            const out = el('button', 'as-link', '‹ Access'); out.type = 'button'; out.addEventListener('click', () => { if (!nav.close('compose')) back(); });
-            detail.append(out);
-            if (assetsAdding === 'choose') {
-                detail.append(el('h3', '', 'New asset'));
-                const kinds = el('div', 'as-kinds');
-                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['secret', 'Secret'], ['list', LISTS_WORD.one]]) {
-                    const b = el('button', '', word); b.type = 'button'; b.dataset.kind = kind;
-                    b.addEventListener('click', () => { assetsAdding = kind; void paintAssets(); });
-                    b.prepend(kindIcon(kind)); kinds.append(b);
+        if (!chosen.target && ['folder', 'git', 'mailbox'].includes(chosen.kind)) {
+            for (const d of sharedDevices) { const g = (d.grants ?? []).find((x) => x.asset === chosen.key); if (g) rows.push({ id: `device:${d.id}`, name: d.label ?? d.name ?? d.id, value: g.rights }); }
+        }
+        return rows;
+    }
+    async function setAccess(chosen, row, level, stored) {
+        $(asErrId()).hidden = true;
+        try {
+            if (row.holder === 'device') {
+                const id = String(row.id).slice('device:'.length);
+                if (stored) await post(`${API}/devices/${id}/give`, { asset: chosen.key, rights: stored });
+                else await post(`${API}/devices/${id}/take`, { asset: chosen.key });
+                await readDevices();
+            } else {
+                await applyMemberGrant(chosen, String(row.id).slice('conversation:'.length), stored ?? level);
+                /* A secret: its tool has it, or no longer, at its next start (said where it was changed, its tab). */
+                if (chosen.kind === 'secret' && place !== 'assets' && row.id === `conversation:${current}`) secretNote(chosen.name, level !== 'none');
+            }
+        } catch (error) { sayAsErr(error); return false; }
+        await repaintAsset();
+        return true;
+    }
+    /* AN EXTERNAL MCP SERVER (mcpx.mjs, Tether's mcp target): its address, its tools each with its kind, « Refresh »;
+       a new tool marked until seen (« Mark as seen »); then, for each conversation at Custom, what each kind may do. */
+    /* A sign-in under way (its provider's tab open): the panel is painted again when this page is looked at again.
+       The client form opened, and what the server said it needs, per server. */
+    let mcpSigningIn = ''; let mcpClientOpen = ''; const mcpClientNeed = new Map(); const mcpSignLink = new Map();
+    const backFromSignin = () => { if (!mcpSigningIn || document.visibilityState !== 'visible') return; mcpSigningIn = ''; void repaintAsset(); };
+    document.addEventListener('visibilitychange', backFromSignin);
+    window.addEventListener('focus', backFromSignin);
+    const MCP_CLASS = { read: ['set-mcp-c-read', 'Reads only'], write: ['set-mcp-c-write', 'Writes'], destructive: ['set-mcp-c-destructive', 'Deletes or overwrites'] };
+    const mcpClass = (c) => uiSaid(...(MCP_CLASS[c] ?? MCP_CLASS.destructive));
+    function mcpParts(t) {
+        const out = [];
+        if (t.config?.url) out.push(el('p', 'hint mcp-url', t.config.url));
+        const tools = Array.isArray(t.catalog?.tools) ? t.catalog.tools : [];
+        const refresh = el('button', '', uiSaid('set-mcp-refresh', 'Refresh')); refresh.type = 'button'; refresh.dataset.act = 'mcp-refresh';
+        refresh.addEventListener('click', async () => {
+            refresh.disabled = true; $(asErrId()).hidden = true;
+            try { const r = await post(`${API}/tether/mcp-refresh`, { target: t.id }); if (r?.error) sayAsErr(new Error(r.error)); }
+            catch (error) { sayAsErr(error); }
+            await repaintAsset();
+        });
+        /* Signed in with OAuth where the service offers no key (mcpoauth.mjs). PHONE-SAFE (16-11): the provider's tab is
+           opened IN the click, before anything is awaited (a browser lets only a click open one), then sent to its
+           address; none opened (a blocked pop-up), this tab goes there and comes back by itself. A service that
+           registers no client by itself asks once for its client id and secret (kept on the server, never shown
+           again) and the permissions to ask; the address its app must name is shown to copy. */
+        const signedOut = t.catalog?.needs === 'reconnect';
+        const oauth = el('button', signedOut ? 'primary' : '', signedOut ? uiSaid('set-mcp-reconnect', 'Reconnect') : uiSaid('set-mcp-oauth', 'Sign in')); oauth.type = 'button'; oauth.dataset.act = 'mcp-oauth';
+        const clientBox = el('details', 'mcp-client'); clientBox.open = mcpClientOpen === t.id;
+        clientBox.append(el('summary', '', uiSaid('set-mcp-client-box', 'Client ID and secret')));
+        const field = (key, fallback, input) => { const l = el('label', 'mcp-client-field'); l.append(el('span', '', uiSaid(key, fallback)), input); return l; };
+        const clientId = el('input'); clientId.type = 'text'; clientId.autocomplete = 'off'; clientId.spellcheck = false; clientId.name = 'mcp-client-id';
+        const clientSecret = el('input'); clientSecret.type = 'password'; clientSecret.autocomplete = 'new-password'; clientSecret.name = 'mcp-client-secret';
+        const scopes = el('input'); scopes.type = 'text'; scopes.autocomplete = 'off'; scopes.spellcheck = false; scopes.name = 'mcp-scopes';
+        const redirect = el('input'); redirect.type = 'text'; redirect.readOnly = true; redirect.name = 'mcp-redirect';
+        const said = el('p', 'hint mcp-client-said', uiSaid('set-mcp-client-kept', 'Kept on the server. No AI sees them.'));
+        const asked = mcpClientNeed.get(t.id);
+        if (asked) { redirect.value = asked.redirect ?? ''; scopes.value = (asked.scopes ?? []).join(' '); clientId.value = asked.id ?? ''; }
+        /* The client kept for it (18-11): its id and permissions shown again; the secret never, said kept. */
+        else if (t.client) { clientId.value = t.client.clientId ?? ''; scopes.value = t.client.scope ?? ''; }
+        if (t.client?.secret) clientSecret.placeholder = uiSaid('set-mcp-secret-kept', 'Kept — leave empty to keep it');
+        redirect.hidden = !redirect.value;
+        clientBox.append(field('set-mcp-client', 'Client ID', clientId), field('set-mcp-secret', 'Client secret', clientSecret),
+            field('set-mcp-scopes', 'Permissions asked', scopes), ...(redirect.value ? [field('set-mcp-redirect', 'Its app\'s redirect address', redirect)] : []), said);
+        clientBox.addEventListener('toggle', () => { mcpClientOpen = clientBox.open ? t.id : ''; });
+        /* The sign-in address, shown to copy or open in another browser (17-11). */
+        const linkBox = el('div', 'mcp-sign-link');
+        const linkText = el('input'); linkText.type = 'text'; linkText.readOnly = true; linkText.name = 'mcp-sign-link'; linkText.spellcheck = false;
+        const linkCopy = el('button', '', uiSaid('set-mcp-link-copy', 'Copy')); linkCopy.type = 'button';
+        const linkOpen = el('a', 'button', uiSaid('set-mcp-link-open', 'Open')); linkOpen.target = '_blank'; linkOpen.rel = 'noopener noreferrer';
+        linkCopy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(linkText.value); linkCopy.textContent = uiSaid('set-mcp-link-copied', 'Copied'); } catch { linkText.select(); } });
+        linkText.addEventListener('focus', () => linkText.select());
+        const linkRow = el('div', 'mcp-sign-link-row'); linkRow.append(linkText, linkCopy, linkOpen);
+        linkBox.append(el('p', 'hint', uiSaid('set-mcp-link', 'Or open this link in another browser:')), linkRow);
+        const showSignLink = (url) => { if (!/^https?:\/\//.test(String(url))) { linkBox.hidden = true; return; } linkText.value = url; linkOpen.href = url; linkBox.hidden = false; };
+        showSignLink(mcpSignLink.get(t.id) ?? '');
+        oauth.addEventListener('click', async () => {
+            $(asErrId()).hidden = true;
+            /* Opened now, empty; never told who opened it (the provider's page cannot reach this one). */
+            let tab = null;
+            try { tab = window.open('', '_blank'); } catch { tab = null; }
+            try { if (tab) tab.opener = null; } catch { /* some browsers refuse it: the tab is still ours */ }
+            oauth.disabled = true; oauth.setAttribute('aria-busy', 'true');
+            const body = { target: t.id, lang: deviceLang(), back: location.pathname + location.search, tab: tab ? 'new' : 'same' };
+            if (asked && clientId.value.trim()) asked.id = clientId.value.trim();
+            if (clientId.value.trim()) body.clientId = clientId.value.trim();
+            if (clientSecret.value.trim()) body.clientSecret = clientSecret.value.trim();
+            if (asked && scopes.value.trim() !== (asked.scopes ?? []).join(' ')) body.scope = scopes.value.trim();
+            else if (clientId.value.trim() && scopes.value.trim()) body.scope = scopes.value.trim();
+            /* Not kept in the page a moment longer. */
+            clientSecret.value = '';
+            try {
+                const r = await post(`${API}/tether/mcp-oauth`, body);
+                if (r?.url) {
+                    mcpSigningIn = t.id;
+                    /* Its address, also to copy: to sign in from another browser (17-11). */
+                    mcpSignLink.set(t.id, r.url); showSignLink(r.url);
+                    if (tab) tab.location.href = r.url; else { location.assign(r.url); return; }
+                } else {
+                    try { tab?.close(); } catch { /* gone */ }
+                    if (r?.need === 'client') {
+                        mcpClientNeed.set(t.id, { redirect: r.redirect, scopes: r.scopes, secret: r.secret, id: clientId.value.trim() });
+                        mcpClientOpen = t.id;
+                        sayAsErr(new Error(r.missing === 'secret' ? uiSaid('set-mcp-secret-need', 'Paste its client secret too.') : uiSaid('set-mcp-client-need', 'Paste its client ID and secret, once.')));
+                        await repaintAsset();
+                        return;
+                    }
                 }
-                detail.append(kinds);
-                return;
-            }
-            const form = $(`${assetsAdding}-box`); form.hidden = false;
-            detail.append(form);
-            if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
-            if (assetsAdding === 'list') void fillTemplates();
-            focusField(form.querySelector('input:not([type=radio])'));
-            return;
-        }
-        if (assetsAdding) {
-            const all2 = el('button', 'as-link as-back', '‹ Assets'); all2.type = 'button'; all2.addEventListener('click', () => { if (!nav.close('asset')) back(); });
-            const form = $(`${assetsAdding}-box`); form.hidden = false;
-            detail.append(all2, form);
-            if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
-            if (assetsAdding === 'list') void fillTemplates();
-            focusField(form.querySelector('input:not([type=radio])'));
-            return;
-        }
-        if (!chosen) { if (items.length) detail.append(noAssetChosen()); return; }
-        detail.append(asTitle(chosen, back));
-        const ready = conversations.filter((c) => c.phase === 'ready');
-        const r = chosen.resource;
-        /* State, in a line. */
-        if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
-        if (chosen.kind === 'secret') {
-            /* Renamed: its value and the conversations it is handed to go with it. */
-            const form = el('form', 'set-row secret-rename'); form.autocomplete = 'off';
-            const name = el('input'); name.id = 'secret-rename-name'; name.value = chosen.name; name.maxLength = 40; name.pattern = '[A-Z][A-Z0-9_]*'; name.spellcheck = false; name.autocapitalize = 'characters'; name.setAttribute('aria-label', 'New name');
-            const go = el('button', '', 'Rename'); go.type = 'submit';
-            const what = el('div', 'set-what'); what.append(el('span', '', 'Name'), el('small', '', 'Applies at next start'));
-            const control = el('div', 'set-control'); control.append(name, go);
-            form.append(what, control);
-            form.addEventListener('submit', async (event) => {
-                event.preventDefault();
-                $('assets-error').hidden = true;
-                try { const done = await post(`${API}/secrets/${chosen.name}/rename`, { name: name.value.trim() }); assetOpen = `secret:${done.name}`; }
-                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-                await paintAssets();
+            } catch (error) { try { tab?.close(); } catch { /* gone */ } sayAsErr(error); }
+            oauth.disabled = false; oauth.removeAttribute('aria-busy');
+        });
+        const fresh = tools.filter((x) => x.fresh === true);
+        const seen = fresh.length ? el('button', '', uiSaid('set-mcp-seen', 'Mark as seen')) : null;
+        if (seen) {
+            seen.type = 'button'; seen.dataset.act = 'mcp-seen';
+            seen.addEventListener('click', async () => {
+                seen.disabled = true; $(asErrId()).hidden = true;
+                try { await post(`${API}/tether/mcp-seen`, { target: t.id }); } catch (error) { sayAsErr(error); }
+                await repaintAsset();
             });
-            detail.append(secretLine(chosen.secret, 'not given to machines'));
-            const replace = secretReplace(chosen);
-            const box = el('div', 'set-rows as-block'); box.append(form, ...replace.rows);
-            detail.append(box, ...replace.card);
         }
-        /* Used by: each conversation that has it, what it may do; "+" offers the others. */
-        const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
-        const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : chosen.kind === 'list' ? chosen.list.grants?.[`conversation:${c.name}`] ?? 'none' : r.attachments?.[c.name] ?? 'none');
-        const using = ready.filter((c) => !['none', 'off'].includes(has(c)));
-        const others = ready.filter((c) => ['none', 'off'].includes(has(c)));
-        const users = el('div', 'as-users');
-        const picker = el('div', 'as-users as-picker'); picker.hidden = true;
-        const row = (c) => {
-            const line = el('div', 'given-row'); line.dataset.conversation = c.name;
-            line.append(el('span', '', shownName(c)), modes(options, has(c), async (value) => {
-                if (chosen.kind === 'secret') await handTo(c.name, chosen.name, value === 'use', 'assets-error');
-                else if (chosen.kind === 'list') await grantList(chosen.list.id, c.name, value);
-                else await attachTo(c.name, chosen.name, value, 'assets-error');
-                await paintAssets();
-            }, `What ${c.name} may do with ${chosen.name}`));
-            return line;
-        };
-        for (const c of using) users.append(row(c));
-        if (using.length === 0) users.append(el('p', 'hint', 'No conversation uses it.'));
-        for (const c of others) picker.append(row(c));
-        if (others.length === 0) picker.append(el('p', 'hint', ready.length ? 'Every conversation has it.' : 'No conversation is ready.'));
-        detail.append(chapter('Used by', roundPlus('Give it to a conversation', () => { picker.hidden = !picker.hidden; })), users, picker);
-        if (chosen.kind === 'list') {
-            /* The list itself, Binder's screen, here: that list alone. */
-            const open = el('button', '', listOpen === chosen.key ? 'Close' : 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
-            const holder = el('div', 'binder-holder as-binder');
-            open.addEventListener('click', () => { listOpen = listOpen === chosen.key ? '' : chosen.key; void paintAssets(); });
-            detail.append(chapter('Cards', open), holder);
-            const id = chosen.list.id;
-            if (listOpen === chosen.key) {
-                /* Drawn again (the lists changed): on the card it showed, if it showed one; after a reload, the card of the address. */
-                const was = assetsView?.place;
-                const at = assetsAt?.list === id ? assetsAt : was?.list === id && was.page === 'card' ? { list: id, card: was.card } : null;
-                assetsAt = null;
-                void mountBinder(holder, (l) => l.id === id, { place: at, steps: assetsSteps, onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } })
-                    .then((view) => { if (view) assetsView = view; });
+        const list = el('ul', 'mcp-tools');
+        for (const x of tools) {
+            const li = el('li', 'mcp-tool'); li.dataset.tool = x.name; li.dataset.class = x.class;
+            const nm = el('span', 'mcp-tool-name', x.title || x.name);
+            if (x.description) nm.title = x.description;
+            const kind = el('small', 'mcp-tool-class', mcpClass(x.class)); kind.dataset.class = x.class;
+            li.append(nm, kind);
+            if (x.open && x.class !== 'read') li.append(el('small', 'hint', uiSaid('set-mcp-open', 'reaches outside')));
+            /* Declares nothing, seems to only read (Tether, 16-11): offered at Read, each call asked. */
+            if (x.guess === 'read') li.append(el('small', 'hint', uiSaid('set-mcp-guess', 'seems to only read')));
+            if (x.fresh === true) li.append(el('small', 'mcp-tool-fresh', uiSaid('set-mcp-fresh', 'New — asked until you\'ve seen it')));
+            list.append(li);
+        }
+        const body = [];
+        /* Signed out for good (Tether, 16-11): said once, plainly, the button to reconnect beside it. */
+        if (signedOut) body.push(el('p', 'error mcp-out', uiSaid('set-mcp-out', '{name} is disconnected. Reconnect it.', { name: t.title })));
+        else if (t.catalog?.error) body.push(el('p', 'error', uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: t.catalog.error })));
+        body.push(tools.length ? list : el('p', 'hint', uiSaid('set-mcp-none', 'No tools listed yet.')));
+        body.push(linkBox, clientBox);
+        /* What its new tools do (#392): asked once, those that only read at once, or all at once -- the owner's choice. */
+        const newTools = el('div', 'mcp-new-tools');
+        newTools.append(el('span', '', uiSaid('set-mcp-new', 'New tools')), KIT.Segmented({
+            options: [['ask', uiSaid('set-mcp-new-ask', 'Ask once')], ['read', uiSaid('set-mcp-new-read', 'Read-only: accepted')], ['all', uiSaid('set-mcp-new-all', 'All accepted')]].map(([value, label]) => ({ value, label })),
+            value: t.newTools ?? 'ask', label: uiSaid('set-mcp-new', 'New tools'), onChange: async (mode) => {
+                $(asErrId()).hidden = true;
+                try { await post(`${API}/tether/mcp-new-tools`, { target: t.id, mode }); } catch (error) { sayAsErr(error); }
+                await repaintAsset();
+            } }));
+        body.push(newTools);
+        out.push({ title: uiSaid('set-mcp-tools', 'Tools'), extra: [seen, oauth, refresh], body, cls: 'as-mcp-tools' });
+        /* Custom: each kind of tool Yes / Ask / No, for each conversation set to it. */
+        const custom = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');
+        if (custom.length) {
+            const goes = [['yes', uiSaid('set-mcp-yes', 'Yes')], ['ask', uiSaid('set-mcp-ask', 'Ask')], ['no', uiSaid('set-mcp-no', 'No')]].map(([value, label]) => ({ value, label }));
+            const rows = custom.map(([id, g]) => {
+                const box = el('div', 'mcp-custom'); box.dataset.conversation = id.slice('conversation:'.length);
+                const who = conversations.find((c) => c.name === id.slice('conversation:'.length));
+                box.append(el('b', '', (who && shownName(who)) || id.slice('conversation:'.length)));
+                for (const c of ['read', 'write', 'destructive']) {
+                    const now = g.classes?.[c] ?? (c === 'read' ? 'yes' : 'ask');
+                    const line = el('div', 'mcp-custom-line'); line.dataset.class = c;
+                    line.append(el('span', '', mcpClass(c)), KIT.Segmented({ options: goes, value: now, label: mcpClass(c), onChange: async (go) => {
+                        $(asErrId()).hidden = true;
+                        try { await post(`${API}/tether/mcp-rights`, { target: t.id, agent: id, classes: { [c]: go } }); } catch (error) { sayAsErr(error); }
+                        await repaintAsset();
+                    } }));
+                    box.append(line);
+                }
+                return box;
+            });
+            out.push({ title: uiSaid('set-mcp-custom', 'Custom rights'), body: rows, cls: 'as-mcp-custom' });
+        }
+        return out;
+    }
+    /* A BROWSER PAIRED THROUGH THE TETHER EXTENSION (browsers.mjs): connected or not, the tabs its person granted (all an
+       AI can touch), the address the extension connects to, « Pair again »; then, for each conversation at Frame, the
+       sites it acts on without asking. */
+    const browserAddress = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/c/api/browser`;
+    /* The one line pasted in the extension's popup: where it connects, and its key good once (Tether 0.1.0-next.59). */
+    const browserConfig = (key) => JSON.stringify({ url: browserAddress(), key });
+    function browserParts(t, tether = {}) {
+        const out = [];
+        const now = tether.browsers?.[t.id] ?? { connected: false, tabs: [] };
+        const state = el('p', now.connected ? 'hint br-on' : 'hint br-off', now.connected
+            ? uiSaid('set-br-connected', 'Connected · {n} tab(s) granted', { n: now.tabs.length }) : uiSaid('set-br-offline', 'Not connected: open that browser'));
+        state.dataset.act = 'browser-state';
+        const list = el('ul', 'br-tabs');
+        for (const x of now.tabs) { const li = el('li', '', x.title || x.url || String(x.id)); li.title = x.url ?? ''; list.append(li); }
+        const body = [state];
+        body.push(now.tabs.length ? list : el('p', 'hint', uiSaid('set-br-no-tabs', 'No tab granted: grant them in its popup.')));
+        out.push({ title: uiSaid('set-br-tabs', 'Tabs'), body, cls: 'as-br-tabs' });
+        /* Paired again (the extension reinstalled, its pairing reset): a new configuration for the same asset. */
+        const again = el('div', 'br-again');
+        const line = el('input'); line.readOnly = true; line.spellcheck = false; line.hidden = true; line.setAttribute('aria-label', uiSaid('set-br-config', 'Configuration (once, 10 minutes)'));
+        const go = el('button', '', uiSaid('set-br-pair-again', 'Pair again')); go.type = 'button'; go.dataset.act = 'browser-pair-again';
+        go.addEventListener('click', async () => {
+            if (!line.hidden) { try { await navigator.clipboard.writeText(line.value); go.textContent = uiSaid('set-br-copied', 'Copied'); } catch { line.select(); } return; }
+            go.disabled = true; $(asErrId()).hidden = true;
+            try { const made = await post(`${API}/tether/browser-offer`, { target: t.id }); line.value = browserConfig(made.key); line.hidden = false; go.textContent = uiSaid('set-br-copy', 'Copy'); }
+            catch (error) { sayAsErr(error); }
+            go.disabled = false;
+        });
+        again.append(line, go);
+        out.push({ title: uiSaid('set-br-pairing', 'Pairing'), body: [again], cls: 'as-br-pair' });
+        /* Frame: the sites each conversation acts on without a card (Tether's site rules). Empty: everything asked. */
+        const framed = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');
+        if (framed.length) {
+            const rows = framed.map(([id, g]) => {
+                const name = id.slice('conversation:'.length);
+                const box = el('div', 'br-sites'); box.dataset.conversation = name;
+                const who = conversations.find((c) => c.name === name);
+                const lab = el('label', '', uiSaid('set-br-sites', 'Allowed sites (one per line, *.example.com)'));
+                const ta = el('textarea'); ta.rows = 3; ta.spellcheck = false; ta.autocapitalize = 'off'; ta.placeholder = 'shop.example.com\n*.example.org';
+                ta.value = (g.rules ?? []).filter((r) => r.kind === 'site').map((r) => r.value).join('\n');
+                const id2 = `br-sites-${t.id}-${name}`.replace(/[^a-zA-Z0-9-]/g, '-'); ta.id = id2; lab.htmlFor = id2;
+                const save = el('button', '', uiSaid('set-br-save', 'Save')); save.type = 'button'; save.dataset.act = 'browser-sites';
+                const said = el('small', 'hint');
+                save.addEventListener('click', async () => {
+                    save.disabled = true; $(asErrId()).hidden = true;
+                    try { const r = await post(`${API}/tether/browser-sites`, { target: t.id, agent: id, sites: ta.value.split('\n') }); ta.value = (r.sites ?? []).join('\n'); said.textContent = uiSaid('set-br-saved', 'Saved.'); }
+                    catch (error) { sayAsErr(error); }
+                    save.disabled = false;
+                });
+                const row = el('div', 'row'); row.append(save, said);
+                box.append(el('b', '', (who && shownName(who)) || name), lab, ta, el('p', 'hint', uiSaid('set-br-sites-hint', 'Other sites: asked each time.')), row);
+                return box;
+            });
+            out.push({ title: uiSaid('set-br-frame', 'Frame: sites'), body: rows, cls: 'as-br-frame' });
+        }
+        return out;
+    }
+    /* `detail`: where it is drawn. `from`: the conversation it is seen from ('' : the menu). `back`: the way back (a phone).
+       `tether`, `groups`: as the page read them. `gits`: the conversation's repositories (To send, beside). */
+    async function assetPanel(detail, chosen, { from = '', back, tether = {}, groups = [], gits = [], stale = () => false } = {}) {
+        const inMenu = !from;
+        const r = chosen.resource;
+        const parts = []; const foot = [];
+        const t = chosen.target;
+        const copyBox = (chosen.kind === 'mailbox' || chosen.kind === 'folder') && !t;
+        /* WHAT IT IS. */
+        if (chosen.kind === 'mailbox' && !t) parts.push(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+        /* ACTIONS TOO (02-11): a mailbox copied as files is read only; the same mailbox, connected live, can
+           send, reply, move, flag -- within the rights given. Made here with its address and password (they
+           stay on the server); only its sending server is asked, found from the address when known. */
+        if (inMenu && chosen.kind === 'mailbox' && !t && chosen.box && !chosen.box.provider) {
+            const live = el('div', 'as-live');
+            const go = el('button', '', 'Also allow actions (send, move…)'); go.type = 'button';
+            live.append(el('p', 'hint', 'Read only here. Connected live too, an agent can send, reply, move or flag its mail, each within the rights you give.'), go);
+            go.addEventListener('click', async () => {
+                go.hidden = true;
+                const box = chosen.box; const emailLike = String(box.user ?? '').includes('@');
+                const email = el('input'); email.type = 'email'; email.value = emailLike ? box.user : ''; email.placeholder = 'its email address'; email.setAttribute('aria-label', 'Email address');
+                const smtp = el('input'); smtp.placeholder = 'smtp.example.com'; smtp.spellcheck = false; smtp.setAttribute('aria-label', 'Sending server (SMTP)');
+                const make = el('button', 'primary', 'Connect'); make.type = 'button';
+                const said = el('p', 'error'); said.hidden = true;
+                const form = el('div', 'as-live-form');
+                form.append(el('label', '', 'Email address'), email, el('label', '', 'Sending server (SMTP)'), smtp, make, said);
+                live.append(form);
+                const guess = async () => { try { const found = await post(`${API}/accounts/lookup`, { user: email.value.trim() }); if (found?.smtp && !smtp.value.trim()) smtp.value = found.smtp; } catch { /* typed by hand */ } if (!smtp.value.trim() && box.host) smtp.value = String(box.host).replace(/^imap\./, 'smtp.'); };
+                if (email.value) void guess();
+                email.addEventListener('change', () => void guess());
+                make.addEventListener('click', async () => {
+                    make.disabled = true; make.textContent = 'Trying it…'; said.hidden = true;
+                    try { await post(`${API}/mailboxes/${encodeURIComponent(box.name)}/live`, { email: email.value.trim(), smtp: smtp.value.trim() }); void repaintAsset(); }
+                    catch (error) { said.textContent = error.message; said.hidden = false; make.disabled = false; make.textContent = 'Connect'; }
+                });
+                focusField(smtp.value ? make : smtp);
+            });
+            parts.push(live);
+        }
+        /* A live link: what it is, and that it is associated with the same account's others. */
+        if (t) {
+            parts.push(el('p', 'hint', ['live', connexionSub(t.kind), t.config?.user].filter(Boolean).join(' · ')));
+            /* The account's real permissions, read from the token (server-side) --
+               shown here so they can be checked at any time, not only at connection.
+               "Re-check" reads them live, to catch a permission removed since. */
+            if (inMenu && ['google', 'microsoft'].includes(t.config?.provider)) {
+                const KINDS3 = ['mail', 'calendar', 'contacts'];
+                const perms = el('div', 'as-perms');
+                parts.push(perms);
+                const draw = (authorized) => {
+                    perms.replaceChildren();
+                    if (Array.isArray(authorized)) {
+                        const line = el('p', 'hint');
+                        line.append(el('b', '', 'Permissions: '));
+                        line.append(document.createTextNode(KINDS3.map((k) => `${k} ${authorized.includes(k) ? '✓' : '✗'}`).join('   ')));
+                        perms.append(line);
+                    } else { perms.append(el('p', 'hint', 'Permissions not checked yet.')); }
+                    const btn = el('button', '', Array.isArray(authorized) ? 'Re-check' : 'Check permissions');
+                    btn.type = 'button';
+                    btn.addEventListener('click', async () => {
+                        btn.disabled = true; btn.textContent = 'Checking…';
+                        try { const got = await post(`${API}/accounts/verify`, { id: t.id }); draw(got.authorized); }
+                        catch (e) { perms.append(el('p', 'error', e.message)); btn.disabled = false; btn.textContent = 'Re-check'; }
+                    });
+                    perms.append(btn);
+                };
+                draw(Array.isArray(t.config?.authorizedKinds) ? t.config.authorizedKinds : null);
+            }
+            /* A mailbox: its signature, in Markdown, added under what the agent sends. */
+            if (inMenu && t.kind === 'mail') {
+                const box = el('div', 'as-signature');
+                const lab = el('label', '', 'Signature'); lab.htmlFor = `sig-${t.id}`;
+                const ta = document.createElement('textarea'); ta.id = `sig-${t.id}`; ta.rows = 3; ta.value = t.config?.signature ?? ''; ta.placeholder = 'Added under every mail the agent sends from this mailbox (Markdown: **bold**, links…)';
+                const save = el('button', '', 'Save'); save.type = 'button';
+                const said = el('small', 'hint', '');
+                save.addEventListener('click', async () => {
+                    save.disabled = true;
+                    try { await post(`${API}/tether/signature`, { target: t.id, signature: ta.value }); said.textContent = ta.value.trim() ? 'Saved.' : 'Removed.'; t.config = { ...(t.config ?? {}), signature: ta.value.trim() }; }
+                    catch (e) { said.textContent = e.message; }
+                    save.disabled = false;
+                });
+                const row = el('div', 'row'); row.append(save, said);
+                box.append(lab, ta, row);
+                parts.push(box);
+            }
+            if (t.kind === 'mcp') parts.push(...mcpParts(t));
+            if (t.kind === 'browser') parts.push(...browserParts(t, tether));
+            if (chosen.siblings?.length) {
+                const a = el('p', 'as-assoc hint');
+                a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's sign-in (kept on the server); rights are given separately.`));
+                parts.push(a);
             }
         }
+        if (chosen.kind === 'secret') {
+            if (inMenu) {
+                /* Renamed: its value and the conversations it is handed to go with it. */
+                const form = el('form', 'set-row secret-rename'); form.autocomplete = 'off';
+                const name = el('input'); name.id = 'secret-rename-name'; name.value = chosen.name; name.maxLength = 40; name.pattern = '[A-Z][A-Z0-9_]*'; name.spellcheck = false; name.autocapitalize = 'characters'; name.setAttribute('aria-label', 'New name');
+                const go = el('button', '', 'Rename'); go.type = 'submit';
+                const what = el('div', 'set-what'); what.append(el('span', '', 'Name'), el('small', '', 'Applies at next start'));
+                const control = el('div', 'set-control'); control.append(name, go);
+                form.append(what, control);
+                form.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    $('assets-error').hidden = true;
+                    try { const done = await post(`${API}/secrets/${chosen.name}/rename`, { name: name.value.trim() }); assetOpen = `secret:${done.name}`; }
+                    catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                    await paintAssets();
+                });
+                parts.push(secretLine(chosen.secret, 'not given to machines'));
+                const replace = secretReplace(chosen);
+                const box = el('div', 'set-rows as-block'); box.append(form, ...replace.rows);
+                parts.push(box, ...replace.card);
+            } else {
+                if (chosen.secret.expires) parts.push(secretLine(chosen.secret, 'not given to its tool'));
+                parts.push(el('p', 'hint', 'Handed to its tool as a variable and a file, the next time it starts. Its value is never shown.'));
+            }
+        }
+        /* WHO HAS IT: a row per conversation and device, its right set in place ("None" first). */
+        const own = chosen.own;
+        const model = own ? null : KIT.accessModel({ key: KIT.rightsKey(chosen), holders: accessHolders(chosen), from: from ? `conversation:${from}` : '' });
+        if (model) {
+            /* Given to a device: from here too (the map shows who has it). */
+            const share = !t && ['folder', 'git', 'mailbox'].includes(chosen.kind) ? el('button', 'as-link', uiSaid('set-acc-share', 'Share with a device...')) : null;
+            if (share) { share.type = 'button'; share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); }); }
+            parts.push(KIT.AccessList(model, { key: KIT.rightsKey(chosen), kind: chosen.kind, name: chosen.name, onChange: (row, level, stored) => setAccess(chosen, row, level, stored), actions: [share] }));
+        }
+        /* A CALENDAR'S AGENDA (16-11): its events, under who has it -- read through Tether as the owner's own read
+           (agenda.mjs), so the calendar need not stay open elsewhere. The owner's page only: a device reads no calendar. */
+        if (t?.kind === 'calendar' && !DEVICE) parts.push(agendaPart(t));
+        /* A MACHINE'S SHARED CONSOLE (16-11): live, under who has it (sshconsole.mjs). The owner's page only: not given to devices. */
+        if (t?.kind === 'ssh' && !DEVICE) parts.push(...consoleParts(t, tether, from));
+        /* A MAILBOX'S MAIL, AN ADDRESS BOOK'S CONTACTS (16-11): read the same way (mailview.mjs, contactview.mjs). */
+        if (t?.kind === 'mail' && !DEVICE) parts.push(mailPart(t));
+        if (t?.kind === 'contacts' && !DEVICE) parts.push(contactsPart(t));
+        /* WHAT IS IN IT. */
+        if (copyBox) {
+            /* Its files: at once in a conversation; in the menu, a button opens them in the panel (the files sheet, moved in). */
+            const holder = el('div', 'as-files');
+            if (inMenu) {
+                const browse = el('button', '', uiSaid('set-as-browse', 'Browse')); browse.type = 'button'; browse.dataset.act = 'files';
+                browse.addEventListener('click', () => { browse.disabled = true; filesBrowsing = chosen.key; embedFiles(holder, chosen.name, { owner: true }); });
+                parts.push({ title: uiSaid('set-as-files', 'Files'), extra: [browse], body: [holder], cls: 'as-files-menu' });
+                if (filesBrowsing === chosen.key) queueMicrotask(() => browse.click());
+            } else parts.push({ body: [holder], cls: 'as-files-part' });
+            if (!inMenu) queueMicrotask(() => embedFiles(holder, chosen.name));
+        }
+        if (chosen.kind === 'list') {
+            if (inMenu) {
+                /* The list itself, Binder's screen, here: that list alone. */
+                const open = el('button', '', listOpen === chosen.key ? 'Close' : 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
+                const holder = el('div', 'binder-holder as-binder');
+                open.addEventListener('click', () => { listOpen = listOpen === chosen.key ? '' : chosen.key; void paintAssets(); });
+                parts.push({ title: 'Cards', extra: [open], body: [holder] });
+                const id = chosen.list.id;
+                if (listOpen === chosen.key) {
+                    /* Drawn again (the lists changed): on the card it showed, if it showed one; after a reload, the card of the address. */
+                    const was = assetsView?.place;
+                    const at = assetsAt?.list === id ? assetsAt : was?.list === id && was.page === 'card' ? { list: id, card: was.card } : null;
+                    assetsAt = null;
+                    queueMicrotask(() => void mountBinder(holder, (l) => l.id === id, { place: at, steps: assetsSteps, onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } })
+                        .then((view) => { if (view) assetsView = view; }));
+                }
+            } else {
+                /* In a conversation, its cards are in its Lists tab. */
+                const open = el('button', '', 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
+                open.addEventListener('click', () => { goTab('lists'); });
+                parts.push({ title: 'Cards', extra: [open], body: [el('p', 'hint', `${chosen.list.count} card${chosen.list.count === 1 ? '' : 's'}`)] });
+            }
+        }
+        let gitHolder = null;
         if (chosen.kind === 'git') {
-            const holder = el('div', 'as-git'); detail.append(holder);
             /* Settings: where it is sent, with what. */
             const settings = await getJson(`/git/${chosen.name}`, {});
             const edit = el('button', 'as-edit', '✎ Edit'); edit.type = 'button';
             const table = el('dl', 'as-settings');
             const fact = (k, v) => { table.append(el('dt', '', k), el('dd', '', v)); };
             fact('Remote', settings.remote ?? 'none');
-            fact('Sent with', settings.hasKey ? 'a key kept for it' : settings.sshKey ? `SSH key ${settings.sshKey}` : r.via?.method && r.via.method !== 'none' ? viaText(r.via).replace(/^, with /, '') : 'what it was cloned with');
-            if (r.from && r.via?.hostKey) fact('Host key', `${hostOf(r.from)}: ${r.via.hostKey}`);
-            detail.append(chapter('Settings', edit), table);
-            const box = $('gitview-remote-box');
-            remoteShown = chosen.name;
-            await fillRemote(chosen.name, settings);
-            box.hidden = !remoteEditing; box.open = true;
-            detail.append(box);
-            edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
-            void gitDetail(holder, chosen.name, { place: true });
+            fact('Sent with', settings.hasKey ? 'a key kept for it' : settings.sshKey ? `SSH key ${settings.sshKey}` : r?.via?.method && r.via.method !== 'none' ? viaText(r.via).replace(/^, with /, '') : 'what it was cloned with');
+            if (r?.from && r.via?.hostKey) fact('Host key', `${hostOf(r.from)}: ${r.via.hostKey}`);
+            const body = [table];
+            if (inMenu) {
+                const box = $('gitview-remote-box');
+                remoteShown = chosen.name;
+                await fillRemote(chosen.name, settings);
+                box.hidden = !remoteEditing; box.open = true;
+                body.push(box);
+                edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
+            } else edit.addEventListener('click', () => { void openAssetsPlace(chosen.key, { remote: true }); });
+            gitHolder = el('div', 'as-git');
+            parts.push({ title: 'Settings', extra: [edit], body });
+            /* What THIS conversation's agent may send by itself: under the right it depends on (it writes), seen from it. */
+            if (!inMenu && !DEVICE && model?.here?.level === 'write') parts.push(autoSending(from, chosen.name));
+            parts.push(gitHolder);
         }
-        /* Delete, out of the way; refused while it is used, and why. */
-        const remove = el('button', 'as-link danger-link', 'Delete...'); remove.type = 'button';
-        const why = el('small', 'hint');
-        const inUse = chosen.kind !== 'secret' && using.length > 0;
-        const lost = { secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.';
-        if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
-        remove.addEventListener('click', () => {
-            const sure = el('button', 'danger', chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
-            const keep = el('button', '', 'Keep'); keep.type = 'button';
-            keep.addEventListener('click', () => { void paintAssets(); });
-            const ask = el('div', 'callout bad confirm'); ask.setAttribute('role', 'alertdialog');
-            ask.append(el('span', '', lost), keep, sure);
-            sure.addEventListener('click', async () => {
-                try {
-                    if (chosen.kind === 'list') { const done = await binderCall('delete-list', { list: chosen.list.id }); if (!done.ok) throw new Error(done.text); }
-                    else await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`);
-                    assetOpen = '';
+        if (t) {
+            /* An MCP server's rights say themselves (Off / Read / All with approval / All / Custom): no levels' words under them. */
+            if (t.kind !== 'mcp') parts.push(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
+            /* Calls waiting for a person (propose/frame). Accept or refuse each. */
+            /* A machine's terminal inputs are proposed beside its console (consoleAsk), not here again. */
+            const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id && !(t.kind === 'ssh' && !DEVICE && String(q.verb ?? '').startsWith('terminal.')));
+            if (waiting.length) {
+                const box = el('div', 'as-users');
+                for (const q of waiting) {
+                    const line = el('div', 'given-row');
+                    const what = el('span', ''); what.append(el('b', '', q.verb ?? 'action'), document.createTextNode(` ${q.detail ?? ''}`.trimEnd()));
+                    if (q.why) what.append(el('small', 'hint', ` — ${q.why}`));
+                    const yes = el('button', 'primary', 'Accept'); yes.type = 'button'; yes.addEventListener('click', () => { yes.disabled = true; void decideTether(q.id, 'yes', repaintAsset); });
+                    const no = el('button', 'danger', 'Refuse'); no.type = 'button'; no.addEventListener('click', () => { no.disabled = true; void decideTether(q.id, 'no', repaintAsset); });
+                    const acts = el('div', 'levels'); acts.append(yes, no);
+                    line.append(what, acts);
+                    /* EDIT BEFORE APPROVING (16-11): an MCP call's texts shown whole (a reply's text...), changed here, then
+                       approved as changed; Tether checks them again against the tool. */
+                    const editable = q.card?.kind === 'mcp' && Array.isArray(q.editable) ? q.editable : [];
+                    if (editable.length) {
+                        const edit = el('button', '', uiSaid('set-ap-edit', 'Edit')); edit.type = 'button'; edit.dataset.act = 'edit-call';
+                        const form = el('div', 'ap-edit'); form.hidden = true;
+                        const boxes = editable.map((name) => {
+                            const area = el('textarea'); area.name = name; area.rows = 3; area.value = (q.card.args ?? []).find((x) => x.name === name)?.value ?? '';
+                            const l = el('label', 'mcp-client-field'); l.append(el('span', '', name), area); form.append(l);
+                            return area;
+                        });
+                        const send = el('button', 'primary', uiSaid('set-ap-send-edited', 'Accept as edited')); send.type = 'button';
+                        send.addEventListener('click', () => { send.disabled = true; void decideTether(q.id, 'yes', repaintAsset, Object.fromEntries(boxes.map((b) => [b.name, b.value]))); });
+                        form.append(send);
+                        edit.addEventListener('click', () => { form.hidden = !form.hidden; yes.hidden = !form.hidden; if (!form.hidden) boxes[0]?.focus(); });
+                        acts.append(edit);
+                        line.append(form);
+                    }
+                    box.append(line);
                 }
-                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-                await paintAssets();
-            });
-            remove.replaceWith(ask); why.remove();
-            sure.focus();
+                parts.push({ title: 'Waiting for you', body: [box] });
+            }
+        }
+        if (inMenu && !own) {
+            /* Delete, out of the way; refused while it is used, and why (a secret goes even used). */
+            const using = model ? model.given.filter((x) => x.holder === 'conversation').length : 0;
+            const inUse = chosen.kind !== 'secret' && using > 0;
+            const lost = t ? 'The connection is removed; the account token stays on the server.' : ({ secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.');
+            foot.push(KIT.AssetDelete({ label: uiSaid('set-acc-delete', 'Delete...'), lost,
+                blocked: inUse ? uiSaid(using > 1 ? 'set-acc-used-n' : 'set-acc-used-1', using > 1 ? 'used by {n} conversations: set them to None first' : 'used by 1 conversation: set it to None first', { n: using }) : '',
+                yes: chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`,
+                onYes: async () => {
+                    try {
+                        if (chosen.kind === 'list') { const done = await binderCall('delete-list', { list: chosen.list.id }); if (!done.ok) throw new Error(done.text); }
+                        else if (t) await post(`${API}/tether/remove-target`, { target: t.id });
+                        else await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`);
+                        assetOpen = '';
+                    }
+                    catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                    await paintAssets();
+                } }));
+        } else if (!inMenu && !own) {
+            const there = el('button', 'as-link', uiSaid('set-acc-in-assets', 'Open in Assets')); there.type = 'button'; there.dataset.act = 'in-assets';
+            there.addEventListener('click', () => { void openAssetsPlace(chosen.key); });
+            foot.push(there);
+        }
+        /* Its right said once: by its own row's picker when it has one (« Lire » pressed), else by the head's badge. */
+        const card = { ...cardOf(chosen), holders: undefined, right: inMenu || model?.here ? undefined : chosen.right, chips: [inMenu && groups && !own ? { node: groupChip(chosen, groups) } : null, ...chipsOf(chosen)] };
+        /* A later paint began while this one read: it draws, not this one. */
+        if (stale()) return;
+        detail.append(KIT.AssetPanel(card, { back: back ? { onBack: () => { if (!nav.close('asset')) back(); } } : null, parts, foot }));
+        if (gitHolder) await gitDetail(gitHolder, chosen.name, { place: inMenu, others: gits.length > 1 });
+    }
+    /* THE AGENDA OF A CALENDAR ASSET (16-11): a week, its days, each event's time, title and place; « now » on today;
+       an event opened says its time, place, link and organiser. Read only. Each read is journaled by Tether, which
+       moves its count and paints the panel again: an answer is kept AGENDA_KEEP_MS here, so a paint reads no calendar. */
+    const AGENDA_KEEP_MS = 5 * 60_000;
+    const AGENDA_DAYS = 7;      /* one week; the pages follow each other, no day twice */
+    const agendaKept = new Map();       /* `${target}|${from}` -> { at, answer } or { at, pending } */
+    const agendaFrom = new Map();       /* target -> the first day shown, when moved from today */
+    let agendaOpen = '';                /* the event opened, kept across paints */
+    let agendaZone = 'Europe/Paris';    /* the calendar's zone (Tether's), as the server last said it */
+    const dayAdd = (day, n) => { const [y, m, d] = day.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+    /* Now, on the calendar's wall clock (its zone, said by the server): 'YYYY-MM-DDTHH:MM'. */
+    const wallNow = (zone) => {
+        try {
+            const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+                .formatToParts(new Date()).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
+            return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+        } catch { return new Date().toISOString().slice(0, 16); }
+    };
+    const dayWords = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const hourOf = (time) => (time && time.length > 10 ? time.slice(11, 16) : '');
+    async function agendaRead(target, from, { fresh = false } = {}) {
+        const key = `${target}|${from}`;
+        const kept = agendaKept.get(key);
+        if (kept && !fresh && (kept.pending || Date.now() - kept.at < AGENDA_KEEP_MS)) return kept.pending ?? kept.answer;
+        const pending = post(`${API}/tether/agenda`, { target, from, to: dayAdd(from, AGENDA_DAYS) })
+            .then((answer) => { agendaKept.set(key, { at: Date.now(), answer }); return answer; })
+            .catch((error) => { agendaKept.delete(key); return { error: error.message || uiSaid('set-ag-failed', 'The calendar could not be read.') }; });
+        agendaKept.set(key, { at: Date.now(), pending });
+        return pending;
+    }
+    function agendaEvent(ev) {
+        const box = el('details', 'ag-event'); box.dataset.show = ev.show ?? 'busy';
+        if (ev.cancelled) box.dataset.cancelled = '';
+        if (agendaOpen === ev.id) box.open = true;
+        box.addEventListener('toggle', () => { if (box.open) agendaOpen = ev.id; else if (agendaOpen === ev.id) agendaOpen = ''; });
+        const head = el('summary', 'ag-row');
+        head.append(el('span', 'ag-time', ev.allDay ? uiSaid('set-ag-allday', 'All day') : hourOf(ev.start)));
+        const what = el('span', 'ag-what'); what.append(el('span', 'ag-title', ev.title));
+        /* Cancelled: struck out, and said in words (not by the line alone). */
+        if (ev.cancelled) what.prepend(el('span', 'ag-cancelled', uiSaid('set-ag-cancelled', 'Cancelled')));
+        if (ev.location) what.append(el('span', 'ag-where hint', ev.location));
+        head.append(what);
+        const facts = el('dl', 'ag-facts');
+        const fact = (k, v) => { if (!v) return; facts.append(el('dt', '', k)); const dd = el('dd'); dd.append(v); facts.append(dd); };
+        const when = ev.allDay ? uiSaid('set-ag-allday', 'All day') : `${hourOf(ev.start)}${ev.end ? ` – ${ev.end.slice(0, 10) === ev.start.slice(0, 10) ? hourOf(ev.end) : `${dayWords(ev.end.slice(0, 10))} ${hourOf(ev.end)}`}` : ''}`;
+        fact(uiSaid('set-ag-when', 'When'), document.createTextNode(`${dayWords(ev.start.slice(0, 10))}, ${when}`));
+        fact(uiSaid('set-ag-where', 'Where'), ev.location ? document.createTextNode(ev.location) : null);
+        if (ev.online) { const a = el('a', '', uiSaid('set-ag-join', 'Join online')); a.href = ev.online; a.target = '_blank'; a.rel = 'noopener noreferrer'; fact(uiSaid('set-ag-link', 'Link'), a); }
+        fact(uiSaid('set-ag-organizer', 'Organizer'), ev.organizer ? document.createTextNode(ev.organizer) : null);
+        if (Number.isInteger(ev.attendees) && ev.attendees > 0) fact(uiSaid('set-ag-guests', 'Guests'), document.createTextNode(String(ev.attendees)));
+        /* ITS INVITATION'S TEXT (16-11): text nodes only -- never HTML, nothing in it runs; a web address (https) alone is a link. */
+        if (ev.notes) fact(uiSaid('set-ag-notes', 'Invitation'), linkedText('ag-notes', ev.notes));
+        if (ev.show && ev.show !== 'busy') fact(uiSaid('set-ag-shown', 'Shown as'), document.createTextNode(uiSaid(`set-ag-show-${ev.show}`, { free: 'Free', tentative: 'Tentative', away: 'Away', elsewhere: 'Elsewhere' }[ev.show] ?? ev.show)));
+        box.append(head, facts);
+        return box;
+    }
+    /* The days of an answer, each with its events; an event of several days on each of them; today always, with « now ». */
+    function agendaDays(holder, answer) {
+        if (answer.zone) agendaZone = answer.zone;
+        const now = wallNow(agendaZone); const today = now.slice(0, 10);
+        const days = new Map();
+        for (let d = answer.from; d < answer.to; d = dayAdd(d, 1)) days.set(d, []);
+        for (const ev of answer.events ?? []) {
+            const first = ev.start.slice(0, 10);
+            /* An all-day event ends the day after its last: it shows on each of its days in the window. */
+            const last = ev.allDay && ev.end ? dayAdd(ev.end.slice(0, 10), -1) : first;
+            for (let d = first; d <= last && d < answer.to; d = dayAdd(d, 1)) if (days.has(d)) days.get(d).push(ev);
+        }
+        const list = el('div', 'ag-days');
+        for (const [day, evs] of days) {
+            if (!evs.length && day !== today) continue;
+            const group = el('section', 'ag-day'); if (day === today) group.dataset.today = '1';
+            const head = el('h4', 'ag-dayhead', dayWords(day));
+            if (day === today) head.append(el('span', 'tag', uiSaid('set-ag-today', 'Today')));
+            group.append(head);
+            const timed = evs.filter((e) => !e.allDay); const whole = evs.filter((e) => e.allDay);
+            for (const ev of whole) group.append(agendaEvent(ev));
+            let marked = day !== today;
+            for (const ev of timed) {
+                if (!marked && ev.start > now) { group.append(el('div', 'ag-now', uiSaid('set-ag-now', 'Now'))); marked = true; }
+                group.append(agendaEvent(ev));
+            }
+            if (!marked) group.append(el('div', 'ag-now', uiSaid('set-ag-now', 'Now')));
+            if (!evs.length) group.append(el('p', 'hint', uiSaid('set-ag-free-day', 'Nothing today')));
+            list.append(group);
+        }
+        const shown = el('p', 'hint ag-range', `${dayWords(answer.from)} – ${dayWords(dayAdd(answer.to, -1))}`);
+        const notes = [];
+        if (!(answer.events ?? []).length) notes.push(el('p', 'hint', uiSaid('set-ag-none', 'No event this week')));
+        if (answer.more) notes.push(el('p', 'hint', uiSaid('set-ag-more', 'Some events not shown')));
+        if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-ag-partial', 'Start times only, for now')));
+        holder.replaceChildren(shown, list, ...notes);
+    }
+    /* WHILE A CALENDAR, A MAILBOX OR AN ADDRESS BOOK IS READ (17-11, the transitions persona): seen at once -- a turning
+       sign, the word, and grey lines where the rows will come; read again over what is shown, a moving bar on top
+       (style.css, [aria-busy]). Said once to a screen reader (role=status). */
+    function readingNote(rows) {
+        const box = el('div', 'as-reading'); box.setAttribute('role', 'status');
+        const head = el('p', 'as-reading-head'); head.append(el('span', 'as-spin'), el('span', '', uiSaid('set-ag-reading', 'Reading…')));
+        box.append(head);
+        for (let i = 0; i < rows; i++) { const r = el('div', 'as-skel'); r.setAttribute('aria-hidden', 'true'); r.style.setProperty('--w', `${[78, 62, 86, 54][i % 4]}%`); box.append(r); }
+        return box;
+    }
+    async function agendaFill(holder, target, opts) {
+        const from = agendaFrom.get(target) ?? wallNow(agendaZone).slice(0, 10);
+        holder.setAttribute('aria-busy', 'true');
+        if (!holder.childElementCount) holder.append(readingNote(4));
+        const answer = await agendaRead(target, from, opts);
+        holder.removeAttribute('aria-busy');
+        if (!holder.isConnected) return;
+        if (answer.error) {
+            const again = el('button', '', uiSaid('set-ag-again', 'Try again')); again.type = 'button';
+            again.addEventListener('click', () => { void agendaFill(holder, target, { fresh: true }); });
+            holder.replaceChildren(el('p', 'error', answer.error), again);
+            return;
+        }
+        agendaDays(holder, answer);
+    }
+    /* A MACHINE'S SHARED CONSOLE (16-11): the live SSH console of a machine asset, under who has it -- ONE shell that
+       the person and the conversations given the machine share (Tether's console.mjs, through sshconsole.mjs). Drawn by
+       the same terminal as a conversation's (terminalOptions, xterm: what the machine prints is never HTML here), with
+       the same keys bar (wireKeys). Big: most of the panel's height. Under it, the AI's proposals (Send / Edit / Refuse,
+       destructive marked, sent in two steps) and its inputs, then a short journal. Full screen: the console large and,
+       beside it (under it on a phone), the chat of the conversation that holds the machine (Parley's own view). The
+       person's key always wins; « Take back control », « Hidden input », « Hide from the AI », Ctrl C.
+       KEPT ACROSS PAINTS: the panel is drawn again with every Tether change, the console is not -- its element (and its
+       terminal, its socket) is the same one, moved into the new panel, its focus given back. */
+    const consoleViews = new Map();             /* target id -> view */
+    const SC_KEYS = [['esc', 'Esc'], ['tab', 'Tab'], ['left', '←'], ['down', '↓'], ['up', '↑'], ['right', '→'], ['enter', 'Enter'], ['stop', 'Ctrl+C']];
+    const SC_RISK = {
+        erase: ['set-sc-risk-erase', 'Erases files. No way back.'], disk: ['set-sc-risk-disk', 'Writes over a disk. No way back.'],
+        power: ['set-sc-risk-power', 'Stops or restarts the machine.'], rights: ['set-sc-risk-rights', 'Changes rights on the whole system.'],
+        other: ['set-sc-risk-other', 'Can break the machine.'],
+    };
+    const SC_EVENTS = {
+        'control taken back from the AI': ['set-sc-j-took', 'took back control'], 'input hidden: a password prompt': ['set-sc-j-prompt', 'password prompt: input hidden'],
+        'input hidden by the person': ['set-sc-j-hidden', 'hidden input'], 'hidden from the AI': ['set-sc-j-hide-ai', 'hidden from the AI'], 'shown to the AI again': ['set-sc-j-show-ai', 'shown to the AI again'],
+    };
+    const scButton = (cls, text) => { const b = el('button', cls, text); b.type = 'button'; return b; };
+    const hhmm = (at) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+    function consoleView(target) {
+        let v = consoleViews.get(target.id);
+        if (v) { v.target = target; return v; }
+        v = { id: target.id, target, state: null, socket: null, phase: 'connecting', focused: false, full: false, below: false, chat: null, chatOf: '', chatPick: '', waiting: [], opened: false, retry: 0, away: 0, from: '' };
+        consoleViews.set(target.id, v);
+        const root = el('div', 'sc'); root.dataset.target = target.id;
+        const presence = el('div', 'sc-presence'); presence.setAttribute('aria-live', 'polite');
+        const screen = el('div', 'sc-screen'); screen.setAttribute('role', 'log'); screen.setAttribute('aria-label', uiSaid('set-sc-console', 'Console'));
+        const banner = el('div', 'sc-state'); banner.setAttribute('aria-live', 'assertive');
+        const keys = el('div', 'sc-keys'); keys.setAttribute('role', 'group'); keys.setAttribute('aria-label', uiSaid('set-sc-keys', 'Keys'));
+        for (const [k, label] of SC_KEYS) { const b = scButton(k === 'stop' ? 'careful' : '', label); b.dataset.keys = k; keys.append(b); }
+        const take = scButton('danger sc-take', uiSaid('set-sc-take', 'Take back control')); take.hidden = true;
+        const hideAi = scButton('sc-hide-ai', uiSaid('set-sc-hide-ai', 'Hide from the AI')); hideAi.setAttribute('aria-pressed', 'false');
+        const secret = scButton('sc-secret', uiSaid('set-sc-secret', 'Hidden input')); secret.setAttribute('aria-pressed', 'false');
+        const ctrlc = scButton('quiet sc-ctrlc', 'Ctrl C'); ctrlc.title = uiSaid('set-sc-ctrlc', 'Interrupts what is running');
+        const full = scButton('quiet sc-full-btn', uiSaid('set-sc-full', 'Full screen')); full.setAttribute('aria-pressed', 'false');
+        /* The chat of the conversation that holds the machine, under the console (17-11: the same chat, never one of its own). */
+        const chatBtn = scButton('quiet sc-chat-btn', uiSaid('set-sc-chat', 'Chat')); chatBtn.setAttribute('aria-pressed', 'false');
+        const reopen = scButton('primary sc-reopen', uiSaid('set-sc-reopen', 'Open it again')); reopen.hidden = true;
+        const tools = el('div', 'sc-tools'); tools.append(take, hideAi, secret, el('span', 'sc-space'), ctrlc, chatBtn, full);
+        const main = el('div', 'sc-main'); main.append(presence, screen, banner, keys, tools);
+        /* Full screen: the chat of a conversation that holds the machine, beside the console. */
+        const chatHead = el('div', 'sc-chat-head');
+        const chatBox = el('div', 'sc-chat-thread');
+        const side = el('aside', 'sc-chat'); side.setAttribute('aria-label', uiSaid('set-sc-chat', 'Chat')); side.hidden = true; side.append(chatHead, chatBox);
+        root.append(main, side);
+        Object.assign(v, { root, presence, screen, banner, take, hideAi, secret, fullBtn: full, chatBtn, reopen, chatHead, chatBox, side });
+        const term = new Terminal({ ...terminalOptions(), scrollback: 3000 });
+        const fitter = new FitAddon.FitAddon(); term.loadAddon(fitter);
+        v.term = term; v.fit = () => { if (v.opened && screen.isConnected && screen.offsetWidth > 0) { try { fitter.fit(); } catch { /* not drawn yet */ } } };
+        new ResizeObserver(() => v.fit()).observe(screen);
+        const sendJson = (m) => { if (v.socket?.readyState === 1) v.socket.send(JSON.stringify(m)); };
+        const sendKeys = (data) => { if (v.socket?.readyState === 1) v.socket.send(new TextEncoder().encode(data)); };
+        v.sendJson = sendJson;
+        term.onData(sendKeys);
+        term.onResize(({ cols, rows }) => sendJson({ type: 'resize', cols, rows }));
+        keys.addEventListener('pointerdown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
+        wireKeys(keys.querySelectorAll('button[data-keys]'), sendKeys, () => term.focus());
+        take.addEventListener('click', () => { sendJson({ type: 'take-back' }); term.focus(); });
+        ctrlc.addEventListener('click', () => { sendJson({ type: 'interrupt' }); term.focus(); });
+        hideAi.addEventListener('click', () => { sendJson({ type: 'hide-ai', on: !(v.state?.hideAi) }); });
+        secret.addEventListener('click', () => { sendJson({ type: 'hidden', on: !(v.state?.hidden) }); term.focus(); });
+        full.addEventListener('click', () => consoleFull(v, !v.full));
+        chatBtn.addEventListener('click', () => consoleBelow(v, !v.below));
+        reopen.addEventListener('click', () => { reopen.hidden = true; consoleConnect(v); });
+        /* Where the focus is, kept across paints: given back once the console is in the new panel. */
+        root.addEventListener('focusin', () => { v.focused = true; });
+        document.addEventListener('pointerdown', (event) => { if (!root.contains(event.target)) v.focused = false; }, true);
+        return v;
+    }
+    function consoleConnect(v) {
+        if (v.socket && v.socket.readyState <= 1) return;
+        v.phase = 'connecting'; consolePaint(v);
+        const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${scheme}://${location.host}${API}/tether/console?${new URLSearchParams({ target: v.id, cols: String(v.term.cols), rows: String(v.term.rows) })}`);
+        ws.binaryType = 'arraybuffer';
+        v.socket = ws;
+        ws.addEventListener('message', (event) => {
+            if (typeof event.data !== 'string') { v.term.write(new Uint8Array(event.data)); return; }
+            let m; try { m = JSON.parse(event.data); } catch { return; }
+            /* Ready: the screen so far comes next, drawn on a clean terminal (a page that came back draws it once). */
+            if (m.type === 'ready') { v.term.reset(); v.phase = 'live'; v.retry = 0; v.state = m.state; consolePaint(v); v.fit(); }
+            else if (m.type === 'state') { const was = v.state; v.state = m.state; consolePaint(v); if (was && !was.typing !== !m.state.typing) consoleSoon(v); }
+            else if (m.type === 'error') { v.phase = 'failed'; v.error = String(m.text ?? ''); consolePaint(v); }
         });
-        /* Given to a device: from here too (the map shows who has it). */
-        const share = el('button', 'as-link', 'Share with a device...'); share.type = 'button';
-        share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); });
-        const foot = el('div', 'as-foot'); foot.append(...(chosen.kind === 'secret' || chosen.kind === 'list' ? [] : [share, el('br')]), remove, why);
-        detail.append(foot);
+        ws.addEventListener('close', (event) => {
+            if (v.socket !== ws) return;
+            v.socket = null;
+            if (v.phase === 'failed') { v.reopen.hidden = false; return; }
+            if (event.code === 1000) { v.phase = 'closed'; consolePaint(v); return; }
+            /* Dropped: again in a moment while it is shown, said meanwhile; never its keys replayed. */
+            v.phase = 'connecting'; consolePaint(v);
+            if (v.root.isConnected && v.retry < 6) { v.retry++; setTimeout(() => { if (v.root.isConnected) consoleConnect(v); }, 1500 * v.retry); }
+            else { v.phase = 'closed'; consolePaint(v); }
+        });
+    }
+    /* After the AI typed: the journal and the proposals read again (a paint of the panel; the console stays). */
+    function consoleSoon(v) { clearTimeout(v.soon); v.soon = setTimeout(() => { if (v.root.isConnected) void repaintAsset(); }, 600); }
+    function consolePaint(v) {
+        const st = v.state ?? {};
+        const typing = st.typing ?? null;
+        v.root.classList.toggle('ai-typing', Boolean(typing));
+        v.root.classList.toggle('hidden-input', Boolean(st.hidden));
+        v.root.classList.toggle('hidden-ai', Boolean(st.hideAi));
+        /* Who has it: you, and each assistant on it -- what it does, in words, never by colour alone. */
+        const chips = [];
+        const me = el('span', `sc-chip me${typing ? '' : ' active'}`); me.append(el('span', 'sc-av', uiSaid('set-sc-you-av', 'Y')), el('span', '', uiSaid('set-sc-you', 'You')), el('small', '', st.hidden ? uiSaid('set-sc-you-hidden', 'typing (hidden)') : typing ? uiSaid('set-sc-you-watch', 'watching') : uiSaid('set-sc-you-control', 'in control')));
+        chips.push(me);
+        for (const a of st.agents ?? []) {
+            const doing = st.hideAi ? uiSaid('set-sc-ai-blind', 'sees nothing') : typing?.agent === a.id ? uiSaid('set-sc-ai-typing', 'typing') : v.waiting.some((q) => q.agent?.id === a.id) ? uiSaid('set-sc-ai-proposes', 'proposes') : uiSaid('set-sc-ai-watching', 'watching');
+            const c = el('span', `sc-chip ai${typing?.agent === a.id ? ' active' : ''}`); c.append(el('span', 'sc-av', uiSaid('set-sc-ai-av', 'AI')), el('span', '', a.name), el('small', '', doing));
+            chips.push(c);
+        }
+        if (!(st.agents ?? []).length) chips.push(el('small', 'hint', uiSaid('set-sc-no-ai', 'No assistant on it now')));
+        const live = el('span', `sc-live${v.phase === 'live' ? ' on' : ''}`, v.phase === 'live' ? uiSaid('set-sc-live', 'live') : v.phase === 'connecting' ? uiSaid('set-sc-connecting', 'connecting…') : uiSaid('set-sc-off', 'closed'));
+        v.presence.replaceChildren(...chips, el('span', 'sc-space'), live);
+        /* The one line that says the state (aria-live). */
+        let text; let tone = '';
+        if (v.phase === 'failed') { text = v.error || uiSaid('set-sc-failed', 'The console could not be opened.'); tone = 'bad'; }
+        else if (v.phase === 'closed') { text = uiSaid('set-sc-closed', 'The console is closed.'); tone = 'pause'; }
+        else if (v.phase === 'connecting') text = uiSaid('set-sc-connecting-long', 'Connecting to the machine…');
+        else if (st.hidden) { text = st.hidden === 'prompt' ? uiSaid('set-sc-hidden-prompt', 'Password asked: hidden input, the AI sees nothing.') : uiSaid('set-sc-hidden', 'Hidden input: the AI sees nothing.'); tone = 'secret'; }
+        else if (typing) { text = uiSaid('set-sc-typing', '{name} is typing. A key takes back control.', { name: typing.name }); tone = 'ai'; }
+        else if (st.hideAi) { text = uiSaid('set-sc-hidden-ai', 'Hidden from the AI until you show it.'); tone = 'pause'; }
+        else text = uiSaid('set-sc-control', 'You are in control.');
+        v.banner.dataset.tone = tone;
+        v.banner.replaceChildren(el('span', '', text), ...(v.phase === 'closed' || v.phase === 'failed' ? [v.reopen] : []));
+        if (v.phase === 'closed' || v.phase === 'failed') v.reopen.hidden = false;
+        v.take.hidden = !typing;
+        v.hideAi.setAttribute('aria-pressed', String(Boolean(st.hideAi)));
+        v.hideAi.textContent = st.hideAi ? uiSaid('set-sc-show-ai', 'Show to the AI') : uiSaid('set-sc-hide-ai', 'Hide from the AI');
+        v.secret.setAttribute('aria-pressed', String(Boolean(st.hidden)));
+    }
+    /* FULL SCREEN: the console large, the chat of its conversation beside it (under it on a phone). Esc (outside the
+       terminal, which keeps its Escape for the machine) or Back leaves. */
+    function consoleFull(v, on) {
+        if (v.full === on) return;
+        v.full = on;
+        v.root.classList.toggle('sc-full', on);
+        v.side.hidden = !on && !v.below;
+        v.chatBtn.hidden = on;
+        const b = v.fullBtn;
+        b.setAttribute('aria-pressed', String(on));
+        b.textContent = on ? uiSaid('set-sc-leave-full', 'Leave full screen') : uiSaid('set-sc-full', 'Full screen');
+        document.documentElement.toggleAttribute('data-sc-full', on);
+        /* Over the whole page, out of the panel (drawn again meanwhile, it holds a line in its place); back in it after. */
+        if (on) document.body.append(v.root);
+        else if (v.root.parentElement === document.body) { v.root.remove(); void repaintAsset(); }
+        if (on) {
+            v.fullStep = nav.over('console-full', () => consoleFull(v, false));
+            void consoleChat(v);
+        } else {
+            if (v.fullStep) { const step = v.fullStep; v.fullStep = null; nav.drop(step); }
+            if (!v.below) { v.chat?.destroy(); v.chat = null; v.chatOf = ''; }
+        }
+        requestAnimationFrame(() => { v.fit(); v.term.focus(); });
+    }
+    /* The chat under the console, out of full screen: shown or not (the button says which). */
+    function consoleBelow(v, on) {
+        if (v.below === on) return;
+        v.below = on;
+        v.root.classList.toggle('sc-below', on);
+        v.chatBtn.setAttribute('aria-pressed', String(on));
+        if (!v.full) v.side.hidden = !on;
+        if (on) void consoleChat(v);
+        else if (!v.full) { v.chat?.destroy(); v.chat = null; v.chatOf = ''; }
+        requestAnimationFrame(() => v.fit());
+    }
+    /* The conversations that hold the machine; the one whose chat is shown: picked, else the one on the console now,
+       else the conversation this panel is seen from, else the first. */
+    function consoleHolders(v) {
+        return Object.keys(v.target.grants ?? {}).filter((id) => id.startsWith('conversation:')).map((id) => id.slice('conversation:'.length)).filter((n) => conversations.some((c) => c.name === n));
+    }
+    function consoleChatOf(v) {
+        const holders = consoleHolders(v);
+        if (v.chatPick && holders.includes(v.chatPick)) return v.chatPick;
+        const on = (v.state?.agents ?? []).map((a) => String(a.id).replace(/^conversation:/, '')).find((n) => holders.includes(n));
+        return on ?? (holders.includes(v.from) ? v.from : holders[0] ?? '');
+    }
+    async function consoleChat(v) {
+        const holders = consoleHolders(v);
+        const name = consoleChatOf(v);
+        const label = (n) => conversations.find((c) => c.name === n)?.title || n;
+        if (holders.length > 1) {
+            const pick = el('select', 'sc-chat-pick'); pick.setAttribute('aria-label', uiSaid('set-sc-chat-of', 'Chat of'));
+            for (const n of holders) { const o = el('option', '', label(n)); o.value = n; o.selected = n === name; pick.append(o); }
+            pick.addEventListener('change', () => { v.chatPick = pick.value; void consoleChat(v); });
+            v.chatHead.replaceChildren(el('b', '', uiSaid('set-sc-chat-of', 'Chat of')), pick);
+        } else v.chatHead.replaceChildren(el('b', '', name ? label(name) : uiSaid('set-sc-chat', 'Chat')));
+        if (!name) { v.chat?.destroy(); v.chat = null; v.chatOf = ''; v.chatBox.replaceChildren(el('p', 'hint', uiSaid('set-sc-no-holder', 'No conversation has this machine.'))); return; }
+        if (v.chat && v.chatOf === name) return;
+        v.chat?.destroy(); v.chat = null; v.chatOf = name;
+        v.chatBox.replaceChildren();
+        if (!conversations.find((c) => c.name === name)?.talk) { v.chatBox.append(el('p', 'hint', uiSaid('set-sc-chat-off', 'The chat of this conversation is off.'))); return; }
+        const [{ mount }, words] = await Promise.all([parleyUi(), readWords()]);
+        if (!(v.full || v.below) || v.chatOf !== name) return;
+        v.chatBox.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+        /* Parley's own chat view, as in the conversation: its thread read and written the same way. */
+        v.chat = mount(v.chatBox, {
+            words, view: chatView, window: windowFor(chatWindow),
+            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then(machineLines),
+            search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
+            send: (text, answers, files) => post(talkPath(name), { text, answers, quick: true, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}) }),
+            schemes: { mail: { icon: 'mail', open: (ref, label2) => { void openMailRef(ref, { label: label2, of: name }); } } },
+        });
+    }
+    /* A console no longer shown for a while lets its shell go (the person's side): opened again when shown. */
+    setInterval(() => {
+        for (const v of consoleViews.values()) {
+            if (v.root.isConnected) { v.away = 0; continue; }
+            v.away += 1;
+            if (v.away >= 3 && v.socket) { const ws = v.socket; v.socket = null; v.phase = 'closed'; try { ws.close(); } catch { /* gone */ } }
+            /* Its chat too: not read every 3 s for a screen no longer there (drawn again when it is shown). */
+            if (v.away >= 3 && v.chat) { v.chat.destroy(); v.chat = null; v.chatOf = ''; }
+        }
+    }, 10_000);
+    /* The parts: the console (kept), then what the AI proposes and has typed, then the journal (drawn each paint). */
+    function consoleParts(target, tether, from) {
+        const v = consoleView(target);
+        v.from = from || '';
+        v.waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === target.id && String(q.verb ?? '').startsWith('terminal.'));
+        const hadFocus = v.focused;
+        let tries = 0;
+        queueMicrotask(function place() {
+            /* Put in the panel at the end of its paint; a paint overtaken by another never puts it: given up after a while. */
+            if (!v.root.isConnected) { if (++tries < 120) requestAnimationFrame(place); return; }
+            if (!v.opened) { v.term.open(v.screen); v.opened = true; }
+            v.fit();
+            if (!v.socket) consoleConnect(v);
+            if ((v.full || v.below) && !v.chatOf) void consoleChat(v);
+            if (hadFocus) v.term.focus();
+        });
+        consolePaint(v);
+        const ai = el('div', 'sc-ai'); ai.setAttribute('aria-live', 'polite');
+        for (const q of v.waiting) ai.append(consoleAsk(q));
+        const typed = el('div', 'sc-typed');
+        ai.append(typed);
+        const journal = el('div', 'sc-journal');
+        journal.append(el('p', 'hint', uiSaid('set-sc-j-empty', 'Each AI input is kept here.')));
+        void post(`${API}/tether/console-journal`, { target: target.id }).then((r) => {
+            const lines = Array.isArray(r?.lines) ? r.lines : [];
+            const inputs = lines.filter((l) => l.verb && l.ok === true).slice(0, 3);
+            if (inputs.length) {
+                typed.replaceChildren(el('h4', '', uiSaid('set-sc-typed', 'Its last inputs')));
+                for (const l of inputs) { const row = el('div', 'sc-typed-row'); row.append(el('small', '', hhmm(l.at)), el('code', '', l.detail)); typed.append(row); }
+            } else if (!v.waiting.length) typed.replaceChildren(el('p', 'hint', uiSaid('set-sc-ai-none', 'Nothing proposed. It follows the console.')));
+            if (!lines.length) return;
+            journal.replaceChildren(...lines.map((l) => {
+                const row = el('div', 'sc-j-row');
+                row.append(el('small', 'sc-j-at', hhmm(l.at)));
+                if (l.op === 'console') {
+                    const [k, t] = SC_EVENTS[l.detail] ?? ['', l.detail];
+                    row.append(el('b', '', l.by ? uiSaid('set-sc-you', 'You') : uiSaid('set-sc-console', 'Console')), el('span', '', k ? uiSaid(k, t) : t));
+                } else {
+                    row.append(el('b', '', l.agent ?? uiSaid('set-sc-ai-av', 'AI')), el('code', '', l.detail));
+                    const mark = l.decision === 'no' ? uiSaid('set-sc-j-refused', 'refused') : l.decision === 'stopped' || l.decision === 'timeout' || l.decision === 'withdrawn' ? uiSaid('set-sc-j-dropped', 'not sent')
+                        : l.ok === false ? uiSaid('set-sc-j-failed', 'not done') : l.edited ? uiSaid('set-sc-j-edited', 'edited by you') : '';
+                    if (mark) row.append(el('span', 'sc-j-mark', mark));
+                    if (l.risk) row.append(el('span', 'sc-risk', uiSaid('set-sc-destructive', 'Destructive')));
+                }
+                return row;
+            }));
+        }).catch(() => {});
+        return [
+            { title: uiSaid('set-sc-title', 'Console'), body: [v.full ? el('p', 'hint', uiSaid('set-sc-in-full', 'The console is in full screen.')) : v.root], cls: 'as-console-part' },
+            { title: uiSaid('set-sc-ai-title', 'Assistant'), body: [ai], cls: 'as-console-ai' },
+            { title: uiSaid('set-sc-journal', 'Journal'), body: [journal], cls: 'as-console-journal' },
+        ];
+    }
+    /* A PROPOSAL: why, the line whole, Send / Edit / Refuse -- the same decision as any waiting call (decideTether);
+       a destructive one marked, said in plain words, and sent in two steps. */
+    function consoleAsk(q) {
+        const risk = q.destructive ?? q.card?.destructive ?? '';
+        const card = el('div', `sc-ask${risk ? ' risky' : ''}`); card.dataset.request = q.id;
+        const head = el('div', 'sc-ask-head');
+        head.append(el('span', 'sc-ai-tag', uiSaid('set-sc-ai-av', 'AI')), el('b', '', uiSaid('set-sc-to-approve', 'To approve')), el('small', 'hint', q.agent?.name ?? ''), el('span', 'sc-space'));
+        if (risk) head.append(el('span', 'sc-risk', uiSaid('set-sc-destructive', 'Destructive')));
+        card.append(head);
+        if (q.why) card.append(el('p', 'sc-why', q.why));
+        const key = (Array.isArray(q.editable) && q.editable[0]) || (q.verb === 'terminal.run' ? 'command' : 'text');
+        const line = String(q.card?.[key] ?? q.detail ?? '');
+        card.append(el('code', 'sc-cmd', line));
+        if (q.verb === 'terminal.run') card.append(el('p', 'hint', uiSaid('set-sc-run-apart', 'Run apart, shown in the console.')));
+        if (risk) { const [k, t] = SC_RISK[risk] ?? SC_RISK.other; card.append(el('p', 'sc-risk-say', uiSaid(k, t))); }
+        const send = scButton(risk ? 'danger' : 'primary', risk ? uiSaid('set-sc-send-anyway', 'Send anyway') : uiSaid('set-sc-send', 'Send'));
+        const edit = scButton('', uiSaid('set-sc-edit', 'Edit'));
+        const refuse = scButton('quiet', uiSaid('set-sc-refuse', 'Refuse'));
+        const acts = el('div', 'sc-ask-acts'); acts.append(send, edit, refuse);
+        let armed = 0;
+        send.addEventListener('click', () => {
+            if (risk && Date.now() - armed > 5000) { armed = Date.now(); send.textContent = uiSaid('set-sc-sure', 'Sure? Send'); return; }
+            send.disabled = true; void decideTether(q.id, 'yes', repaintAsset);
+        });
+        refuse.addEventListener('click', () => { refuse.disabled = true; void decideTether(q.id, 'no', repaintAsset); });
+        card.append(acts);
+        if (Array.isArray(q.editable) && q.editable.length) {
+            const form = el('div', 'sc-edit'); form.hidden = true;
+            const area = el('textarea'); area.rows = 2; area.value = line; area.spellcheck = false; area.setAttribute('aria-label', uiSaid('set-sc-edit-line', 'The line to send'));
+            const go = scButton('primary', uiSaid('set-sc-send-edited', 'Send as edited'));
+            go.addEventListener('click', () => { if (!area.value.trim()) return; go.disabled = true; void decideTether(q.id, 'yes', repaintAsset, { [key]: area.value }); });
+            form.append(area, go);
+            edit.addEventListener('click', () => { form.hidden = !form.hidden; send.hidden = !form.hidden; if (!form.hidden) area.focus(); });
+            card.append(form);
+        } else edit.hidden = true;
+        return card;
+    }
+    function agendaPart(target) {
+        const holder = el('div', 'as-agenda');
+        const move = (days) => {
+            const from = agendaFrom.get(target.id) ?? wallNow(agendaZone).slice(0, 10);
+            agendaFrom.set(target.id, dayAdd(from, days));
+            void agendaFill(holder, target.id);
+        };
+        const btn = (text, label, act) => { const b = el('button', 'quiet', text); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', act); return b; };
+        const prev = btn('‹', uiSaid('set-ag-prev', 'Previous week'), () => move(-7));
+        /* Today: back to this week; already there, read again. */
+        const today = btn(uiSaid('set-ag-today', 'Today'), uiSaid('set-ag-today', 'Today'), () => { const was = agendaFrom.has(target.id); agendaFrom.delete(target.id); void agendaFill(holder, target.id, { fresh: !was }); });
+        const next = btn('›', uiSaid('set-ag-next', 'Next week'), () => move(7));
+        const bar = el('div', 'ag-bar'); bar.append(prev, today, next);
+        queueMicrotask(() => { void agendaFill(holder, target.id); });
+        return { title: uiSaid('set-ag-title', 'Agenda'), extra: [bar], body: [holder], cls: 'as-agenda-part' };
+    }
+    /* TEXT WITH ITS LINKS (16-11): text nodes only -- never HTML, nothing in it runs; a web address (https) alone is a
+       link. An invitation's text, a mail's words, a contact's notes. */
+    function linkedText(cls, text) {
+        const box = el('div', cls);
+        for (const part of String(text ?? '').split(/(https:\/\/[^\s<>"')\]]+)/)) {
+            if (/^https:\/\//.test(part)) { const a = el('a', '', part.length > 60 ? `${part.slice(0, 57)}…` : part); a.href = part; a.target = '_blank'; a.rel = 'noopener noreferrer'; box.append(a); }
+            else if (part) box.append(document.createTextNode(part));
+        }
+        return box;
+    }
+    /* A READ OF A MAILBOX OR AN ADDRESS BOOK (16-11), kept PEEK_KEEP_MS as the agenda's: a read is journaled by Tether,
+       which paints the panel again -- a paint reads nothing. `key` -> { at, answer } or { at, pending }. */
+    const PEEK_KEEP_MS = 5 * 60_000;
+    const peekKept = new Map();
+    function peekRead(key, path, body, failed, { fresh = false } = {}) {
+        const kept = peekKept.get(key);
+        if (kept && !fresh && (kept.pending || Date.now() - kept.at < PEEK_KEEP_MS)) return kept.pending ?? kept.answer;
+        const pending = post(`${API}/tether/${path}`, body)
+            .then((answer) => { peekKept.set(key, { at: Date.now(), answer }); return answer; })
+            .catch((error) => { peekKept.delete(key); return { error: error.message || failed }; });
+        peekKept.set(key, { at: Date.now(), pending });
+        return pending;
+    }
+    const peekState = new Map();        /* target -> { folder, text, open }: kept across paints */
+    let peekFocus = '';                 /* the search box typed in, given its focus again after a paint */
+    const peekOf = (id) => { if (!peekState.has(id)) peekState.set(id, { folder: 'inbox', text: '', draft: '', open: '' }); return peekState.get(id); };
+    /* A search box: Enter searches, emptied it lists again; what is typed survives a paint. */
+    function peekSearch(id, label, onSearch) {
+        const s = peekOf(id);
+        const form = el('form', 'mv-search'); form.setAttribute('role', 'search');
+        const input = el('input'); input.type = 'search'; input.placeholder = label; input.setAttribute('aria-label', label); input.maxLength = 200; input.value = s.draft; input.spellcheck = false;
+        input.addEventListener('input', () => { s.draft = input.value; if (!input.value.trim() && s.text) { s.text = ''; onSearch(); } });
+        input.addEventListener('focus', () => { peekFocus = id; });
+        input.addEventListener('blur', () => { if (input.isConnected && peekFocus === id) peekFocus = ''; });
+        form.addEventListener('submit', (event) => { event.preventDefault(); s.text = input.value.trim(); s.open = ''; onSearch(); });
+        form.append(input);
+        if (peekFocus === id) queueMicrotask(() => { if (input.isConnected) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } });
+        return form;
+    }
+    /* A mail's time: the hour today, else its day. */
+    const mailWhen = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+    };
+    const fileSize = (n) => (!Number.isFinite(n) ? '' : n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+    const peekFacts = () => {
+        const facts = el('dl', 'ag-facts mv-facts');
+        const fact = (k, v) => { if (!v) return; facts.append(el('dt', '', k)); const dd = el('dd'); dd.append(typeof v === 'string' ? document.createTextNode(v) : v); facts.append(dd); };
+        return { facts, fact };
+    };
+
+    /* THE MAIL OF A MAILBOX ASSET (16-11): its latest messages (25, newest first: who, subject, when, unread, a file);
+       a search through Tether's mail-search; a folder on Microsoft. A message opened: its words AS TEXT, its files
+       named with their size, never opened; its pictures never loaded. Never marked read (Tether peeks). Read only. */
+    async function mailOpenFill(box, target, folder, m) {
+        const body = box.querySelector('.mv-body');
+        if (body.dataset.filled) return;
+        body.dataset.filled = '1';
+        body.replaceChildren(readingNote(2));
+        const got = await peekRead(`mail-read|${target}|${folder}|${m.id}`, 'mail-read', { target, id: m.id, folder }, uiSaid('set-mv-failed-one', 'This message could not be read.'));
+        if (!body.isConnected) return;
+        if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
+        const { facts, fact } = peekFacts();
+        fact(uiSaid('set-mv-from', 'From'), got.from);
+        fact(uiSaid('set-mv-to', 'To'), got.to);
+        fact(uiSaid('set-mv-cc', 'Cc'), got.cc);
+        if (got.date) fact(uiSaid('set-ag-when', 'When'), new Date(got.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }));
+        if ((got.attachments ?? []).length) {
+            const files = el('ul', 'mv-files');
+            for (const a of got.attachments) { const li = el('li'); li.append(el('span', 'mv-file', a.name)); const size = fileSize(a.size); if (size) li.append(el('span', 'hint', ` ${size}`)); files.append(li); }
+            fact(uiSaid('set-mv-files', 'Files'), files);
+        }
+        const text = linkedText('ag-notes mv-text', got.text || uiSaid('set-mv-empty', '(no text)'));
+        const out = [facts, text];
+        if (got.cut) out.push(el('p', 'hint', uiSaid('set-mv-cut', 'Long message: its start only')));
+        /* The whole mail, as it was written: the mail viewer of .eml files (its pictures blocked unless asked). */
+        if (got.ref) { const open = el('button', 'quiet', uiSaid('set-mv-viewer', 'Open in the viewer')); open.type = 'button'; open.addEventListener('click', () => { void openMailRef(got.ref, { label: m.subject, of: '' }); }); out.push(open); }
+        body.replaceChildren(...out);
+    }
+    function mailRow(target, folder, m) {
+        const s = peekOf(target);
+        const box = el('details', 'ag-event mv-msg'); if (m.unread) box.dataset.unread = '1';
+        const head = el('summary', 'ag-row mv-row');
+        const mark = el('span', 'mv-mark');
+        if (m.unread) { mark.append(el('span', 'mv-dot')); mark.title = uiSaid('set-mv-unread', 'Unread'); mark.setAttribute('aria-label', mark.title); }
+        const what = el('span', 'ag-what');
+        what.append(el('span', 'mv-from', m.from || '—'));
+        const subj = el('span', 'ag-title mv-subject', m.subject);
+        what.append(subj);
+        const side = el('span', 'mv-side');
+        if (m.attachments) { const clip = el('span', 'mv-clip'); clip.append(window.clavariumIcons?.icon('paperclip', 'mv-svg') ?? document.createTextNode('+')); clip.title = uiSaid('set-mv-has-files', 'Has files'); clip.setAttribute('aria-label', clip.title); side.append(clip); }
+        side.append(el('span', 'ag-time', mailWhen(m.date)));
+        head.append(mark, what, side);
+        const body = el('div', 'mv-body');
+        box.append(head, body);
+        box.addEventListener('toggle', () => { if (box.open) { s.open = m.id; void mailOpenFill(box, target, folder, m); } else if (s.open === m.id) s.open = ''; });
+        if (s.open === m.id) { box.open = true; }
+        return box;
+    }
+    async function mailFill(holder, target, opts) {
+        const s = peekOf(target);
+        holder.setAttribute('aria-busy', 'true');
+        if (!holder.childElementCount) holder.append(readingNote(4));
+        const answer = await peekRead(`mail-list|${target}|${s.folder}|${s.text}`, 'mail-list', { target, folder: s.folder, text: s.text }, uiSaid('set-mv-failed', 'The mailbox could not be read.'), opts);
+        holder.removeAttribute('aria-busy');
+        if (!holder.isConnected) return;
+        if (answer.error) {
+            const again = el('button', '', uiSaid('set-ag-again', 'Try again')); again.type = 'button';
+            again.addEventListener('click', () => { void mailFill(holder, target, { fresh: true }); });
+            holder.replaceChildren(el('p', 'error', answer.error), again);
+            return;
+        }
+        const pick = holder.closest('.as-mail-part')?.querySelector('.mv-folder');
+        if (pick && (answer.folders ?? []).length > 1 && !pick.options.length) {
+            for (const f of answer.folders) { const o = el('option', '', uiSaid(`set-mv-f-${f}`, { inbox: 'Inbox', sent: 'Sent', drafts: 'Drafts', archive: 'Archive', junk: 'Junk', trash: 'Deleted' }[f] ?? f)); o.value = f; pick.append(o); }
+            pick.value = s.folder; pick.hidden = false;
+        }
+        const list = el('div', 'ag-days mv-list');
+        for (const m of answer.messages ?? []) list.append(mailRow(target, answer.folder, m));
+        const notes = [];
+        if (!(answer.messages ?? []).length) notes.push(el('p', 'hint', answer.text ? uiSaid('set-mv-nothing', 'Nothing found') : uiSaid('set-mv-none', 'No message')));
+        if (answer.more) notes.push(el('p', 'hint', uiSaid('set-mv-more', 'The latest only')));
+        if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-mv-partial', 'No unread or file marks, for now')));
+        holder.replaceChildren(...((answer.messages ?? []).length ? [list] : []), ...notes);
+    }
+    function mailPart(target) {
+        const holder = el('div', 'as-agenda as-mail');
+        const s = peekOf(target.id);
+        const search = peekSearch(target.id, uiSaid('set-mv-search', 'Search mail'), () => { void mailFill(holder, target.id); });
+        const pick = el('select', 'mv-folder'); pick.hidden = true; pick.setAttribute('aria-label', uiSaid('set-mv-folder', 'Folder'));
+        pick.addEventListener('change', () => { s.folder = pick.value; s.open = ''; void mailFill(holder, target.id); });
+        const again = el('button', 'quiet', '↻'); again.type = 'button'; again.title = uiSaid('set-mv-again', 'Read again'); again.setAttribute('aria-label', again.title);
+        again.addEventListener('click', () => { void mailFill(holder, target.id, { fresh: true }); });
+        const bar = el('div', 'ag-bar mv-bar'); bar.append(pick, again);
+        queueMicrotask(() => { void mailFill(holder, target.id); });
+        return { title: uiSaid('set-mv-title', 'Mail'), extra: [bar], body: [search, holder], cls: 'as-agenda-part as-mail-part' };
+    }
+
+    /* THE CONTACTS OF AN ADDRESS BOOK ASSET (16-11): name, email, phone, company; a search through Tether's
+       contacts-search; a contact opened: its details as text. Read only. */
+    async function contactOpenFill(box, target, c) {
+        const body = box.querySelector('.mv-body');
+        if (body.dataset.filled) return;
+        body.dataset.filled = '1';
+        body.replaceChildren(readingNote(2));
+        const got = await peekRead(`contact|${target}|${c.id}`, 'contact', { target, id: c.id }, uiSaid('set-ct-failed-one', 'This contact could not be read.'));
+        if (!body.isConnected) return;
+        if (got.error) { delete body.dataset.filled; body.replaceChildren(el('p', 'error', got.error)); return; }
+        const { facts, fact } = peekFacts();
+        const several = (items, scheme) => { if (!items?.length) return null; const box = el('span', 'mv-lines'); for (const v of items) { const a = el('a', '', v); const bare = v.replace(/ \([^)]*\)$/, ''); a.href = `${scheme}:${scheme === 'tel' ? bare.replace(/[^\d+]/g, '') : bare}`; box.append(a); } return box; };
+        fact(uiSaid('set-ct-email', 'Email'), several(got.emails, 'mailto'));
+        fact(uiSaid('set-ct-phone', 'Phone'), several(got.phones, 'tel'));
+        fact(uiSaid('set-ct-company', 'Company'), got.company);
+        const WORD = { title: uiSaid('set-ct-f-title', 'Title'), birthday: uiSaid('set-ct-f-birthday', 'Birthday'), address: uiSaid('set-ct-f-address', 'Address') };
+        for (const [k, v] of got.facts ?? []) { const [base, kind] = /^(\w+)(?: \((.*)\))?$/.exec(k)?.slice(1) ?? [k]; fact(`${WORD[base] ?? base}${kind ? ` (${kind})` : ''}`, v); }
+        if (got.notes) fact(uiSaid('set-ct-notes', 'Notes'), linkedText('ag-notes', got.notes));
+        body.replaceChildren(facts);
+    }
+    function contactRow(target, c) {
+        const s = peekOf(target);
+        const box = el('details', 'ag-event ct-person');
+        const head = el('summary', 'ag-row ct-row');
+        const what = el('span', 'ag-what');
+        what.append(el('span', 'ag-title', c.name));
+        const sub = [c.emails?.[0], c.company].filter(Boolean).join(' · ');
+        if (sub) what.append(el('span', 'ag-where hint', sub));
+        head.append(what, el('span', 'ag-time ct-phone', c.phones?.[0] ?? ''));
+        box.append(head, el('div', 'mv-body'));
+        box.addEventListener('toggle', () => { if (box.open) { s.open = c.id; void contactOpenFill(box, target, c); } else if (s.open === c.id) s.open = ''; });
+        if (s.open === c.id) box.open = true;
+        return box;
+    }
+    async function contactsFill(holder, target, opts) {
+        const s = peekOf(target);
+        holder.setAttribute('aria-busy', 'true');
+        if (!holder.childElementCount) holder.append(readingNote(4));
+        const answer = await peekRead(`contacts|${target}|${s.text}`, 'contacts', { target, text: s.text }, uiSaid('set-ct-failed', 'The address book could not be read.'), opts);
+        holder.removeAttribute('aria-busy');
+        if (!holder.isConnected) return;
+        if (answer.error) {
+            const again = el('button', '', uiSaid('set-ag-again', 'Try again')); again.type = 'button';
+            again.addEventListener('click', () => { void contactsFill(holder, target, { fresh: true }); });
+            holder.replaceChildren(el('p', 'error', answer.error), again);
+            return;
+        }
+        const list = el('div', 'ag-days mv-list ct-list');
+        for (const c of answer.contacts ?? []) list.append(contactRow(target, c));
+        const notes = [];
+        if (!(answer.contacts ?? []).length) notes.push(el('p', 'hint', answer.text ? uiSaid('set-mv-nothing', 'Nothing found') : uiSaid('set-ct-none', 'No contact')));
+        if (answer.more) notes.push(el('p', 'hint', uiSaid('set-ct-more', 'Some contacts not shown: search')));
+        if (answer.partial) notes.push(el('p', 'hint', uiSaid('set-ct-partial', 'No company in the list, for now')));
+        holder.replaceChildren(...((answer.contacts ?? []).length ? [list] : []), ...notes);
+    }
+    function contactsPart(target) {
+        const holder = el('div', 'as-agenda as-contacts');
+        const search = peekSearch(target.id, uiSaid('set-ct-search', 'Search contacts'), () => { void contactsFill(holder, target.id); });
+        const again = el('button', 'quiet', '↻'); again.type = 'button'; again.title = uiSaid('set-mv-again', 'Read again'); again.setAttribute('aria-label', again.title);
+        again.addEventListener('click', () => { void contactsFill(holder, target.id, { fresh: true }); });
+        const bar = el('div', 'ag-bar mv-bar'); bar.append(again);
+        queueMicrotask(() => { void contactsFill(holder, target.id); });
+        return { title: uiSaid('set-ct-title', 'Contacts'), extra: [bar], body: [search, holder], cls: 'as-agenda-part as-contacts-part' };
+    }
+    const ASSET_WORD = { folder: 'Folder', git: 'Repository', mailbox: 'Mailbox', agenda: 'Calendar', contacts: 'Contacts', secret: 'Secret', list: LISTS_WORD.one, acces: 'Access' };
+    /* Under its name: its kind (its group, a chip before it, in the menu). */
+    function chipsOf(chosen) {
+        const kind = chosen.target ? (TETHER_CAT[chosen.target.kind] ?? 'acces') : chosen.kind;
+        const word = uiSaid(`set-acc-kind-${kind}`, ASSET_WORD[kind] ?? kind);
+        /* Said once: not again when its line already says it ("folder"). */
+        return String(chosen.sub ?? '').toLowerCase() === word.toLowerCase() ? [] : [{ text: word }];
+    }
+    let assetsPainting = 0;
+    async function paintAssets() {
+        if (place !== 'assets' || DEVICE) return;
+        watchTether();
+        const mine = ++assetsPainting;
+        const [all, boxes, secrets, keys, lists, tether, assetGroups] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), getJson('/tether', {}), getJson('/asset-groups', []), readDevices()]);
+        /* A later paint asked meanwhile: it draws, with what it read (never this older reading over it). */
+        if (place !== 'assets' || mine !== assetsPainting) return;
+        paintKeys(keys);
+        markSecrets(secrets);
+        const items = [];
+        for (const r of all) {
+            const kind = kindOf(r);
+            const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
+            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, ...usedBy(Object.keys(r.attachments ?? {}), `${kind}:${r.name}`),
+                sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : '', tone: box?.failure ? 'bad' : '' });
+        }
+        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...usedBy(s2.conversations, `secret:${s2.name}`), ...secretItem(s2, uiSaid('set-as-name-only', 'name only')) });
+        /* Tether targets ("Connexions"): a mailbox, calendar or address book connected
+           by token, given to a conversation at a level. The token lives on the server. */
+        const allTargets = Array.isArray(tether.targets) ? tether.targets : [];
+        for (const tgt of allTargets) {
+            const users = Object.keys(tgt.grants ?? {}).filter((id) => id.startsWith('conversation:')).map((id) => id.slice('conversation:'.length));
+            const acct = tetherAccount(tgt.id);
+            const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
+            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true, ...usedBy(users, `connexion:${tgt.id}`),
+                sub: siblings.length ? uiSaid('set-as-linked', 'linked: {list}', { list: siblings.join(', ') }) : connexionOwnSub(tgt.kind) });
+        }
+        /* Binder's lists: given to a conversation (read, write) in Binder itself. */
+        const shownLists = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived) : [];
+        listsSig = binderSig(lists.data);
+        for (const l of shownLists) {
+            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, ...usedBy(givenTo(l).map((id) => id.slice('conversation:'.length)), `list:${l.id}`), sub: cardsSub(l.count) });
+        }
+        const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
+        if (justMade && !justMade.to && justMade.key !== chosen?.key) justMade = null;
+        /* A group can be the open thing too (its own detail: give it, rename it). */
+        const chosenGroup = !assetsAdding && !chosen && assetOpen.startsWith('group:') ? assetGroups.find((g) => `group:${g.id}` === assetOpen) ?? null : null;
+        /* Every call waiting for the owner, across all the connexions, gathered in one place
+           (in a connexion's own detail they still show, but only that one's). */
+        const allApprovals = Array.isArray(tether.approvals) ? tether.approvals : [];
+        const onDemandes = !assetsAdding && !chosen && !chosenGroup && assetOpen === 'demandes:all';
+        $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding || onDemandes ? 'detail' : 'list';
+        const choose = (key) => { placeAssetStep(); if (key !== assetOpen) { groupSaid = null; clearAssetDetail(); } assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
+        /* THE ONE LIST (kit AssetList), scope all: groups by default once one exists; who has each on its right. */
+        const model = KIT.assetListModel({ items: items.map(cardOf), groups: assetGroups, scope: 'all', by: assetsBy, query: assetsQuery, folded: [...groupsFolded], kinds: assetKinds() });
+        paintAssetsView(model.view);
+        /* Above them all, once something waits: the owner reaches every call from here, not only by opening the
+           right connexion. Then "+ New group", in either view. */
+        const pinned = [];
+        if (allApprovals.length && !assetsQuery) pinned.push(pinnedCard({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', sub: uiSaid('set-as-waiting', '{n} waiting for you', { n: allApprovals.length }), count: allApprovals.length }, { chosen: onDemandes ? 'demandes:all' : '', onOpen: choose, extra: 'demande-entry' }));
+        if (!assetsQuery || groupAdding) pinned.push(newGroupBar());
+        paintAssetList($('assets-rows'), model, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : onDemandes ? 'demandes:all' : ''), onOpen: choose, pinned,
+            onFold: (id) => { if (groupsFolded.has(id)) groupsFolded.delete(id); else groupsFolded.add(id); keepGroupsFolded(); void paintAssets(); },
+            onGroup: (id) => choose(`group:${id}`), noMatch: uiSaid('set-as-no-match', 'Nothing by that name.') });
+        if (model.view === 'group') dragToGroups($('assets-rows'));
+        const detail = clearAssetDetail();
+        const back = () => { assetOpen = ''; assetsAdding = ''; remember(); void paintAssets(); };
+        if (assetsAdding) {
+            /* The New asset box: from the map's "+" of Assets, which kind first ("<" goes back to the map);
+               from "+ New" of the list, which kind first too ("<" Assets). */
+            const out = assetsFromMap ? el('button', 'as-link', '‹ Access') : el('button', 'as-link as-back', '‹ Assets'); out.type = 'button';
+            out.addEventListener('click', () => { if (!nav.close(assetsFromMap ? 'compose' : 'asset')) back(); });
+            const kind = assetsAdding === 'choose' ? '' : assetsAdding;
+            detail.append(out, newAssetBox({ kind, onKind: (k) => { assetsAdding = k; void paintAssets(); }, boxHost: { where: '', repaint: () => { void paintAssets(); }, close: back } }));
+            if (kind) focusFirst(detail);
+            return;
+        }
+        if (chosenGroup) { groupPanel(detail, chosenGroup, items, { back, choose }); return; }
+        if (onDemandes) {
+            const body = [el('p', 'hint', 'Each is a Tether call its agent asked you to allow. Accept, and it runs; refuse, and it is told so.'),
+                allApprovals.length ? demandesList(allApprovals, { withWho: true, after: () => paintAssets() }) : el('p', 'hint', 'Nothing is waiting now.')];
+            detail.append(KIT.AssetPanel({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', count: allApprovals.length }, { back: { onBack: () => { if (!nav.close('asset')) back(); } }, parts: body }));
+            return;
+        }
+        if (!chosen) { if (items.length) detail.append(noAssetChosen()); return; }
+        /* Just made here: the box's ending above it -- Create another, or Done. */
+        if (justMade && !justMade.to && justMade.key === chosen.key) {
+            const made = justMade;
+            detail.append(newAssetBox({ kind: made.kind, made: { said: uiSaid('set-na-made', '{name} created', { name: made.name }), note: made.note },
+                onAnother: () => { justMade = null; placeAssetStep(); assetsAdding = made.kind || 'choose'; void paintAssets(); },
+                onDone: () => { justMade = null; void paintAssets(); } }));
+        }
+        if (filesBrowsing && filesBrowsing !== chosen.key) filesBrowsing = '';
+        await assetPanel(detail, chosen, { back, tether, groups: assetGroups });
     }
     /* From the map's "+" of Assets: the Assets page over the map, on "which kind"; Back, the map. */
     let assetsFromMap = false;
@@ -3974,6 +7087,14 @@
         void paintAssets();
     }
     /* One asset of the place opened (or a form to make one): a step; another one takes its place. */
+    /* The detail emptied (its forms back where they wait): another asset picked shows nothing of the one before while it is read. */
+    function clearAssetDetail() {
+        const detail = $('assets-detail');
+        if (detail.contains($('files'))) unembedFiles();
+        for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
+        detail.replaceChildren();
+        return detail;
+    }
     function placeAssetStep() {
         const a = nav.last(['asset']);
         if (a >= 0 && a > nav.last(['place'])) { nav.cut(a + 1); return; }
@@ -3989,7 +7110,8 @@
             : settings.sshKey ? `Push key: SSH key ${settings.sshKey}` : 'Push key: none · the clone\'s access, same server only';
     }
     $('assets-search').addEventListener('input', () => { assetsQuery = $('assets-search').value.trim(); void paintAssets(); });
-    $('assets-close').addEventListener('click', () => leavePlace());
+    /* ONE "+ New" (06-11, assets step 2), in place of a "+" per kind: the New asset box, its kind chosen in it. */
+    $('assets-new').addEventListener('click', () => { placeAssetStep(); assetsAdding = 'choose'; remoteEditing = false; $('assets-error').hidden = true; void paintAssets(); });
     /* The Assets place, on one asset (`key`), its remote form open (`remote`). */
     async function openAssetsPlace(key, { remote = false, push = true } = {}) {
         if (DEVICE) return;
@@ -4000,6 +7122,524 @@
         await paintAssets();
     }
     async function openAssets() { await openAssetsPlace(); }
+    /* ---------- the conversations as cards (02-11) ---------- */
+    /* ONE CONVERSATION AS A CARD (the home deck): the kit's card, its last words and when, its rooms and boxes. `onOpen(c)`. */
+    function convCard(c, onOpen) {
+        const card = KIT.ConvCard(convModel(c, true), { size: 'card', cls: 'conv-card', onOpen: () => onOpen(c) });
+        card.dataset.name = c.name;
+        return card;
+    }
+    /* ---------- ROOMS (#268): one thread for several AIs, the person and boxes ---------- */
+    let rooms = [];
+    let boxesKnown = [];
+    const loadBoxes = async () => { if (DEVICE) return boxesKnown; try { const r = await fetch(`${API}/boxes`); if (r.ok) { const got = await r.json(); boxesKnown = Array.isArray(got) ? got : []; } } catch { /* kept as known */ } return boxesKnown; };
+    const loadRooms = async () => { try { const r = await fetch(`${API}/rooms`); rooms = r.ok ? await r.json() : []; } catch { rooms = []; } return rooms; };
+    const huePick = KIT.hueOf;
+    /* Its members as small chips, each by its shape: a person round, an AI a rounded square, a box an outline. */
+    const memberChips = (members, max = 7) => {
+        const stack = el('span', 'salon-stack');
+        for (const m of members.slice(0, max)) { const i = el('i', `salon-chip salon-chip-${m.kind}`, m.kind === 'box' ? '' : KIT.initialOf(m.name)); if (m.kind !== 'box') i.style.setProperty('--h', String(huePick(m.name))); i.title = m.name; stack.append(i); }
+        return stack;
+    };
+    const countOf = (members) => { const n = (k) => members.filter((m) => m.kind === k).length; return [n('person') ? uiSaid(n('person') > 1 ? 'set-room-n-people' : 'set-room-n-person', n('person') > 1 ? '{n} people' : '1 person', { n: n('person') }) : '',
+        n('ai') ? uiSaid(n('ai') > 1 ? 'set-room-n-ais' : 'set-room-n-ai', n('ai') > 1 ? '{n} AIs' : '1 AI', { n: n('ai') }) : '',
+        n('box') ? uiSaid(n('box') > 1 ? 'set-room-n-boxes' : 'set-room-n-box', n('box') > 1 ? '{n} boxes' : '1 box', { n: n('box') }) : ''].filter(Boolean).join(' \u00b7 '); };
+    /* A ROOM AS A CARD: the kit's card, as a conversation's (a card behind it says it holds several). */
+    function roomCard(r) {
+        const card = KIT.ConvCard(roomModel(r), { size: 'card', cls: 'conv-card conv-card-room', onOpen: () => { void openSalon(r.id); } });
+        card.dataset.room = r.id;
+        return card;
+    }
+    let salonThread = null; let salonId = '';
+    /* A room's bar while one of its AIs speaks: its dot at work (gold, breathing), the words under its name. */
+    function salonLive(who) {
+        const dot = $('salon-state'); const line = $('salon-live');
+        if (dot) { dot.dataset.state = who.length ? 'work' : 'ok'; dot.title = who.length ? speaking(who) : ''; }
+        if (line) { line.hidden = who.length === 0; line.textContent = who.length ? speaking(who) : ''; }
+    }
+    let salonAsked = 0;
+    /* A room's bar: its name, its state, its members (up to 3 avatars; a click shows the list under the bar). */
+    function salonHead(r) {
+        $('salon-name').textContent = r.name;
+        salonLive(thinkingOf(r));
+        KIT.MemberStack(r.members, { max: 3, button: $('salon-who'), label: countOf(r.members) });
+        $('salon-who').setAttribute('aria-expanded', 'false'); $('salon-members').hidden = true;
+        const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? uiSaid('set-room-people', 'People') : k === 'ai' ? uiSaid('set-room-ais-of', 'AIs') : uiSaid('set-room-boxes-of', 'Boxes')), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', uiSaid('set-room-host-mark', 'host'))); return x; })); return row; }).filter(Boolean);
+        $('salon-members').replaceChildren(...rows);
+    }
+    function salonLeft() { salonThread?.destroy(); salonThread = null; salonId = ''; }
+    /* `step`: picked by the owner (the list, the deck): as a conversation picked, the list folds. */
+    async function openSalon(id, push = true, { step = false } = {}) {
+        if (DEVICE) return;
+        const mine = ++salonAsked;
+        /* The same room again: as the same conversation again, read again, not drawn again (its draft, where it was). */
+        if (place === 'salon' && salonId === id && salonThread) {
+            void salonThread.refresh();
+            /* Shown by an address (Forward, a reload) with no step: picked, it takes one, as a conversation does -- Back and Escape go to the list. */
+            if (step && nav.last(['place']) < 0) { placeFrom = 'list'; nav.push('place', ({ quiet }) => leftPlace(quiet), { address: placeAddress() }); }
+            if (step) foldOnOpen();
+            return;
+        }
+        /* Known (the list read the rooms): opened at once, read again behind; else read first. */
+        if (!rooms.some((x) => x.id === id)) await loadRooms();
+        else void loadRooms().then(() => { const fresh = rooms.find((x) => x.id === id); if (fresh && salonId === id && place === 'salon') salonHead(fresh); });
+        /* Another room asked meanwhile: that one is shown, not this one (an answer come late). */
+        if (mine !== salonAsked) return;
+        const r = rooms.find((x) => x.id === id); if (!r) return;
+        /* Picked in the list while a conversation is open: it takes that one's place, as another conversation
+           would -- Back (Escape) goes to the list, not to the conversation left. */
+        if (step && place === 'conversations' && current) select('');
+        enterPlace('salon', push);
+        salonLeft(); salonId = id;
+        /* Its address names it: a reload, Back and Forward find it again. */
+        remember();
+        /* The list marks this room, and no conversation, at once. */
+        paint();
+        salonHead(r);
+        /* What the room before said of its AIs (« Chef is thinking… ») goes with it. */
+        $('salon-thinking').hidden = true; $('salon-thinking').replaceChildren();
+        if (step) foldOnOpen();
+        const [{ mount }, words] = await Promise.all([import(new URL('vendor/parley-ui.js', new URL('/', location.href)).href), readWords()]);
+        if (salonId !== id || mine !== salonAsked) return;
+        let first = true;
+        $('salon-thread').dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+        salonThread = mount($('salon-thread'), {
+            words, markdown: true, agentName: '',
+            /* A mail an AI of the room cites: the same chip and viewer as in a conversation's chat, read for the conversation of the AI that cited it. */
+            schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: '', room: id }); } } },
+            /* Its lines (a Tether call held for one of its AIs): drawn and decided as in a conversation's chat (machineLines, tetherAct). */
+            load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then(machineLines).then((d) => {
+                /* Read for a room no longer shown: its words go nowhere (Parley drops them with its screen). */
+                if (salonId !== id || place !== 'salon') return d;
+                /* Read, it is seen (the server says so): its count in the list goes at once, as a conversation's. */
+                const seen = rooms.find((x) => x.id === id);
+                if (seen?.unread) { seen.unread = 0; paint(); }
+                if (first) {
+                    first = false; fadeIn($('salon-thread'));
+                    /* Its box takes what is typed, as a conversation's chat does (never on a touch screen: no keyboard raised). */
+                    requestAnimationFrame(() => { if (salonId === id && !touchScreen && !writingIn()) $('salon-thread').querySelector('textarea.parley-box')?.focus({ preventScroll: true }); });
+                }
+                /* Who was given a message and has not answered yet (#282): « Hugo réfléchit… ». */
+                const who = thinkingOf(d);
+                /* What they say they do (06-11): on this line, « Thomas : je demande à MSM… », never in the thread. */
+                const doing = (Array.isArray(d.doing) ? d.doing : []).filter((x) => x && typeof x.name === 'string' && typeof x.text === 'string' && x.text);
+                $('salon-thinking').hidden = who.length === 0 && doing.length === 0;
+                if (doing.length) $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(doing.map((x) => `${x.name} : ${x.text}`).join(' \u00b7 ')));
+                else $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
+                /* Its bar says it too, as its row in the list: its dot at work, « Cuisine parle… » under its name. */
+                salonLive(who);
+                const known = rooms.find((x) => x.id === id);
+                if (known && JSON.stringify(thinkingOf(known)) !== JSON.stringify(who)) { known.thinking = who; paint(); }
+                return d;
+            }),
+            /* Kept in the room even when an AI of it could not get it (its chat off, 07-11): said for a moment, by name. */
+            send: async (text, answers, files) => {
+                const d = await post(`${API}/rooms/${id}/talk`, { text, ...(files?.length ? { files: files.map((f) => f.path) } : {}) });
+                const missed = Array.isArray(d?.missed) ? d.missed.map((m) => String(m?.name ?? '')).filter(Boolean) : [];
+                if (missed.length) flash(uiSaid('set-room-missed', '{names} did not get it: chat off', { names: missed.join(', ') }));
+                return d;
+            },
+            /* A file attached in a room (06-11): as in a conversation's chat; kept in the room, a copy to each AI the message goes to. */
+            attach: { upload: async (file) => { const x = await fetch(`${API}/rooms/${id}/talk/file?${new URLSearchParams({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }); const j = await x.json().catch(() => ({})); if (!x.ok) throw new Error(j.error || 'The file could not be sent.'); return j; } },
+            /* A file an AI of the room showed or cited (ai:<member>:work:a.png): read from its own conversation, in the same viewer as in its chat. */
+            open: (file) => { const o = String(file.open ?? ''); if (o.startsWith('ai:')) { const at = o.split(':').slice(3).join(':'); void preview('', '', at.split('/').pop() || 'file', 0, `${API}/rooms/${id}/shown?${new URLSearchParams({ o })}`, { origin: '' }); return; } if (!o.startsWith('room:')) return; const inner = file.open.slice('room:'.length); void preview('room', inner, file.name || inner.split('/').pop(), file.size ?? 0, `${API}/rooms/${id}/file?${new URLSearchParams({ p: inner })}`, { within: r.name }); },
+            /* Its pictures, as its chat shows them: those its AIs showed, read from their own conversations (type proved by the bytes). */
+            picture: (file) => (String(file.open ?? '').startsWith('ai:') ? `${API}/rooms/${id}/shown?${new URLSearchParams({ o: file.open, thumb: '1' })}` : null),
+            /* The same chat as a conversation's (03-11): its view, its formulas, its dictation, its keyboard rule. */
+            view: chatView, onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
+            math: { url: new URL('vendor/katex/katex.mjs', new URL('/', location.href)).href },
+            diagram: drawDiagram, highlight: colourCode, touch: touchScreen,
+            voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs, onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
+            draft: `room:${id}`,
+            act: (action) => { tetherAct(action, () => salonThread?.refresh?.()); },
+        });
+        /* Looked at again by Parley's own clock (every 3 s, while the page is in sight): no second clock here. */
+    }
+    $('salon-close').addEventListener('click', () => leavePlace());
+    $('salon-who').addEventListener('click', () => { const open = $('salon-members').hidden; $('salon-members').hidden = !open; $('salon-who').setAttribute('aria-expanded', String(open)); });
+    /* A NEW ROOM, or a room's settings (07-11, charte-reglages: as every settings page): folding chapters -- General
+       (its name), Its AIs (every conversation on a row, a switch: in the room or not; the one that welcomes wears
+       « Welcomes », a tap on another of the room moves it), Their assets, Chat & voice (its boxes), Advanced (remove).
+       A room's settings save each change at once (roomPatch), « ✓ Saved » in the bar; a new room keeps its choices
+       here until « Create ». `salonEditing`: the room, or null for a new one. */
+    let salonIn = new Set(); let salonHost = ''; let salonBoxes = new Set(); let salonEditing = null; let salonBoxList = [];
+    /* What a room has, read again from it (after each change saved: what the server kept). */
+    const salonTake = (r) => {
+        salonIn = new Set(r ? r.members.filter((m) => m.kind === 'ai').map((m) => m.ref) : []);
+        salonHost = r?.members.find((m) => m.kind === 'ai' && m.host)?.ref ?? '';
+        salonBoxes = new Set(r ? r.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
+    };
+    let salonSavedTimer;
+    /* ONE CHANGE, SAVED AT ONCE (a room's settings): its POST, then the room as the server keeps it; « ✓ Saved » a
+       moment, as Settings say it; refused, said under the bar and drawn back as it was. */
+    async function salonSave(change) {
+        const r = salonEditing; if (!r) return;
+        const patch = KIT.roomPatch(r, change);
+        if (!patch) { salonTake(r); paintSalonMembers(); return; }
+        $('salon-new-error').hidden = true;
+        try {
+            const now = await post(`${API}/rooms/${r.id}`, patch);
+            if (salonEditing !== r) return;
+            salonEditing = now && Array.isArray(now.members) ? now : r;
+            const said = $('salon-new-status'); said.textContent = `✓ ${uiSaid('set-room-saved', 'Saved')}`;
+            clearTimeout(salonSavedTimer); salonSavedTimer = setTimeout(() => { said.textContent = ''; }, 2500);
+            if ('name' in patch) { $('salon-new-title').textContent = uiSaid('set-room-settings-of', '{name} · Settings', { name: salonEditing.name }); }
+            void loadRooms().then(() => paint());
+            if ('add' in patch || 'remove' in patch) void paintSalonAssets();
+        } catch (error) { if (salonEditing !== r) return; $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
+        salonTake(salonEditing); paintSalonMembers();
+        if ('name' in change) $('salon-new-name').value = salonEditing.name;
+    }
+    /* Every conversation as a member: the kit's card, its size `member`, its switch at its end; the one that welcomes,
+       its pill « Welcomes » (the only place it is said). */
+    function paintSalonMembers() {
+        const editing = salonEditing;
+        const q = $('salon-new-search').value.trim().toLowerCase();
+        const rows = conversations.filter((c) => !q || `${shownName(c)} ${c.chatName ?? ''}`.toLowerCase().includes(q)).sort((a, b) => Number(salonIn.has(b.name)) - Number(salonIn.has(a.name)));
+        const makeHost = (c) => { if (c.name === salonHost || !salonIn.has(c.name)) return; if (editing) { void salonSave({ host: c.name }); return; } salonHost = c.name; paintSalonMembers(); };
+        $('salon-new-ais').replaceChildren(...rows.map((c) => {
+            const isIn = salonIn.has(c.name); const isHost = c.name === salonHost;
+            const actions = [];
+            if (isHost) { const pill = el('span', 'salon-welcome-pill', uiSaid('set-room-welcomes', 'Welcomes')); pill.setAttribute('aria-label', `${shownName(c)} welcomes the room`); actions.push(pill); }
+            actions.push(KIT.Switch({ on: isIn, label: `${shownName(c)} in the room`, onChange: (on) => {
+                if (editing) { void salonSave({ ai: c.name, on }); return; }
+                if (!on) { salonIn.delete(c.name); if (salonHost === c.name) salonHost = [...salonIn][0] ?? ''; } else { salonIn.add(c.name); if (!salonHost) salonHost = c.name; }
+                paintSalonMembers();
+            } }));
+            const row = KIT.ConvCard(convModel(c), { size: 'member', cls: 'salon-member-row', actions });
+            row.setAttribute('role', 'listitem'); row.dataset.name = c.name;
+            if (isHost) row.dataset.host = 'true';
+            /* Another AI of the room: a tap (Enter) on its row, and it welcomes. */
+            if (isIn && !isHost) {
+                row.tabIndex = 0; row.dataset.pick = 'true'; row.title = uiSaid('set-room-host-how', 'Tap another AI of the room to move it');
+                row.addEventListener('click', (e) => { if (!e.target.closest?.('button')) makeHost(c); });
+                row.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === row) { e.preventDefault(); makeHost(c); } });
+            }
+            return row;
+        }));
+        const hostC = conversations.find((c) => c.name === salonHost);
+        $('salon-new-count').textContent = [uiSaid('set-room-of', '{n} of {t}', { n: salonIn.size, t: conversations.length }), hostC ? shownName(hostC) : ''].filter(Boolean).join(' · ');
+        $('salon-sum-general').textContent = editing?.name ?? '';
+        const nb = salonBoxes.size;
+        $('salon-sum-voice').textContent = nb ? uiSaid(nb > 1 ? 'set-room-n-boxes' : 'set-room-n-box', nb > 1 ? '{n} boxes' : '1 box', { n: nb }) : uiSaid('set-none', 'None');
+        $('salon-new-boxes').replaceChildren(...salonBoxList.map((b) => {
+            const row = el('div', 'salon-member-row'); row.setAttribute('role', 'listitem');
+            const what = el('span', 'salon-member-what'); what.append(el('b', '', b.name), el('small', '', b.place || uiSaid('set-na-k-box', 'Voice box')));
+            const sw = KIT.Switch({ on: salonBoxes.has(b.id), label: `${b.name} in the room`, onChange: (on) => {
+                if (editing) { void salonSave({ box: b.id, on }); return; }
+                if (on) salonBoxes.add(b.id); else salonBoxes.delete(b.id); paintSalonMembers();
+            } });
+            row.append(what, sw);
+            return row;
+        }));
+    }
+    $('salon-new-search').addEventListener('input', paintSalonMembers);
+    /* Its name: saved at Enter, or on leaving the field (a room's settings); Escape gives it back. */
+    $('salon-limit').addEventListener('change', async () => {
+        const r = salonEditing; if (!r) return;
+        const raw = $('salon-limit').value.trim(); const perHour = raw === '' ? null : Math.round(Number(raw));
+        $('salon-new-error').hidden = true;
+        try {
+            const now = await post(`${API}/rooms/${r.id}`, { perHour });
+            if (salonEditing !== r) return;
+            salonEditing = { ...r, ...now };
+            $('salon-limit').value = salonEditing.perHourSet ? String(salonEditing.perHour) : '';
+            const said = $('salon-new-status'); said.textContent = `✓ ${uiSaid('set-room-saved', 'Saved')}`;
+            clearTimeout(salonSavedTimer); salonSavedTimer = setTimeout(() => { said.textContent = ''; }, 2500);
+        } catch (error) { if (salonEditing !== r) return; $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; $('salon-limit').value = r.perHourSet ? String(r.perHour) : ''; }
+    });
+    $('salon-new-name').addEventListener('keydown', (e) => {
+        if (!salonEditing) return;
+        if (e.key === 'Enter') { e.preventDefault(); $('salon-new-name').blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); $('salon-new-name').value = salonEditing.name; $('salon-new-name').blur(); }
+    });
+    $('salon-new-name').addEventListener('change', () => { if (salonEditing) void salonSave({ name: $('salon-new-name').value }); });
+    /* « + … » on a chapter's title: its gesture, never the chapter folded by it -- opened instead. */
+    for (const id of ['salon-assets-all', 'salon-new-box-add']) $(id).addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); const ch = $(id).closest('details'); if (ch) ch.open = true; }, true);
+    /* EACH AI'S ASSETS (06-11), in a room's settings: what each of its AIs has, as its own conversation has it --
+       there is no room asset. « + Give… » opens that conversation's own give; « Give to all its AIs… » gives one
+       asset at one right to each (POST /rooms/<id>/give): ordinary rights of each conversation, taken back one by one. */
+    let salonGive = null;
+    const GIVE_LETTERS = { read: 'r', write: 'rw', use: 'x' };
+    const salonOpenConv = (name, pick) => { salonEditing = null; salonGive = null; select(name, { step: true }); if (pick) { goTab('assets', { pick }); assetStep(); } else void openAccess(true); };
+    async function paintSalonAssets() {
+        const r = salonEditing; const card = $('salon-assets-card');
+        card.hidden = !r; if (!r) return;
+        const [all, held, boxes, tether, lists] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {}), binderCall('lists', {})]);
+        if (salonEditing !== r) return;
+        const list = (Array.isArray(all) ? all : []).map((x) => { const kind = kindOf(x); return { key: `${kind}:${x.name}`, kind, name: x.name }; });
+        const keys = Array.isArray(held) ? held : [];
+        const ais = r.members.filter((m) => m.kind === 'ai').sort((a, b) => Number(Boolean(b.host)) - Number(Boolean(a.host)));
+        /* What its own Assets tab lists, row for row (06-11 showed a part: no calendar, contacts, binder or access). */
+        const assetsOf = (name) => givenItems(name, { all, secrets: keys, boxes, tether, lists }).map((a) => ({ key: a.key, kind: a.kind, name: a.name, live: a.live, right: a.right }))
+            .sort((a, b) => ASSET_KINDS.findIndex((k) => k[0] === a.kind) - ASSET_KINDS.findIndex((k) => k[0] === b.kind));
+        /* Folded, its chapter says how many each has (« Kitchen helper 9 · Homework 1 »). */
+        $('salon-sum-assets').textContent = ais.map((m) => `${shownName(conversations.find((x) => x.name === m.ref)) || m.name} ${assetsOf(m.ref).length}`).join(' \u00b7 ');
+        $('salon-assets').replaceChildren(...ais.map((m) => {
+            const c = conversations.find((x) => x.name === m.ref);
+            const give = el('button', 'salon-give-btn', uiSaid('set-room-give', '+ Give\u2026')); give.type = 'button';
+            give.setAttribute('aria-label', `Give to ${shownName(c) || m.name}`);
+            give.addEventListener('click', () => salonOpenConv(m.ref));
+            const head = c ? KIT.ConvCard(convModel(c), { size: 'member', actions: [give] }) : el('b', '', m.name);
+            const chips = el('div', 'salon-asset-chips'); const mine = assetsOf(m.ref);
+            if (mine.length) chips.append(...mine.map((a) => KIT.AssetCard(a, { size: 'chip', onOpen: (key) => salonOpenConv(m.ref, key) })));
+            else chips.append(el('small', 'hint', uiSaid('set-room-assets-none', 'Nothing yet')));
+            const row = el('div', 'salon-asset-ai'); row.setAttribute('role', 'listitem'); row.dataset.name = m.ref;
+            row.append(head, chips);
+            return row;
+        }));
+        $('salon-assets-all').setAttribute('aria-expanded', String(Boolean(salonGive)));
+        paintSalonGive(r, [...list, ...keys.map((k) => ({ key: `secret:${k.name}`, kind: 'secret', name: k.name }))], ais.length);
+    }
+    /* « Give to all its AIs… »: an asset, a right (None first), then given to each. What each got is said below. */
+    function paintSalonGive(r, items, n) {
+        const box = $('salon-assets-give'); box.hidden = !salonGive;
+        if (!salonGive) { box.replaceChildren(); return; }
+        const chosen = items.find((a) => a.key === salonGive.asset);
+        const pick = el('div', 'salon-give-assets');
+        pick.append(...items.map((a) => KIT.AssetCard(a, { size: 'chip', current: a.key === salonGive.asset, onOpen: (key) => { salonGive = { asset: key, level: '', said: [] }; paintSalonGive(r, items, n); } })));
+        const go = el('button', 'primary', uiSaid('set-room-give-go', 'Give to {n} AIs', { n })); go.type = 'button';
+        go.disabled = !(chosen && salonGive.level);
+        const parts = [el('small', 'hint', uiSaid('set-room-give-pick', 'Pick an asset')), pick];
+        if (chosen) parts.push(KIT.RightsPicker({ key: chosen.kind, level: salonGive.level || 'none', label: `Right on ${chosen.name}`, cls: 'salon-give-right',
+            onChange: (l) => { salonGive.level = l === 'none' ? '' : l; go.disabled = !salonGive.level; } }));
+        go.addEventListener('click', async () => {
+            go.disabled = true; $('salon-new-error').hidden = true;
+            try { const out = await post(`${API}/rooms/${r.id}/give`, { asset: chosen.key, rights: GIVE_LETTERS[salonGive.level] }); salonGive.said = Array.isArray(out.given) ? out.given : []; await refresh(); }
+            catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
+            await paintSalonAssets();
+        });
+        const cancel = el('button', '', uiSaid('set-room-give-cancel', 'Cancel')); cancel.type = 'button';
+        cancel.addEventListener('click', () => { salonGive = null; void paintSalonAssets(); });
+        const said = el('div', 'salon-give-said'); said.setAttribute('role', 'status');
+        for (const g of salonGive.said) {
+            const who = shownName(conversations.find((x) => x.name === g.conversation)) || g.conversation;
+            said.append(el('small', g.ok ? 'hint' : 'err', !g.ok ? `${who}: ${g.error}` : g.kept ? uiSaid('set-room-give-kept', '{name} already has more', { name: who }) : `\u2713 ${uiSaid('set-room-give-done', 'Given to {name}', { name: who })}`));
+        }
+        const actions = el('div', 'action-row'); actions.append(cancel, go);
+        box.replaceChildren(...parts, ...(said.children.length ? [said] : []), actions);
+    }
+    $('salon-assets-all').addEventListener('click', () => { salonGive = salonGive ? null : { asset: '', level: '', said: [] }; void paintSalonAssets(); });
+    /* A ROOM'S "+ Voice box": the New asset box, its kind a voice box, speaking in this room; once it answers, it is
+       among the room's boxes, switched on (saved at once). */
+    function paintSalonBoxNew() {
+        const holder = $('salon-box-newasset');
+        if (holder.contains($('box-add'))) $('assets-forms').append($('box-add'));
+        holder.hidden = false;
+        holder.replaceChildren(newAssetBox({ kind: 'box', boxHost: boxFlow.host }));
+    }
+    function closeSalonBoxNew() { const holder = $('salon-box-newasset'); if (holder.contains($('box-add'))) $('assets-forms').append($('box-add')); holder.replaceChildren(); holder.hidden = true; }
+    $('salon-new-box-add').addEventListener('click', () => {
+        if (!salonEditing) return;
+        if (!$('salon-box-newasset').hidden) { stopBoxWait(); boxFlow = null; closeSalonBoxNew(); return; }
+        startBoxFlow({ where: `room:${salonEditing.id}`, close: closeSalonBoxNew, repaint: () => {
+            paintSalonBoxNew();
+            if (!boxFlow?.made) return;
+            void getJson('/boxes', null).then((list) => {
+                if (!Array.isArray(list)) return;
+                salonBoxList = list; boxesKnown = list;
+                if (list.some((b) => b.id === boxFlow?.made?.id)) void salonSave({ box: boxFlow.made.id, on: true });
+                else paintSalonMembers();
+            });
+        } });
+        paintSalonBoxNew();
+        focusFirst($('salon-box-newasset'));
+    });
+    async function openSalonNew(push = true, editing = null) {
+        if (DEVICE) return;
+        salonEditing = editing;
+        enterPlace('salon-new', push);
+        /* « <name> · Settings », as a conversation's; a room to be made: « New room ». */
+        $('salon-new-title').textContent = editing ? uiSaid('set-room-settings-of', '{name} · Settings', { name: editing.name }) : uiSaid('set-room-new', 'New room');
+        /* Its settings say its state as the room's bar does; a room to be made has none yet. */
+        const dot = $('salon-new-state'); if (dot) { dot.hidden = !editing; dot.dataset.state = thinkingOf(editing).length ? 'work' : 'ok'; }
+        /* Saved at once: no button at its end; a new room, « Create » (nothing to save before it is there). */
+        $('salon-new-actions').hidden = Boolean(editing);
+        $('salon-new-status').textContent = ''; clearTimeout(salonSavedTimer);
+        $('salon-new-remove-card').hidden = !editing; salonRemoveAsk?.close(); salonRemoveAsk = null;
+        $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? ''; $('salon-new-search').value = '';
+        /* Its limit of hand-overs between AIs an hour (19-11): a room that is there; empty, the default (60); 0, none. */
+        $('salon-limit-row').hidden = !editing; $('salon-limit').value = editing?.perHourSet ? String(editing.perHour) : '';
+        salonTake(editing);
+        /* A new room: its name and its AIs open, the rest as the person left it. */
+        if (!editing) for (const id of ['salon-ch-general', 'salon-ch-ais']) $(id).open = true;
+        try { const x = await fetch(`${API}/boxes`); salonBoxList = x.ok ? await x.json() : []; } catch { salonBoxList = []; }
+        if (Array.isArray(salonBoxList)) boxesKnown = salonBoxList; else salonBoxList = [];
+        /* A room that is there already adds a voice box of its own: "+ Voice box". */
+        $('salon-new-boxes-card').hidden = salonBoxList.length === 0 && !editing;
+        $('salon-new-box-add').hidden = !editing; closeSalonBoxNew();
+        paintSalonMembers();
+        salonGive = null; void paintSalonAssets();
+        if (!editing) $('salon-new-name').focus();
+    }
+    $('salon-settings').addEventListener('click', async () => { await loadRooms(); const r = rooms.find((x) => x.id === salonId); if (r) await openSalonNew(true, r); });
+    /* Remove the room: confirmed in place (what goes, what stays), as every settings page does. */
+    let salonRemoveAsk = null;
+    const salonRemove = $('salon-new-remove');
+    salonRemove.addEventListener('click', () => {
+        const r = salonEditing; if (!r) return;
+        salonRemoveAsk = KIT.InlineConfirm(salonRemove, { question: uiSaid('set-room-remove-what', 'The thread goes · AIs and boxes stay'), yes: uiSaid('set-room-remove-yes', 'Remove {name}', { name: r.name }), keep: uiSaid('set-room-keep', 'Keep'),
+            onYes: async () => { try { await post(`${API}/rooms/${r.id}/remove`, {}); salonEditing = null; await loadRooms(); paint(); openDeck(false); } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; } } });
+    });
+    /* Back from a room's settings: to the room; from a new one: where it was opened from. */
+    const salonNewBack = () => { const r = salonEditing; salonEditing = null; if (r) void openSalon(r.id, false); else leavePlace(); };
+    $('salon-new-close').addEventListener('click', salonNewBack);
+    /* A NEW ROOM: made at « Create », with what was chosen above (its settings, once made, save at once). */
+    $('salon-new-create').addEventListener('click', async () => {
+        if (salonEditing) return;
+        const picked = [salonHost, ...[...salonIn].filter((c) => c !== salonHost)].filter(Boolean);
+        try {
+            const made = await post(`${API}/rooms`, { name: $('salon-new-name').value, conversations: picked, boxes: [...salonBoxes], host: salonHost });
+            await openSalon(made.id, false);
+        } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
+    });
+    /* ---------- FEATURES (features.js): what this Clavarium can do, and its next step ---------- */
+    /* Each gesture is done where it is done already: its own request, or its own place open on it. */
+    async function openFeature(what, s = {}) {
+        const chapter = String(s.chapter ?? '');
+        if (what === 'new' || (chapter === 'new' && what === 'settings')) { await openNew(); return; }
+        if (what === 'boxes' || chapter === 'boxes') {
+            await openAccessPage('devices');
+            /* "Add a voice box": the New asset box, on its kind, where the boxes are. */
+            if (s.id === 'boxes:add') openBoxNew();
+            $('boxes')?.scrollIntoView({ block: 'start' });
+            return;
+        }
+        if (what === 'mail' || chapter === 'access') { await openAssetsPlace(); return; }
+        if (what === 'import') { await openAccessPage('map', { mode: 'flows' }); document.getElementById('flows-import')?.click(); return; }
+        if (what === 'opencode') {
+            await openNew();
+            $('newconv-tools').querySelector('[data-tool="opencode"]')?.click();
+            await paintOpenCode();
+            const prov = $('newconv-oc-provider');
+            if (s.provider && [...prov.options].some((o) => o.value === s.provider)) { prov.value = s.provider; ocProvider(); }
+            const model = $('newconv-oc-model'); if (s.model && [...model.options].some((o) => o.value === s.model)) model.value = s.model;
+            const key = $('newconv-oc-key'); if (s.secret && [...key.options].some((o) => o.value === s.secret)) { key.value = s.secret; $('newconv-oc-new').hidden = true; }
+            return;
+        }
+        await openSettings();
+        if (/^s-[a-z-]{1,30}$/.test(chapter)) openChapter(chapter)?.scrollIntoView({ block: 'start' });
+    }
+    const features = DEVICE ? undefined : window.clavariumFeatures?.({
+        API, post, word: (key, en, vars) => uiSaid(key, en, vars), loadWords: () => readWords(),
+        lang: () => { try { return chatWords?.lang ?? 'en'; } catch { return 'en'; } },
+        mascot: () => `${MASCOTS[MASCOT]()}<span class="m-z">z</span><span class="m-z">z</span><span class="m-z">z</span>`,
+        alerts: () => alertsOn(),
+        /* The export of Settings, Backup (links.js): the server keeps its day as the backup's. */
+        backup: async () => { $('flows-export').click(); },
+        open: (what, s) => openFeature(what, s),
+        welcomed: () => { if (place === 'deck') void paintDeckFeatures(conversations.length); },
+    });
+    async function paintSettingsFeatures() {
+        if (!features) return;
+        const data = await features.mount($('settings-features'), 'settings');
+        $('features-title').textContent = uiSaid('features-title', 'Features');
+        $('features-about').textContent = data ? uiSaid('features-lit-of', '{n} of {t} rooms lit', { n: data.counts.ready, t: data.counts.total }) : '';
+    }
+    /* THE DESK (desk.js, 16-11): the home page, a grid of icons kept per person by the server, the same on
+       every screen. Each thing is drawn as everywhere else (kit ConvCard, AssetCard); its folders are its own
+       (the list's groups never change). The first time, it holds the home cards as they were. */
+    let desk = null;
+    let deskAssets = new Map();
+    /* The assets a desk may hold (its "+ Add"): folders, repositories, mailboxes, connected accounts, binders. */
+    async function readDeskAssets() {
+        const [all, lists, tether] = await Promise.all([getJson('/resources', []), binderCall('lists', {}), getJson('/tether', {})]);
+        const got = new Map();
+        for (const r of Array.isArray(all) ? all : []) { const kind = kindOf(r); got.set(`a:${kind}:${r.name}`, { key: `${kind}:${r.name}`, kind, name: r.name }); }
+        for (const t of Array.isArray(tether?.targets) ? tether.targets : []) got.set(`a:connexion:${t.id}`, { key: `connexion:${t.id}`, kind: tetherCat(t.kind), name: t.title ?? t.id });
+        for (const l of lists?.ok && Array.isArray(lists.data) ? lists.data.filter((x) => !x.archived) : []) got.set(`a:list:${l.id}`, { key: `list:${l.id}`, kind: 'list', name: l.title, sub: cardsSub(l.count) });
+        deskAssets = got;
+    }
+    const deskConv = (id) => (id.startsWith('c:') ? conversations.find((c) => c.name === id.slice(2)) : undefined);
+    const deskRoom = (id) => (id.startsWith('r:') ? roomsNow().find((r) => r.id === id.slice(2)) : undefined);
+    const roomSign = () => { const sign = document.createElement('span'); sign.className = 'room-sign'; return sign; };
+    function deskThing(id) {
+        const c = deskConv(id); if (c) return { name: shownName(c) };
+        const r = deskRoom(id); if (r) return { name: r.name };
+        const a = deskAssets.get(id); return a ? { name: a.name } : null;
+    }
+    function deskMini(id) {
+        const c = deskConv(id); if (c) return KIT.Avatar({ name: shownName(c) });
+        const r = deskRoom(id); if (r) return KIT.Avatar({ name: r.name, glyph: roomSign() });
+        return KIT.AssetIcon({ kind: deskAssets.get(id)?.kind ?? 'folder' });
+    }
+    function deskTile(id) {
+        const c = deskConv(id); if (c) { const card = KIT.ConvCard(convModel(c, true), { size: 'card', tag: 'div', cls: 'desk-card' }); card.dataset.name = c.name; return card; }
+        const r = deskRoom(id); if (r) { const card = KIT.ConvCard(roomModel(r), { size: 'card', tag: 'div', cls: 'desk-card desk-card-room' }); card.dataset.room = r.id; return card; }
+        const a = deskAssets.get(id);
+        return KIT.AssetCard({ key: a?.key, kind: a?.kind, name: a?.name ?? '', sub: a?.sub || uiSaid(`set-acc-kind-${a?.kind}`, ASSET_WORD[a?.kind] ?? '') }, { size: 'row', tag: 'div', cls: 'desk-card' });
+    }
+    function deskOpen(id) {
+        const c = deskConv(id); if (c) { leavePlace(); select(c.name, { step: true }); return; }
+        const r = deskRoom(id); if (r) { void openSalon(r.id, true, { step: true }); return; }
+        const a = deskAssets.get(id); if (a) void openAssetsPlace(a.key);
+    }
+    function mountDesk() {
+        if (desk || !window.clavariumDesk) return desk;
+        desk = window.clavariumDesk.Desk($('deck-cards'), {
+            load: async () => { const r = await fetch(`${API}/desktop`); if (!r.ok) throw new Error(`desk: ${r.status}`); return r.json(); },
+            save: async (body) => { const r = await fetch(`${API}/desktop`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); if (!r.ok) throw new Error(`desk: ${r.status}`); },
+            has: (id) => deskThing(id) !== null,
+            name: (id) => deskThing(id)?.name ?? '',
+            tile: (id) => deskTile(id),
+            mini: (id) => deskMini(id),
+            waits: (id) => { const c = deskConv(id); if (c) return needsYou(c); const r = deskRoom(id); return Boolean(r && r.unread > 0); },
+            open: (id) => deskOpen(id),
+            /* Today's home cards, in their order: the rooms, then the conversations. */
+            wanted: () => [...roomsNow().map((r) => ({ id: `r:${r.id}`, size: 'm' })), ...conversations.map((c) => ({ id: `c:${c.name}`, size: 'm' }))],
+            addable: () => [
+                { title: uiSaid('desk-add-convs', 'Conversations'), items: conversations.map((c) => ({ id: `c:${c.name}`, name: shownName(c), sign: deskMini(`c:${c.name}`) })) },
+                { title: uiSaid('desk-add-rooms', 'Rooms'), items: roomsNow().map((r) => ({ id: `r:${r.id}`, name: r.name, sign: deskMini(`r:${r.id}`) })) },
+                { title: uiSaid('desk-add-assets', 'Assets'), items: [...deskAssets].map(([id, a]) => ({ id, name: a.name, what: uiSaid(`set-acc-kind-${a.kind}`, ASSET_WORD[a.kind] ?? a.kind), sign: deskMini(id) })) },
+            ],
+            create: [{ label: uiSaid('desk-new-conv', 'New conversation'), run: () => { void openNew(); } }, { label: uiSaid('desk-new-room', 'New room'), run: () => { void openSalonNew(); } }],
+            word: (key, en, vars) => uiSaid(key, en, vars),
+        });
+        return desk;
+    }
+    /* Drawn again only when what its cards say changed, and never while it is being arranged. */
+    let deskSaid = '';
+    function paintDeskStates() {
+        if (!desk || desk.editing) return;
+        const said = JSON.stringify([conversations.map((c) => convModel(c, true)), roomsNow().map((r) => roomModel(r))]);
+        if (said !== deskSaid) { deskSaid = said; desk.render(); }
+    }
+    async function paintDeck() {
+        $('deck-title').textContent = appName;
+        const count = conversations.length;
+        $('deck-cards').hidden = count === 0; $('deck-empty').hidden = count > 0;
+        void paintDeckFeatures(count);
+        if (!count) return;
+        const d = mountDesk(); if (!d) return;
+        /* Drawn at once with what is known; the rooms, the boxes and the assets read behind, then again. */
+        await Promise.all([loadRooms(), loadBoxes()]);
+        if (place !== 'deck') return;
+        try { await d.refresh(); } catch { /* not read: drawn at the next opening */ }
+        await readDeskAssets().catch(() => {});
+        if (place === 'deck') d.render();
+    }
+    /* FEATURES (features.js): the welcome in place of "No conversation yet" until it is passed; then the
+       next step over the cards. */
+    async function paintDeckFeatures(count) {
+        if (!features) return;
+        const data = await features.refresh();
+        const welcoming = count === 0 && data?.welcome === true;
+        $('deck-empty').hidden = count > 0 || welcoming;
+        const [on, off] = welcoming ? ['deck-welcome', 'deck-features'] : ['deck-features', 'deck-welcome'];
+        features.unmount($(off)); $(off).hidden = true;
+        features.show($(on), welcoming ? 'welcome' : 'home');
+    }
+    /* The desk folds the list away, as the other places of the menu do (16-11: the operator). */
+    function openDeck(push = true) { if (DEVICE) return; if (!narrow()) foldOnOpen(); enterPlace('deck', push); void paintDeck(); }
+    /* « Home » in the menu: the desk, said plainly (its title, top left, was not seen as a way there). */
+    $('nav-home').addEventListener('click', () => openDeck());
+    $('deck-close').addEventListener('click', () => leavePlace());
+    $('deck-empty-new').addEventListener('click', () => { void openNew(); });
+    /* Import a configuration: the import of the map (Access, Flows), a file chosen at once. */
+    $('deck-empty-import').addEventListener('click', () => { void openAccessPage('map', { mode: 'flows' }).then(() => document.getElementById('flows-import')?.click()).catch(() => {}); });
+    $('list-title').addEventListener('click', () => openDeck());
+    $('list-title').setAttribute('role', 'button'); $('list-title').tabIndex = 0;
+    $('list-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') openDeck(); });
     /* ---------- private repositories: how this server gets in ---------- */
     /* The host of an address, whatever its form (user@host:path has no URL form). */
     const hostOf = (from) => { try { return new URL(from).hostname; } catch { return /@([^:/]+):/.exec(String(from))?.[1] ?? String(from); } };
@@ -4031,7 +7671,7 @@
             copy.addEventListener('click', () => { void copyField(field, copy); });
             const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
             const why = document.createElement('span'); why.className = 'hint';
-            if (key.usedBy.length) { remove.disabled = true; why.textContent = `removing it would cut ${key.usedBy.join(', ')} off: remove ${key.usedBy.length > 1 ? 'those repositories' : 'that repository'} first`; }
+            if (key.usedBy.length) { remove.disabled = true; why.textContent = `removing it would cut ${key.usedBy.join(', ')} off: remove ${key.usedBy.length > 1 ? 'them' : 'it'} first`; }
             remove.addEventListener('click', () => {
                 const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, remove the key ${key.name} (it cannot be made again)`;
                 sure.addEventListener('click', async () => {
@@ -4047,18 +7687,85 @@
         }
         fillKeyChoice();
     }
-    /* The key offered in "Add a repository": the one chosen stays chosen. */
+    /* The key of "New repository": the kit's SecretPicker -- its keys, "+ New key…" made in place, and
+       the new one chosen (its public half shown under it, to give the hosting service). */
+    const gitKeyPick = KIT.SecretPicker({
+        ids: { select: 'git-key', add: 'git-key-new', row: 'git-key-make', name: 'git-key-name', go: 'git-key-make-go' },
+        none: 'No key yet: make one', addLabel: uiSaid('set-na-new-key', '+ New key…'), makeLabel: uiSaid('set-na-create', 'Create'), nameLabel: 'Name of the new key',
+        nameAttrs: { maxlength: '32', pattern: '[a-z]([a-z0-9-]{0,30}[a-z0-9])?', placeholder: 'deploy-key', spellcheck: 'false', autocapitalize: 'off' },
+        suggest: () => {
+            const taken = new Set(gitKeys.map((k) => k.name));
+            const wanted = $('git-name').value.trim();
+            let suggestion = wanted && !taken.has(wanted) ? wanted : '';
+            for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
+            return suggestion;
+        },
+        onMake: async (name) => {
+            $('git-error').hidden = true;
+            try {
+                const made = await post(`${API}/git-keys`, { name });
+                paintKeys(await fetch(`${API}/git-keys`).then((r) => r.json()));
+                fillKeyChoice(made.name);
+                return true;
+            } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; return false; }
+        },
+        onChange: () => showChosenKey(),
+    });
+    $('git-key-pick').append(gitKeyPick);
+    for (const [id, key] of [['git-key-new', 'set-na-new-key'], ['git-key-make-go', 'set-na-create']]) { const b = gitKeyPick.querySelector?.(`#${id}`); if (b) b.dataset.said = key; }
+    /* The key offered in "New repository": the one chosen stays chosen. */
     function fillKeyChoice(chosen = $('git-key').value) {
-        const select = $('git-key'); select.replaceChildren();
-        if (gitKeys.length === 0) { const none = document.createElement('option'); none.value = ''; none.textContent = 'No key yet: make one'; select.append(none); }
-        for (const key of gitKeys) {
-            const o = document.createElement('option'); o.value = key.name;
-            o.textContent = key.usedBy.length ? `${key.name} (used by ${key.usedBy.join(', ')})` : key.name;
-            select.append(o);
-        }
-        if (gitKeys.some((k) => k.name === chosen)) select.value = chosen;
+        const offered = gitKeys.map((key) => ({ value: key.name, label: key.usedBy.length ? `${key.name} (used by ${key.usedBy.join(', ')})` : key.name }));
+        gitKeyPick.set(offered, chosen);
         showChosenKey();
+        machineKeyPick.set(offered, $('machine-key')?.value || chosen);
+        showMachineKey();
     }
+    /* A MACHINE (SSH, sshmachine.mjs): the same keys made here; the line for its authorized_keys under the one chosen. */
+    const machineKeyPick = KIT.SecretPicker({
+        ids: { select: 'machine-key', add: 'machine-key-new', row: 'machine-key-make', name: 'machine-key-name', go: 'machine-key-make-go' },
+        none: uiSaid('set-mc-no-key', 'No key yet: make one'), addLabel: uiSaid('set-na-new-key', '+ New key…'), makeLabel: uiSaid('set-na-create', 'Create'), nameLabel: uiSaid('set-mc-key-name', 'Name of the new key'),
+        nameAttrs: { maxlength: '32', pattern: '[a-z]([a-z0-9-]{0,30}[a-z0-9])?', placeholder: 'server-key', spellcheck: 'false', autocapitalize: 'off' },
+        suggest: () => {
+            const taken = new Set(gitKeys.map((k) => k.name));
+            const wanted = $('machine-title').value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+|-+$/g, '').slice(0, 32);
+            let suggestion = wanted && !taken.has(wanted) ? wanted : '';
+            for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
+            return suggestion;
+        },
+        onMake: async (name) => {
+            $('machine-error').hidden = true;
+            try {
+                const made = await post(`${API}/git-keys`, { name });
+                paintKeys(await fetch(`${API}/git-keys`).then((r) => r.json()));
+                machineKeyPick.set(gitKeys.map((key) => ({ value: key.name, label: key.name })), made.name);
+                fillKeyChoice($('git-key').value);
+                showMachineKey();
+                return true;
+            } catch (error) { $('machine-error').textContent = error.message; $('machine-error').hidden = false; return false; }
+        },
+        onChange: () => showMachineKey(),
+    });
+    $('machine-key-pick').append(machineKeyPick);
+    function showMachineKey() {
+        const key = gitKeys.find((k) => k.name === $('machine-key')?.value);
+        $('machine-key-shown').hidden = !key;
+        $('machine-key-line').value = key?.publicKey ?? '';
+    }
+    $('machine-key-copy').addEventListener('click', () => { void copyField($('machine-key-line'), $('machine-key-copy')); });
+    $('machine-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('machine-error').hidden = true;
+        const btn = $('machine-add'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/ssh-add`, { title: $('machine-title').value.trim(), host: $('machine-host').value.trim(), port: $('machine-port').value.trim(), user: $('machine-user').value.trim(), key: $('machine-key').value, pin: $('machine-pin').value.trim() });
+            $('machine-new').reset();
+            paintKeys(await getJson('/git-keys', []));
+            await assetMade($('machine-box'), { key: `connexion:${made.id}`, name: made.title, note: uiSaid('set-mc-pinned', 'Server fingerprint kept: {pin}', { pin: made.pin }), give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
+        } catch (error) { $('machine-error').textContent = error.message; $('machine-error').hidden = false; }
+        finally { btn.disabled = false; }
+        await paintAssets();
+    });
     function showChosenKey() {
         const key = gitKeys.find((k) => k.name === $('git-key').value);
         $('git-key-shown').hidden = !key;
@@ -4076,25 +7783,6 @@
         const from = $('git-from').value.trim();
         const pick = looksSsh(from) ? 'ssh-key' : /^https:\/\//i.test(from) ? 'none' : '';
         if (pick) { $('git-new').querySelector(`input[name="git-via"][value="${pick}"]`).checked = true; showVia(); }
-    });
-    $('git-key').addEventListener('change', showChosenKey);
-    $('git-key-new').addEventListener('click', () => {
-        const taken = new Set(gitKeys.map((k) => k.name));
-        const wanted = $('git-name').value.trim();
-        let suggestion = wanted && !taken.has(wanted) ? wanted : '';
-        for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
-        $('git-key-name').value = suggestion;
-        $('git-key-make').hidden = false; focusField($('git-key-name'));
-    });
-    $('git-key-make-go').addEventListener('click', async () => {
-        $('git-error').hidden = true;
-        try {
-            const made = await post(`${API}/git-keys`, { name: $('git-key-name').value.trim() });
-            $('git-key-make').hidden = true;
-            gitKeys = await fetch(`${API}/git-keys`).then((r) => r.json());
-            fillKeyChoice(made.name);
-            await paintAssets();
-        } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
     });
     $('git-key-copy').addEventListener('click', () => { void copyField($('git-key-public'), $('git-key-copy')); });
     /* Secrets: a name, and which conversations' tools are handed it. A value goes in and never comes back. */
@@ -4116,13 +7804,20 @@
     });
     $('secret-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('assets-error').hidden = true;
+        $('assets-error').hidden = true; $('cassets-error').hidden = true;
         const lines = !$('secret-lines').hidden;
         /* A key's last line ends with a line break: kept as it was pasted. */
         const value = lines ? $('secret-lines').value.replace(/\r\n?/g, '\n') : $('secret-value').value;
         const expires = $('secret-expires').value;
-        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value, ...(expires ? { expires } : {}) }); assetOpen = `secret:${$('secret-name').value.trim()}`; assetsAdding = ''; $('secret-name').value = ''; $('secret-expires').value = ''; secretLines(false, ''); }
-        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        const name = $('secret-name').value.trim();
+        try {
+            await post(`${API}/secrets`, { name, value, ...(expires ? { expires } : {}) });
+            $('secret-name').value = ''; $('secret-expires').value = ''; secretLines(false, '');
+            await assetMade($('secret-box'), { key: `secret:${name}`, name, give: async (to) => {
+                await handTo(to, name, true, 'cassets-error');
+                secretNote(name, true);
+            } });
+        } catch (error) { newAssetError($('secret-box'), error.message); }
         await paintAssets();
     });
 
@@ -4130,11 +7825,11 @@
     /* What those sheets share with the rest of the page: the requests, the
        automatic sending form of Access, the share sheet for a device to pair. */
     const links = DEVICE ? undefined : window.clavariumLinks?.({
-        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => { void openCompose([]); }, newConversation: () => createFromMap(),
+        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => newDevice(''), newConversation: () => createFromMap(),
         newAsset: () => newAssetFromMap(),
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
-        deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? deviceCard(d, '', true) : null; },
+        deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? devicePanel(d, '', true) : null; },
         /* The map says when it turns to its flows by itself (a box's "Trace it"). */
         modeIs: (mode) => { if (mode !== mapMode) { mapMode = mode; paintTabs(); subStep(); } },
         /* Its box rising from the bottom on a phone: over the screen, closed by Back. */
@@ -4171,6 +7866,14 @@
         $('access').hidden = which !== 'access';
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
+        $('deck').hidden = which !== 'deck';
+        /* The desk left: its menu, an open folder, its edit mode go with it. */
+        if (which !== 'deck') { try { desk?.leave(); } catch { /* not set up yet */ } }
+        $('salon').hidden = which !== 'salon'; $('salon-new').hidden = which !== 'salon-new';
+        /* The places of the whole have a part of the page of their own, over the conversation (03-11). */
+        $('places').hidden = !['access', 'settings', 'assets', 'deck', 'new', 'salon', 'salon-new'].includes(which);
+        /* A room left: its row no longer marked (as a conversation left). */
+        if (which !== 'salon') { try { const was = salonId; salonLeft(); if (was) paint(); } catch { /* not yet set up */ } }
         $('newconv').hidden = which !== 'new';
         if (which !== 'access') composing = false;
         /* What the conversation had open (its tab) waits under the place, as it was. */
@@ -4180,7 +7883,9 @@
     function placeAddress() {
         const q = new URLSearchParams();
         if (current) q.set('c', current);
-        if (place !== 'conversations') q.set('open', place);
+        /* The desk with no conversation open is the bare address: the page of arrival. */
+        if (place !== 'conversations' && !(place === 'deck' && !current)) q.set('open', place);
+        if (place === 'salon' && roomOpenNow()) q.set('room', roomOpenNow());
         if (place === 'assets' && assetOpen) q.set('a', assetOpen);
         if (place === 'assets' && assetOpen && assetOpen === listOpen && assetsView?.place.page === 'card') q.set('card', assetsView.place.card);
         if (place === 'access') { q.set('tab', accessTab === 'map' && mapMode === 'flows' ? 'flows' : accessTab); if (accessFor) q.set('for', accessFor); }
@@ -4258,12 +7963,14 @@
     /* What a page drew from the lists, to know when they changed. */
     function binderSig(lists) { return JSON.stringify((Array.isArray(lists) ? lists : []).map((l) => [l.id, l.title, l.archived, l.count, l.grants])); }
     /* `of`: the conversation its cards are of (its Binders tab); else the one the list was given to. */
-    async function mountBinder(holder, keep, { onLists, of, place: at = null, steps = null } = {}) {
+    /* `still()`: whether it is still wanted once its parts are read (another one asked meanwhile: not drawn). */
+    async function mountBinder(holder, keep, { onLists, of, place: at = null, steps = null, still = () => true } = {}) {
         binderParts ??= Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${binderLang()}.json`).then((r) => r.json()).catch(() => ({}))]);
-        const [[{ mount }, words], seen] = await Promise.all([binderParts, getJson('/binder/people', null)]);
+        const [[{ mount }, words], seen] = await Promise.all([binderParts, peopleNow()]);
         if (seen) { binderPeople = seen.people; binderChanges = seen.changes; }
-        if (!holder.isConnected) return null;
+        if (!holder.isConnected || !still()) return null;
         let shown = [];
+        let first = true; let showing = null;
         const whose = () => {
             if (of) return of();
             const given = [...new Set(shown.flatMap((l) => Object.keys(l.grants ?? {})).filter((k) => k.startsWith('conversation:')).map((k) => k.slice('conversation:'.length)))];
@@ -4272,8 +7979,16 @@
         const view = mount(holder, {
             words, lang: binderLang(), people: () => binderPeople,
             call: async (op, args) => {
-                const r = await binderCall(op, args);
+                const asked = binderCall(op, args);
+                if (op === 'show') showing = asked;
+                let r = await asked;
+                /* A binder read, answered after another was asked (one binder picked, then another): the last one
+                   asked is what Binder shows, never this late answer painted under the other's tab (clavarium-binder
+                   load() keeps no order of its own). */
+                if (op === 'show') for (let seen = asked; seen !== showing;) { seen = showing; r = await seen; }
                 if (op === 'lists' && r.ok && Array.isArray(r.data)) { onLists?.(r.data); r.data = r.data.filter(keep); shown = r.data; }
+                /* Its first binder read: drawn now, barely faded in. */
+                if (op === 'show' && first) { first = false; fadeIn(holder); }
                 return r;
             },
             /* A thing attached opens where this page opens it. */
@@ -4281,14 +7996,54 @@
                 if (a.kind === 'asset') void openAssetsPlace(a.ref);
                 else if (a.kind === 'message') void openCardMessage(whose(), a.ref);
                 else if (a.kind === 'file') void openCardFile(whose(), a.ref);
+                else if (a.kind === 'mail') openCardMail(whose(), a);
+                else if (a.kind === 'commit' || a.kind === 'branch') void openCardGit(whose(), a.ref, a.kind);
                 else if (a.kind === 'link' && /^https?:\/\//i.test(a.ref)) window.open(a.ref, '_blank', 'noopener');
             },
             /* Where it is: a step of this page's Back (below). */
             place: at, onPlace: steps?.onPlace, onBack: steps?.onBack,
+            /* ACT (02-11): quick actions suggested for a card (server/suggest.mjs); done here. */
+            ...(DEVICE ? {} : { actions: (r, l) => cardActions(r, l, whose), discuss: (r, l) => discussCard(r, l, whose), endings: (r, l, kind) => endCard(r, l, kind) }),
         });
         binderViews.add({ box: holder.firstElementChild, view });
         watchBinders();
         return view;
+    }
+    /* The conversation that carries a card: an assistant among its owners, else the one the binder is given to. */
+    const carrierOf = (r, whose) => (r.owners ?? []).find((o) => o.startsWith('conversation:'))?.slice('conversation:'.length) || whose();
+    const dayAfter = (days) => { const d = new Date(Date.now() + days * 86_400_000); return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10); };
+    /* A card's two endings, archived either way: done (to its done state), or dropped (a note says so). */
+    async function endCard(r, l, kind, why = '') {
+        if (kind === 'done') { const end = (l.states ?? []).find((x) => x.done); if (end) await binderCall('move', { id: r.id, state: end.id }); }
+        else await binderCall('note', { id: r.id, text: `Dropped: no longer relevant${why ? ` (${why})` : ''}.` });
+        await binderCall('archive', { id: r.id });
+    }
+    async function cardActions(r, l, whose) {
+        const got = await post(`${API}/binder/suggest`, { id: r.id }).catch(() => null);
+        return (got?.actions ?? []).map((a) => ({ label: a.label, why: a.why, run: async () => {
+            if (a.key === 'done') { const end = (l.states ?? []).find((x) => x.done); if (end) await binderCall('move', { id: r.id, state: end.id }); return; }
+            if (a.key === 'done-archive') { await endCard(r, l, 'done'); return; }
+            if (a.key === 'drop') { await endCard(r, l, 'drop', a.why); return; }
+            if (a.key === 'postpone-day' || a.key === 'postpone-week') { await binderCall('edit', { id: r.id, due: dayAfter(a.key === 'postpone-day' ? 1 : 7) }); return; }
+            if (a.key === 'urgency-up' || a.key === 'urgency-down') { const u = Number(r.fields?.urgence ?? 50); await binderCall('edit', { id: r.id, fields: { urgence: Math.max(0, Math.min(100, u + (a.key === 'urgency-up' ? 20 : -20))) } }); return; }
+            /* Work for an assistant: asked in its chat, where the person follows and approves. */
+            const name = carrierOf(r, whose);
+            if (!name) return;
+            await post(talkPath(name), { text: `Card #${r.id} « ${r.title} » (${l.title}): ${a.ask}` });
+            if (toConversation(name)) goTab('chat');
+        } }));
+    }
+    /* Discuss a card: its assistant's chat, the card named in what is being written -- the person finishes it. */
+    function discussCard(r, l, whose) {
+        const name = carrierOf(r, whose);
+        if (!name || !toConversation(name)) return;
+        goTab('chat');
+        setTimeout(() => {
+            const box = document.querySelector('#chat textarea.parley-box, textarea.parley-box');
+            if (!box) return;
+            box.value = `About card #${r.id} « ${r.title} » (${l.title}): `;
+            box.dispatchEvent(new Event('input', { bubbles: true })); box.focus();
+        }, 400);
     }
     /* A card's thing attached, of its conversation: that conversation shown first (from a place, or another one). */
     function toConversation(name) {
@@ -4312,18 +8067,119 @@
         const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length);
         void preview(tab, m[2], m[2].split('/').pop(), 0);
     }
+    /* A mail of a card (06-11): its reference (mail:...) opens the mail viewer; a mail file (.eml), as a file;
+       an old bare id, where the server can still read it (else it says so, in the viewer). */
+    function openCardMail(name, a) {
+        const ref = String(a.ref ?? '').trim();
+        if (!ref.startsWith('mail:') && /\.eml$/i.test(ref)) { openCardFile(name, ref); return; }
+        void openMailRef(ref, { label: a.title, of: name });
+    }
+    /* A MAIL CITED BY ITS REFERENCE (mail:TARGET/MESSAGE-ID, 06-11): the viewer of the .eml files, over the
+       page, its bytes read by the server through Tether when it is opened -- never before, kept nowhere --
+       and only by whoever may read that mailbox. `of`: the conversation it was cited in, whose chat Reply
+       writes in. */
+    function openMailRef(ref, { label = '', of = current, room = '' } = {}) {
+        /* Cited in a room: read for the conversation of the AI that cited it (the server finds it, and says which). */
+        if (room) return preview('', '', `${String(label || '').trim() || uiSaid('set-mail-mail', 'Mail')}.eml`, 0, `${API}/rooms/${room}/mail/open?${new URLSearchParams({ ref })}`, { mailRef: { ref, of: '', label, room } });
+        const q = new URLSearchParams({ ref, ...(of ? { c: of } : {}) });
+        const name = `${String(label || '').trim() || uiSaid('set-mail-mail', 'Mail')}.eml`;
+        return preview('', '', name, 0, `${API}/mail/open?${q}`, { mailRef: { ref, of, label } });
+    }
+    /* Reply, from the viewer: nothing is sent -- the chat of its conversation is given the start of a request
+       to its AI (« Reply to this mail: » and the reference), for the person to finish and send. */
+    async function replyToMail({ ref, of }) {
+        closePreview();
+        if (!DEVICE && of && of !== current && !toConversation(of)) return;
+        goTab('chat');
+        for (let i = 0; i < 40; i++) {
+            const box = document.querySelector('#chat textarea.parley-box, #simple-thread textarea.parley-box, textarea.parley-box');
+            if (box && box.offsetParent !== null) {
+                box.value = `${uiSaid('set-mail-reply-ask', 'Reply to this mail:')} ${ref}\n`;
+                box.dispatchEvent(new Event('input', { bubbles: true })); box.focus();
+                box.setSelectionRange?.(box.value.length, box.value.length);
+                return;
+            }
+            await new Promise((r) => setTimeout(r, 100));
+        }
+    }
+    /* A commit or a branch of a repository of its conversation (ref "repository:sha" / "repository:branch"): the git review, at it. */
+    function openCardGit(name, ref, kind) {
+        const raw = String(ref ?? '').trim(); const at = raw.indexOf(':');
+        if (at < 1 || DEVICE || !toConversation(name)) return;
+        const repo = raw.slice(0, at); const rest = raw.slice(at + 1).trim();
+        if (!repo || !rest) return;
+        void openGit(repo, kind === 'commit' ? { commit: rest } : { branch: rest });
+    }
+    /* ATTACH TO A CARD (#180): from where a thing is (a file shown, a message of the chat), a card
+       picked among the binders this page may write in -- by its title, typed or scrolled -- and
+       the thing attached to it, as the agent attaches with `binder attach`. */
+    async function attachToCard({ kind, ref, title }) {
+        document.getElementById('attach-pick')?.remove();
+        const box = document.createElement('div'); box.id = 'attach-pick'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Attach to a card');
+        const card = document.createElement('div'); card.className = 'attach-card';
+        const head = document.createElement('div'); head.className = 'row';
+        const h = document.createElement('b'); h.textContent = 'Attach to a card';
+        const sp = document.createElement('span'); sp.className = 'sp';
+        const x = document.createElement('button'); x.type = 'button'; x.textContent = '\u00d7'; x.setAttribute('aria-label', 'Close');
+        head.append(h, sp, x);
+        const what = document.createElement('p'); what.className = 'dim attach-what'; what.textContent = title || ref;
+        const find = document.createElement('input'); find.type = 'search'; find.placeholder = 'Find a card'; find.setAttribute('aria-label', 'Find a card');
+        const list = document.createElement('div'); list.className = 'attach-list';
+        const said = document.createElement('p'); said.className = 'attach-said'; said.hidden = true;
+        card.append(head, what, find, list, said); box.append(card); document.body.append(box);
+        const close = () => { box.remove(); document.removeEventListener('keydown', esc, true); };
+        const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+        document.addEventListener('keydown', esc, true);
+        x.onclick = close; box.addEventListener('pointerdown', (e) => { if (e.target === box) close(); });
+        list.textContent = 'Loading...';
+        /* The cards of every binder this page may change, the conversation's own binder first. */
+        const lists = ((await binderCall('lists', {})).data ?? []).filter((l) => !l.archived && l.access === 'write');
+        const own = (l) => Object.keys(l.grants ?? {}).includes(`conversation:${current}`);
+        lists.sort((a, b) => Number(own(b)) - Number(own(a)));
+        const cards = [];
+        for (const l of lists.slice(0, 12)) { const r = await binderCall('show', { list: l.id }); for (const rec of r.data?.records ?? []) cards.push({ list: l, rec }); }
+        const draw = () => {
+            const q = find.value.trim().toLowerCase();
+            const shown = cards.filter(({ rec, list: l }) => !q || `#${rec.n} ${rec.title} ${l.title}`.toLowerCase().includes(q)).slice(0, 80);
+            list.replaceChildren(...(shown.length ? shown.map(({ rec, list: l }) => {
+                const b = document.createElement('button'); b.type = 'button'; b.className = 'attach-item';
+                const t = document.createElement('span'); t.textContent = `#${rec.n} ${rec.title}`;
+                const w = document.createElement('small'); w.textContent = l.title;
+                b.append(t, w);
+                b.onclick = async () => {
+                    for (const o of list.querySelectorAll('button')) o.disabled = true;
+                    const r = await binderCall('attach', { id: rec.id, kind, ref, ...(title ? { title } : {}) });
+                    said.hidden = false; said.textContent = r.ok ? `Attached to #${rec.n} ${rec.title}.` : (r.text || 'Not attached.');
+                    said.classList.toggle('bad', !r.ok);
+                    if (r.ok) setTimeout(close, 1400); else for (const o of list.querySelectorAll('button')) o.disabled = false;
+                };
+                return b;
+            }) : [Object.assign(document.createElement('p'), { className: 'dim', textContent: cards.length ? 'No card by that name.' : 'No binder you can write in.' })]));
+        };
+        find.addEventListener('input', draw);
+        draw();
+        find.focus();
+    }
+    /* Read again every screen of a binder when the binders changed. Taken as seen only once every
+       screen read it again: one that failed (the server restarting) is read again at the next turn. */
+    async function catchUpBinders() {
+        const now = await peopleNow();
+        if (!now) return;
+        binderPeople = now.people;
+        if (now.changes === binderChanges) return;
+        const read = await Promise.all([...binderViews].map((one) => Promise.resolve(one.view.refresh()).then((ok) => ok !== false, () => false)));
+        if (read.every(Boolean)) binderChanges = now.changes;
+    }
     function watchBinders() {
         if (binderTimer) return;
-        binderTimer = setInterval(async () => {
+        binderTimer = setInterval(() => {
             for (const one of binderViews) if (!one.box?.isConnected) { one.view.destroy(); binderViews.delete(one); }
             if (binderViews.size === 0) { clearInterval(binderTimer); binderTimer = null; return; }
-            if (document.hidden) return;
-            const now = await getJson('/binder/people', null);
-            if (!now) return;
-            binderPeople = now.people;
-            if (now.changes !== binderChanges) { binderChanges = now.changes; for (const one of binderViews) void one.view.refresh(); }
+            if (!document.hidden) void catchUpBinders();
         }, 4000);
     }
+    /* Back on the page (a tablet woken, a tab shown again): looked at at once, not 4 s later. */
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && binderViews.size) void catchUpBinders(); });
     /* WHERE A BINDER IS, IN THIS PAGE'S BACK: a card (or a binder's settings) is one step over
        its list; Back, Escape and its "‹" close it, and the list is there again. Another binder
        picked takes no step. `viewOf()`: the screen shown now (it may be drawn again).
@@ -4381,6 +8237,8 @@
         if (home && wanted !== current && conversations.some((c) => c.name === wanted)) select(wanted);
         const open = q.get('open') ?? '';
         if (open === 'new') { await openNew({ push: false }); return; }
+        if (open === 'deck') { openDeck(false); return; }
+        if (open === 'salon' && q.get('room')) { await openSalon(q.get('room'), false); return; }
         if (open === 'settings') {
             await openSettings({ push: false });
             /* A link to one chapter of Settings (?open=settings&at=resources): that one opened, and shown. */
@@ -4399,18 +8257,19 @@
     }
     nav.outside = () => { if (!DEVICE) void followAddress(); };
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
-    $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
-    $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
-    $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
+    $('nav-access').addEventListener('click', () => { foldOnOpen(); if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
+    $('nav-assets').addEventListener('click', () => { foldOnOpen(); if (place !== 'assets') void openAssetsPlace(); });
+    $('map-new-device').addEventListener('click', () => newDevice(accessFor));
     /* Every device and what each was given, by device or by thing: a step over the map. */
     $('map-all-devices').addEventListener('click', () => { void openAccessPage('devices'); });
+    /* Voice boxes are on the page of all devices: opened there, at them. */
+    $('map-voice-boxes').addEventListener('click', async () => { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); });
     $('share-manage-close').addEventListener('click', () => { if (!nav.close('sub')) void openAccessPage('map', { push: false }); });
-    $('nav-settings').addEventListener('click', () => { if (place !== 'settings') void openSettings(); });
+    $('nav-settings').addEventListener('click', () => { foldOnOpen(); if (place !== 'settings') void openSettings(); });
     $('access-close').addEventListener('click', () => leavePlace());
     $('access-for-clear').addEventListener('click', () => { accessFor = ''; void openAccessPage(accessTab, { push: false }); });
     for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.addEventListener('click', () => { if (b.dataset.mode !== mapMode || accessTab !== 'map') void openAccessPage('map', { mode: b.dataset.mode }); });
     /* From a conversation's own sheet: Access, on that conversation alone. */
-    $('access-assets-here').addEventListener('click', () => { goTab('assets'); });
     $('access-devices-here').addEventListener('click', () => { void openAccessPage('map', { of: current }); });
 
     /* ---------- Settings: this device, and the platform ---------- */
@@ -4439,6 +8298,221 @@
             rows.append(row);
         }
     }
+    /* API KEYS (server/apikeys.mjs): what a program or an AI elsewhere may read with a key. Made with no
+       scope until one is ticked; its secret shown this once, then never; revoked at once, confirmed in place.
+       Administrators only: hidden on a device, and where the server does not answer it. */
+    const shortDate = (t) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+    /* Its conversations, one by one (step 2): each Off / Read / Talk / Act -- never "all". `chosen`: name -> level.
+       Act (07-11): Talk, and wake it, put it to sleep, stop its turn. A room's Manage: Talk, and its name, members, host. */
+    const apiKeyLevelWord = (level) => (level === 'act' ? uiSaid('set-apikeys-act', 'Act') : level === 'manage' ? uiSaid('set-apikeys-manage', 'Manage')
+        : level === 'talk' ? uiSaid('set-apikeys-talk', 'Talk') : uiSaid('set-apikeys-read', 'Read'));
+    function apiKeyConvPicker(chosen, onChange) {
+        const box = el('div', 'apikey-convs');
+        const list = conversations.filter((c) => c && c.name);
+        if (!list.length) box.append(el('small', 'hint', uiSaid('set-apikeys-no-convs', 'No conversation yet')));
+        const options = [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }, { value: 'act', label: apiKeyLevelWord('act') }];
+        for (const c of list) {
+            const row = el('div', 'apikey-conv'); row.dataset.name = c.name;
+            row.append(el('span', '', shownName(c)), KIT.Segmented({ options, value: chosen.get(c.name) ?? '', label: shownName(c), onChange: (v) => onChange(c.name, v || null) }));
+            box.append(row);
+        }
+        return box;
+    }
+    /* ITS ROOMS AND VOICE BOXES (07-11), one by one the same way: a room Off / Read / Talk, a box Off / State /
+       Speak aloud -- said plainly: it is heard in the home. `kind`: 'rooms' or 'boxes'; `chosen`: id -> level. */
+    const apiKeyBoxWord = (level) => (level === 'speak' ? uiSaid('set-apikeys-speak', 'Speak aloud') : uiSaid('set-apikeys-state', 'State'));
+    /* ITS BINDERS (07-11): each list Off / Read / Write; offered only when there are lists. */
+    let apiKeyLists = [];
+    const apiKeyItems = (kind) => (kind === 'binders' ? apiKeyLists : kind === 'rooms' ? roomsNow().filter((r) => r && r.id).map((r) => ({ id: r.id, name: r.name })) : boxesNow().filter((b) => b && b.id).map((b) => ({ id: b.id, name: b.name })));
+    const apiKeyBinderWord = (level) => (level === 'write' ? uiSaid('set-apikeys-write', 'Write') : uiSaid('set-apikeys-read', 'Read'));
+    function apiKeyOnePicker(kind, chosen, onChange) {
+        const box = el('div', `apikey-${kind}`);
+        const list = apiKeyItems(kind);
+        if (!list.length) box.append(el('small', 'hint', kind === 'rooms' ? uiSaid('set-apikeys-no-rooms', 'No room yet') : uiSaid('set-apikeys-no-boxes', 'No voice box yet')));
+        const options = kind === 'binders'
+            ? [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyBinderWord('read') }, { value: 'write', label: apiKeyBinderWord('write') }]
+            : kind === 'rooms'
+            ? [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }, { value: 'manage', label: apiKeyLevelWord('manage') }]
+            : [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'state', label: apiKeyBoxWord('state') }, { value: 'speak', label: apiKeyBoxWord('speak') }];
+        for (const x of list) {
+            const row = el('div', kind === 'binders' ? 'apikey-conv apikey-binder' : kind === 'rooms' ? 'apikey-conv apikey-room' : 'apikey-conv apikey-box'); row.dataset.id = x.id;
+            row.append(el('span', '', x.name), KIT.Segmented({ options, value: chosen.get(x.id) ?? '', label: x.name, onChange: (v) => onChange(x.id, v || null) }));
+            box.append(row);
+        }
+        return box;
+    }
+    const apiKeyNewConvs = new Map();
+    const apiKeyNewRooms = new Map();
+    const apiKeyNewBoxes = new Map();
+    const apiKeyNewBinders = new Map();
+    /* The key whose conversations or journal are open under it, kept across a repaint. */
+    let apiKeyOpen = null;
+    async function paintApiKeyJournal(box, id) {
+        const got = await fetch(`${API}/apikeys/${id}/journal`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        box.replaceChildren();
+        const uses = Array.isArray(got?.uses) ? got.uses.slice(0, 50) : [];
+        if (!uses.length) { box.append(el('small', 'hint', uiSaid('set-apikeys-no-use', 'No call yet'))); return; }
+        for (const u of uses) {
+            const line = el('div', 'apikey-use');
+            const when = el('small', '', agoSaid(u.at)); when.title = new Date(u.at).toLocaleString();
+            const code = el('b', '', String(u.status)); if (u.status >= 400) code.dataset.bad = 'true';
+            line.append(when, el('code', '', `${u.method} ${u.route}`), code);
+            box.append(line);
+        }
+    }
+    async function paintApiKeys() {
+        const got = DEVICE ? null : await fetch(`${API}/apikeys`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        $('settings-ch-apikeys').hidden = !got || !Array.isArray(got.keys);
+        if (!got || !Array.isArray(got.keys)) return;
+        const [, , lists] = await Promise.all([loadRooms(), loadBoxes(), binderCall('lists', {})]);
+        apiKeyLists = lists?.ok && Array.isArray(lists.data) ? lists.data.filter((l) => l && l.id && !l.archived).map((l) => ({ id: l.id, name: l.title })) : [];
+        $('apikeys-binders-row').hidden = !apiKeyLists.length;
+        const scopeWord = (id) => uiSaid(`set-apikeys-scope-${id}`, got.scopes.find((x) => x.id === id)?.label ?? id);
+        const live = got.keys.filter((k) => !k.expired).length;
+        chapterNow('s-apikeys', got.keys.length ? uiSaid(live === 1 ? 'set-apikeys-n1' : 'set-apikeys-n', live === 1 ? '1 key' : '{n} keys', { n: live }) : uiSaid('set-apikeys-about', 'For a program or an AI.'));
+        $('apikeys-where').textContent = `MCP: ${location.origin}/api/ext/mcp`;
+        const scopes = $('apikeys-scopes');
+        if (!scopes.childElementCount) {
+            for (const sc of got.scopes) {
+                const l = el('label', 'check'); const box = document.createElement('input'); box.type = 'checkbox'; box.value = sc.id; box.name = 'apikeys-scope';
+                l.append(box, ' ', el('span', '', scopeWord(sc.id))); scopes.append(l);
+            }
+        }
+        const rows = $('apikeys-rows'); rows.replaceChildren();
+        $('apikeys-empty').hidden = got.keys.length > 0;
+        for (const k of got.keys) {
+            const row = el('div', 'list-item apikey'); row.dataset.id = k.id;
+            const what = el('div', 'set-what');
+            const head = el('b', '', k.label);
+            what.append(head);
+            const tags = el('span', 'apikey-scopes');
+            const given = [...k.scopes.map((sc) => ({ text: scopeWord(sc) })),
+                ...(k.conversations ?? []).map((c) => ({ text: `${shownName(conversations.find((x) => x.name === c.name) ?? { name: c.name })} · ${apiKeyLevelWord(c.level)}`, tone: c.level === 'read' ? undefined : 'note' })),
+                ...(k.rooms ?? []).map((r) => ({ text: `${roomsNow().find((x) => x.id === r.id)?.name ?? r.id.slice(0, 8)} · ${apiKeyLevelWord(r.level)}`, icon: 'room', tone: r.level === 'read' ? undefined : 'note' })),
+                ...(k.boxes ?? []).map((b) => ({ text: `${boxesNow().find((x) => x.id === b.id)?.name ?? b.id.slice(0, 8)} · ${apiKeyBoxWord(b.level)}`, icon: 'box', tone: b.level === 'speak' ? 'note' : undefined })),
+                ...(k.binders ?? []).map((l) => ({ text: `${apiKeyLists.find((x) => x.id === l.id)?.name ?? l.id} · ${apiKeyBinderWord(l.level)}`, tone: l.level === 'write' ? 'note' : undefined }))];
+            tags.append(KIT.Chips(given.length ? given : [{ text: uiSaid('set-apikeys-no-scope', 'No scope') }]));
+            what.append(tags);
+            const by = k.createdBy ? (k.createdBy === got.me ? uiSaid('set-apikeys-by-you', 'by you') : k.createdBy) : '';
+            const facts = [
+                k.usedAt ? uiSaid('set-apikeys-used', 'Used {when}', { when: agoSaid(k.usedAt) }) : uiSaid('set-apikeys-unused', 'Never used'),
+                k.expired ? uiSaid('set-apikeys-expired', 'Expired') : k.expiresAt ? uiSaid('set-apikeys-expires-on', 'Expires {date}', { date: shortDate(k.expiresAt) }) : uiSaid('set-apikeys-no-expiry', 'No expiry'),
+                `${uiSaid('set-apikeys-created', 'Created {date}', { date: shortDate(k.createdAt) })}${by ? ` ${by}` : ''}`,
+            ];
+            what.append(el('small', k.expired ? 'bad' : '', facts.join(' · ')));
+            const acts = el('div', 'set-control');
+            const revoke = el('button', 'danger', uiSaid('set-apikeys-revoke', 'Revoke')); revoke.type = 'button'; revoke.dataset.act = 'revoke';
+            revoke.addEventListener('click', () => {
+                KIT.InlineConfirm(revoke, { question: uiSaid('set-apikeys-revoke-q', 'Revoke now?'), yes: uiSaid('set-apikeys-revoke', 'Revoke'), onYes: async () => {
+                    $('apikeys-error').hidden = true;
+                    try { await post(`${API}/apikeys/${k.id}/revoke`, {}); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; $('apikeys-form').hidden = false; }
+                    await paintApiKeys();
+                } });
+            });
+            /* Its conversations, or its journal, opened under it (one at a time). */
+            const more = el('div', 'apikey-more'); more.hidden = true;
+            const open = async (kind) => {
+                apiKeyOpen = apiKeyOpen?.id === k.id && apiKeyOpen.what === kind ? null : { id: k.id, what: kind };
+                for (const b of acts.querySelectorAll('button[data-act="scopes"], button[data-act="convs"], button[data-act="rooms"], button[data-act="boxes"], button[data-act="binders"], button[data-act="journal"]')) b.setAttribute('aria-expanded', String(apiKeyOpen?.id === k.id && apiKeyOpen.what === b.dataset.act));
+                more.hidden = apiKeyOpen?.id !== k.id;
+                more.replaceChildren();
+                if (!apiKeyOpen || apiKeyOpen.id !== k.id) return;
+                if (kind === 'journal') { more.dataset.what = 'journal'; await paintApiKeyJournal(more, k.id); return; }
+                /* Its scopes of the server, ticked or not, changed afterwards (18-11). */
+                if (kind === 'scopes') {
+                    more.dataset.what = 'scopes';
+                    for (const sc of got.scopes) {
+                        const l = el('label', 'check'); const box = document.createElement('input'); box.type = 'checkbox'; box.value = sc.id; box.checked = k.scopes.includes(sc.id);
+                        box.addEventListener('change', async () => {
+                            $('apikeys-error').hidden = true;
+                            try { await post(`${API}/apikeys/${k.id}/scopes`, { scope: sc.id, on: box.checked }); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; }
+                            await paintApiKeys();
+                        });
+                        l.append(box, ' ', el('span', '', scopeWord(sc.id))); more.append(l);
+                    }
+                    return;
+                }
+                more.dataset.what = kind;
+                if (kind === 'rooms' || kind === 'boxes' || kind === 'binders') {
+                    more.append(apiKeyOnePicker(kind, new Map((k[kind] ?? []).map((x) => [x.id, x.level])), async (ref, level) => {
+                        $('apikeys-error').hidden = true;
+                        try { await post(`${API}/apikeys/${k.id}/${kind}`, { [kind === 'rooms' ? 'room' : kind === 'boxes' ? 'box' : 'binder']: ref, level }); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; }
+                        await paintApiKeys();
+                    }));
+                    return;
+                }
+                more.append(apiKeyConvPicker(new Map((k.conversations ?? []).map((c) => [c.name, c.level])), async (name, level) => {
+                    $('apikeys-error').hidden = true;
+                    try { await post(`${API}/apikeys/${k.id}/conversations`, { conversation: name, level }); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; }
+                    await paintApiKeys();
+                }));
+            };
+            const convs = el('button', '', uiSaid('set-apikeys-convs', 'Conversations')); convs.type = 'button'; convs.dataset.act = 'convs';
+            const journal = el('button', '', uiSaid('set-apikeys-journal', 'Journal')); journal.type = 'button'; journal.dataset.act = 'journal';
+            const perms = el('button', '', uiSaid('set-apikeys-perms', 'Permissions')); perms.type = 'button'; perms.dataset.act = 'scopes';
+            perms.addEventListener('click', () => void open('scopes'));
+            convs.addEventListener('click', () => void open('convs'));
+            journal.addEventListener('click', () => void open('journal'));
+            acts.append(perms, convs);
+            /* Rooms, voice boxes, binders: offered when there are some (or the key has some still). */
+            for (const [kind, word] of [['rooms', uiSaid('set-apikeys-rooms', 'Rooms')], ['boxes', uiSaid('set-apikeys-boxes', 'Voice boxes')], ['binders', uiSaid('set-apikeys-binders', 'Binders')]]) {
+                if (!apiKeyItems(kind).length && !(k[kind] ?? []).length) continue;
+                const b = el('button', '', word); b.type = 'button'; b.dataset.act = kind;
+                b.addEventListener('click', () => void open(kind));
+                acts.append(b);
+            }
+            acts.append(journal, revoke);
+            row.append(what, acts, more);
+            rows.append(row);
+            if (apiKeyOpen?.id === k.id) { const kind = apiKeyOpen.what; apiKeyOpen = null; void open(kind); }
+        }
+    }
+    const apiKeyFormShown = (on) => {
+        $('apikeys-form').hidden = !on; $('apikeys-new-row').hidden = on; $('apikeys-error').hidden = true;
+        if (on) {
+            $('apikeys-label').value = ''; $('apikeys-days').value = '90'; for (const b of $('apikeys-scopes').querySelectorAll('input')) b.checked = false;
+            apiKeyNewConvs.clear(); apiKeyNewRooms.clear(); apiKeyNewBoxes.clear(); apiKeyNewBinders.clear();
+            $('apikeys-convs').replaceChildren(apiKeyConvPicker(apiKeyNewConvs, (name, level) => { if (level) apiKeyNewConvs.set(name, level); else apiKeyNewConvs.delete(name); }));
+            $('apikeys-rooms').replaceChildren(apiKeyOnePicker('rooms', apiKeyNewRooms, (id, level) => { if (level) apiKeyNewRooms.set(id, level); else apiKeyNewRooms.delete(id); }));
+            $('apikeys-boxes').replaceChildren(apiKeyOnePicker('boxes', apiKeyNewBoxes, (id, level) => { if (level) apiKeyNewBoxes.set(id, level); else apiKeyNewBoxes.delete(id); }));
+            $('apikeys-binders').replaceChildren(apiKeyOnePicker('binders', apiKeyNewBinders, (id, level) => { if (level) apiKeyNewBinders.set(id, level); else apiKeyNewBinders.delete(id); }));
+            $('apikeys-label').focus();
+        }
+    };
+    $('apikeys-new').addEventListener('click', () => apiKeyFormShown(true));
+    $('apikeys-cancel').addEventListener('click', () => apiKeyFormShown(false));
+    $('apikeys-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('apikeys-error').hidden = true;
+        const days = $('apikeys-days').value;
+        try {
+            const scopes = [...$('apikeys-scopes').querySelectorAll('input:checked')].map((b) => b.value);
+            const r = await post(`${API}/apikeys`, { label: $('apikeys-label').value.trim(), scopes, conversations: Object.fromEntries(apiKeyNewConvs), rooms: Object.fromEntries(apiKeyNewRooms), boxes: Object.fromEntries(apiKeyNewBoxes), binders: Object.fromEntries(apiKeyNewBinders), days: days === 'never' ? null : Number(days) });
+            apiKeyFormShown(false);
+            $('apikeys-secret').value = r.secret; $('apikeys-once').hidden = false;
+            /* 06-11 (the owner): the configuration an AI tool takes, ready to paste -- its MCP door and the key, shown this once too. */
+            const slug = (appName || 'clavarium').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'clavarium';
+            $('apikeys-config').textContent = JSON.stringify({ mcpServers: { [slug]: { type: 'http', url: `${location.origin}/api/ext/mcp`, headers: { Authorization: `Bearer ${r.secret}` } } } }, null, 2);
+            /* The curl line reads what it was given: the status, or else its conversations, rooms or voice boxes. */
+            const first = scopes.includes('status') ? 'status' : apiKeyNewConvs.size ? 'conversations' : apiKeyNewRooms.size ? 'rooms' : apiKeyNewBoxes.size ? 'boxes' : apiKeyNewBinders.size ? 'binders' : 'status';
+            $('apikeys-curl').textContent = `curl -H "Authorization: Bearer ${r.secret}" ${location.origin}/api/ext/v1/${first}`;
+        } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; return; }
+        await paintApiKeys();
+    });
+    $('apikeys-copy').addEventListener('click', async () => {
+        const b = $('apikeys-copy'); const f = $('apikeys-secret');
+        try { await navigator.clipboard.writeText(f.value); b.textContent = uiSaid('set-apikeys-copied', 'Copied'); }
+        catch { f.focus(); f.select(); b.textContent = uiSaid('set-apikeys-select', 'Selected: copy it'); }
+        setTimeout(() => { b.textContent = uiSaid('set-apikeys-copy', 'Copy'); }, 2500);
+    });
+    /* Done: the secret leaves the page too. */
+    $('apikeys-config-copy').addEventListener('click', async () => {
+        const b = $('apikeys-config-copy'); const pre = $('apikeys-config');
+        try { await navigator.clipboard.writeText(pre.textContent); b.textContent = uiSaid('set-apikeys-copied', 'Copied'); }
+        catch { const range = document.createRange(); range.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); b.textContent = uiSaid('set-apikeys-select', 'Selected: copy it'); }
+        setTimeout(() => { b.textContent = uiSaid('set-apikeys-config-copy', 'Copy the configuration'); }, 2500);
+    });
+    $('apikeys-done').addEventListener('click', () => { $('apikeys-secret').value = ''; $('apikeys-config').textContent = ''; $('apikeys-curl').textContent = ''; $('apikeys-once').hidden = true; });
     function showPassword(email, password) {
         $('operators-password-for').textContent = email; $('operators-password-value').value = password; $('operators-password').hidden = false;
     }
@@ -4451,22 +8525,232 @@
         catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
         await paintOperators();
     });
-    /* THE CATEGORIES OF SETTINGS, beside them on a wide screen: one click brings its group into sight; the one in sight is marked. */
-    const settingsNav = [...document.querySelectorAll('#settings-nav button[data-group]')];
-    const markGroup = (key) => { for (const b of settingsNav) b.setAttribute('aria-current', String(b.dataset.group === key)); };
-    for (const b of settingsNav) b.addEventListener('click', () => { document.getElementById(`settings-group-${b.dataset.group}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); markGroup(b.dataset.group); });
-    $('settings').addEventListener('scroll', () => {
-        const top = $('settings').getBoundingClientRect().top + 60;
-        const groups = [...document.querySelectorAll('#settings .settings-group')];
-        const seen = groups.filter((g) => g.getBoundingClientRect().top <= top).pop() ?? groups[0];
-        if (seen) markGroup(seen.dataset.group);
-    }, { passive: true });
-    markGroup('device');
+    /* THE TABS OF A SETTINGS PAGE (settings redesign, 05-11): its groups -- General, (This device,) Resources, Access,
+       Chat & voice, Automatic, Diagnostics, Advanced: the same names in the same order on every settings page -- one
+       shown at a time. The one last shown is kept on this device. A tab whose group has nothing to show is hidden,
+       the order of the others unchanged. While a search is typed, every group is searched and shown (CSS). */
+    function settingsTabs(sheet) {
+        const nav = sheet?.querySelector('.settings-tabs'); if (!nav) return;
+        const buttons = [...nav.querySelectorAll('button[data-group]')];
+        const groupOf = (key) => sheet.querySelector(`.settings-group[data-group="${key}"]`);
+        const kept = `clavarium-tab-${sheet.id}`;
+        const show = (key, { keep = true } = {}) => {
+            for (const b of buttons) { const on = b.dataset.group === key; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
+            for (const g of sheet.querySelectorAll('.settings-group[data-group]')) g.classList.toggle('tab-off', g.dataset.group !== key);
+            sheet.dataset.tab = key;
+            if (keep) try { localStorage.setItem(kept, key); } catch { /* a private window */ }
+            const b = buttons.find((x) => x.dataset.group === key);
+            if (b && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, b.offsetLeft - (nav.clientWidth - b.offsetWidth) / 2);
+        };
+        /* Hidden: a tab whose chapters are all hidden (Usage, Administrators on this machine alone...). */
+        const refresh = () => {
+            if (sheet.dataset.searching === 'on') return;
+            for (const b of buttons) { const g = groupOf(b.dataset.group); b.hidden = !g || ![...g.querySelectorAll('details.chapter')].some((d) => !d.hidden); }
+            if (buttons.find((b) => b.dataset.group === sheet.dataset.tab)?.hidden) show(buttons.find((b) => !b.hidden)?.dataset.group ?? buttons[0].dataset.group, { keep: false });
+        };
+        for (const b of buttons) b.addEventListener('click', () => { show(b.dataset.group); b.focus(); });
+        nav.addEventListener('keydown', (event) => {
+            const shown = buttons.filter((b) => !b.hidden); const at = shown.findIndex((b) => b.dataset.group === sheet.dataset.tab);
+            const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: shown.length - 1 }[event.key];
+            if (to === undefined || !shown.length) return;
+            event.preventDefault(); const b = shown[(to + shown.length) % shown.length]; show(b.dataset.group); b.focus();
+        });
+        let first = buttons[0].dataset.group;
+        try { const k = localStorage.getItem(kept); if (buttons.some((b) => b.dataset.group === k)) first = k; } catch { /* as above */ }
+        show(first, { keep: false });
+        sheet.showTab = show; sheet.refreshTabs = refresh;
+        new MutationObserver(() => refresh()).observe(sheet, { subtree: true, attributes: true, attributeFilter: ['hidden'] });
+        refresh();
+    }
+    for (const id of ['settings', 'panel']) settingsTabs($(id));
+
+    /* THE WORDS OF THE SETTINGS PAGES in the screen's language (server/settingswords.mjs, served with the chat's,
+       uiSaid): an element marked data-said="key" keeps its English as the fallback. */
+    function saySettings() {
+        for (const e of document.querySelectorAll('[data-said]')) { e.dataset.en ??= e.textContent; e.textContent = uiSaid(e.dataset.said, e.dataset.en); }
+        for (const e of document.querySelectorAll('[data-said-label]')) { e.dataset.enLabel ??= e.getAttribute('aria-label') ?? ''; const w = uiSaid(e.dataset.saidLabel, e.dataset.enLabel); e.setAttribute('aria-label', w); e.title = w; }
+        for (const b of document.querySelectorAll('button.tip-btn')) b.setAttribute('aria-label', uiSaid('set-why', 'Why'));
+        const s = document.querySelector('#settings .settings-search'); if (s) s.placeholder = uiSaid('set-search', 'Search');
+        const p = document.querySelector('#panel .settings-search'); if (p) p.placeholder = uiSaid('set-search', 'Search');
+        $('cassets-search').placeholder = uiSaid('set-search', 'Search');
+        $('assets-search').placeholder = uiSaid('set-search', 'Search');
+        for (const e of document.querySelectorAll('[data-said-placeholder]')) { e.dataset.enPlaceholder ??= e.placeholder; e.placeholder = uiSaid(e.dataset.saidPlaceholder, e.dataset.enPlaceholder); }
+        /* The lists of assets drawn before the words came: drawn again, the kit's words in the screen's language. */
+        try { if (place === 'assets') void paintAssets(); if (assetsShown) void paintRoomAssets(); } catch { /* not drawn yet */ }
+        /* The list, a conversation's bar and settings, a room's: drawn again in the screen's language -- only when it has
+           words of its own (in English nothing changes, and a row is not swapped under a finger). */
+        let own = false; try { own = Object.keys(chatWords ?? {}).some((k) => k.startsWith('set-')); } catch { /* not read */ }
+        if (!own) return;
+        try { paint(); if (!current) enter(true); else if (panelShown) void paintPanel(); } catch { /* not drawn yet */ }
+        try { if (salonEditing) { paintSalonMembers(); void paintSalonAssets(); } else if (place === 'salon' && salonId) { const r = rooms.find((x) => x.id === salonId); if (r) salonHead(r); } } catch { /* not drawn yet */ }
+    }
+    void readWords().then(saySettings).catch(() => {});
+
+    /* "WHY", BEHIND AN ⓘ (settings redesign, step 3): a row says what it is in one short line; the why behind
+       the ⓘ beside its name, one click away. Any element .tip (hidden) gets its button. */
+    function wireTips(root = document) {
+        for (const tip of root.querySelectorAll('.tip')) {
+            if (tip.dataset.wired) continue; tip.dataset.wired = '1'; tip.hidden = true;
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'tip-btn'; b.textContent = 'ⓘ';
+            b.setAttribute('aria-label', uiSaid('set-why', 'Why')); b.setAttribute('aria-expanded', 'false');
+            b.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); tip.hidden = !tip.hidden; b.setAttribute('aria-expanded', String(!tip.hidden)); });
+            /* Beside the row's name, on its line. */
+            const name = tip.closest('.set-what')?.querySelector(':scope > :is(b, span, label)');
+            if (name) { const line = document.createElement('span'); line.className = 'with-tip'; name.before(line); line.append(name, b); continue; }
+            /* A paragraph of its own: beside the heading or the line above it, else on a line of its own. */
+            let above = tip.previousElementSibling; while (above?.hidden) above = above.previousElementSibling;
+            if (above) { const head = above.querySelector(':scope > b'); if (head) head.after(b); else above.append(b); }
+            else { const line = document.createElement('div'); line.className = 'tip-head'; line.append(b); tip.before(line); }
+        }
+    }
+    wireTips();
+
+    /* WHAT A FOLDED CHAPTER SAYS (settings redesign, step 1): its state now, in a few words, where a description
+       was -- often enough not to open it. */
+    function chapterNow(key, text) {
+        const about = document.querySelector(`details.chapter[data-chapter="${key}"] > summary .chapter-about`);
+        if (about && text !== undefined && text !== null) about.textContent = text;
+    }
+    const agoSaid = (t) => { const m = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60_000)); return m < 1 ? uiSaid('set-just-now', 'just now') : m < 60 ? uiSaid('set-min-ago', '{n} min ago', { n: m }) : m < 48 * 60 ? uiSaid('set-h-ago', '{n} h ago', { n: Math.round(m / 60) }) : uiSaid('set-days-ago', '{n} days ago', { n: Math.round(m / 1440) }); };
+
+    /* AT HAND: three tiles -- memory, disk, CPU -- each its share now, a bar, the last hour in a small line, and
+       what is left in words; a click opens Resources. From what is read already (/api/server, a machine's health,
+       /api/history): no new call to the server. */
+    const levelAt = (p, high = false) => (p >= 95 ? 'bad' : p >= 85 || high ? 'warn' : 'ok');
+    function handTile(label, percent, sub, values, level, reservePercent) {
+        const t = el('button', 'tile'); t.type = 'button'; t.dataset.level = level;
+        const k = el('span', 'tile-k'); k.append(el('b', '', label), el('span', 'tile-n', percent === null ? '—' : `${Math.round(percent)} %`));
+        const bar = el('span', 'tile-bar'); const fill = el('i'); fill.style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`; bar.append(fill);
+        if (Number.isFinite(reservePercent) && reservePercent > 0 && reservePercent < 100) { const u = el('u'); u.style.width = `${reservePercent}%`; bar.append(u); }
+        t.append(k, bar);
+        const known = (values ?? []).map((v, i) => [i, v]).filter(([, v]) => v !== null && v !== undefined);
+        if (known.length > 1) {
+            const n = values.length - 1; let d = '';
+            for (const [i, v] of known) d += `${d ? 'L' : 'M'}${((i / n) * 100).toFixed(1)},${(22 - (v / 100) * 20).toFixed(1)}`;
+            const svg = svgEl('svg', { viewBox: '0 0 100 22', preserveAspectRatio: 'none', class: 'tile-spark', 'aria-hidden': 'true' });
+            svg.append(svgEl('path', { d, 'vector-effect': 'non-scaling-stroke' })); t.append(svg);
+        } else t.append(el('span', 'tile-spark'));
+        t.append(el('span', 'tile-sub', sub));
+        t.setAttribute('aria-label', `${label}: ${percent === null ? '—' : `${Math.round(percent)} %`}, ${sub}`);
+        return t;
+    }
+    /* THE THREE TILES WHILE THEY ARE READ (14-11): their names, « … » where the figures go, bones for the bar and
+       the line -- the size they will have, never a figure made up. */
+    const handTilesLoading = () => [uiSaid('set-memory', 'Memory'), uiSaid('set-disk', 'Disk'), uiSaid('set-cpu', 'CPU')].map((label) => {
+        const t = el('div', 'tile'); t.dataset.loading = '';
+        const k = el('span', 'tile-k'); k.append(el('b', '', label), el('span', 'tile-n', '…'));
+        t.append(k, KIT.Bone({ cls: 'tile-bar' }), KIT.Bone({ cls: 'tile-spark' }), el('span', 'tile-sub', '…'));
+        return t;
+    });
+    const lastOf = (values) => { for (let i = (values?.length ?? 0) - 1; i >= 0; i -= 1) if (values[i] !== null && values[i] !== undefined) return values[i]; return null; };
+    const handHistory = async (of) => (of ? fetch(`${API}/history?of=${encodeURIComponent(of)}&span=1h`).then((x) => (x.ok ? x.json() : null)).catch(() => null) : null);
+    /* A chip: a dot of its state and a word -- only when it says something. */
+    const handChip = (tone, text, go) => { const c = el(go ? 'button' : 'span', 'hand-chip', text); c.dataset.tone = tone; if (go) { c.type = 'button'; c.addEventListener('click', go); } return c; };
+
+    /* The server's: under the top bar of Settings. */
+    let lastServer = null;
+    /* Shown at once as Settings opens, at its final size: the tiles and a chip still being read. */
+    let handFactsRead = false;
+    function settingsHandLoading() {
+        if (DEVICE) return;
+        $('settings-hand').hidden = false;
+        const tiles = $('settings-tiles');
+        if (!tiles.children.length) { tiles.replaceChildren(...handTilesLoading()); tiles.hidden = false; KIT.loading(tiles); }
+        const facts = $('settings-facts');
+        if (!facts.children.length) { handFactsRead = false; facts.replaceChildren(KIT.Bone({ cls: 'hand-chip' })); facts.hidden = false; KIT.loading(facts); }
+    }
+    async function paintSettingsHand(r = lastServer) {
+        if (DEVICE) return;
+        lastServer = r;
+        $('settings-hand').hidden = false;
+        const h = await handHistory('server');
+        const tiles = [];
+        const go = () => { openChapter('s-resources')?.scrollIntoView({ block: 'start' }); };
+        if (r?.memory) { const m = r.memory; tiles.push(handTile(uiSaid('set-memory', 'Memory'), m.usedPercent, uiSaid('set-free-of', '{free} free of {total}', { free: GB(m.freeMb), total: GB(m.totalMb) }), h?.memory, levelAt(m.usedPercent, r.high?.memory), r.reserve?.memoryMb && m.totalMb ? (r.reserve.memoryMb / m.totalMb) * 100 : null)); }
+        const disk = r?.disk?.disks?.find((d) => d.holds?.includes('machines')) ?? r?.disk?.disks?.[0];
+        if (disk) tiles.push(handTile(uiSaid('set-disk', 'Disk'), disk.usedPercent, uiSaid('set-free-of', '{free} free of {total}', { free: GB(disk.freeMb), total: GB(disk.sizeMb) }), h?.disk, levelAt(disk.usedPercent, r.high?.disk), r.reserve?.diskMb && disk.sizeMb ? (r.reserve.diskMb / disk.sizeMb) * 100 : null));
+        const cpu = lastOf(h?.cpu);
+        if (h) { const most = Math.max(0, ...(h.cpu ?? []).filter((v) => v !== null)); tiles.push(handTile(uiSaid('set-cpu', 'CPU'), cpu, uiSaid('set-highest', 'highest {n} % in 1 h', { n: Math.round(most) }), h.cpu, levelAt(cpu ?? 0))); }
+        for (const t of tiles) t.addEventListener('click', go);
+        $('settings-tiles').replaceChildren(...tiles); $('settings-tiles').hidden = tiles.length === 0;
+        KIT.loading($('settings-tiles'), false);
+        paintSettingsFacts();
+    }
+    /* Its chips: the version, a conversation that is not well, a voice box away. */
+    let handWifi = null;
+    function paintSettingsFacts() {
+        const chips = [];
+        const u = lastUpdates;
+        if (u?.installed) {
+            if (u.available) chips.push(handChip('warn', uiSaid('set-update-out', '{v} is out', { v: u.available.version ?? u.available }), () => { openChapter('s-updates')?.scrollIntoView({ block: 'start' }); }));
+            else if (u.version) chips.push(handChip('ok', uiSaid('set-up-to-date', 'Up to date · {v}', { v: u.version })));
+        } else if (u?.version) chips.push(handChip('ok', `Clavarium ${u.version}`));
+        if (handWifi?.using?.ssid) chips.push(handChip('ok', uiSaid('set-wifi-on', 'Wi-Fi · {name}', { name: handWifi.using.ssid })));
+        for (const c of conversations.filter((x) => (x.health?.problems ?? []).some((p) => p.level === 'warn' || p.level === 'bad'))) {
+            const bad = c.health.problems.some((p) => p.level === 'bad');
+            chips.push(handChip(bad ? 'bad' : 'warn', `${c.title || c.name} · ${uiSaid('set-not-well', 'not well')}`, () => select(c.name, { step: true })));
+        }
+        for (const b of (handBoxes ?? []).filter((x) => x.online === false)) chips.push(handChip('off', uiSaid('set-box-away', '{name} offline', { name: b.name })));
+        /* Nothing to say yet, while some is still read: its bone stays (the row does not come and go). */
+        if (!chips.length && !handFactsRead) return;
+        $('settings-facts').replaceChildren(...chips); $('settings-facts').hidden = chips.length === 0;
+        KIT.loading($('settings-facts'), false);
+    }
+    let handBoxes = null;
+    $('hand-check').addEventListener('click', () => { const sheet = $('settings'); sheet.showTab?.('automatic'); openChapter('s-updates'); $('updates-check').click(); $('settings-updates-top').scrollIntoView({ block: 'start' }); });
+    $('hand-activity').addEventListener('click', () => { openChapter('s-events')?.scrollIntoView({ block: 'start' }); });
+    $('hand-restart').addEventListener('click', () => { openChapter('s-advanced'); $('server-restarts').scrollIntoView({ block: 'center' }); });
+    /* THE STATE OF EACH FOLDED CHAPTER OF SETTINGS, read from what its own painting left (and three small looks:
+       network, remote screen, the last thing that happened). Painted again when a chapter is folded. */
+    const optionText = (id) => { const s = $(id); return s?.selectedOptions?.[0]?.textContent?.replace(/\s*\(.*\)$/, '') ?? ''; };
+    const levelsWord = (id) => [...($(id)?.children ?? [])].find((b) => b.getAttribute('aria-pressed') === 'true')?.textContent ?? '';
+    async function paintSettingsStates() {
+        if (DEVICE) return;
+        const join = (...parts) => parts.filter(Boolean).join(' · ');
+        chapterNow('s-screen', join(levelsWord('theme'), document.querySelector('#settings-text .text-now')?.textContent));
+        const alerts = $('alerts-state').textContent.trim();
+        chapterNow('s-alerts', alerts.length <= 30 ? alerts : alerts.split(/[.,:;]/)[0]);
+        chapterNow('s-words', join(optionText('words-lang') === 'The language of each device' ? uiSaid('set-lang-device', 'Each device\'s language') : optionText('words-lang'), optionText('chat-window')));
+        const levels = [...document.querySelectorAll('#thread-levels select')].filter((x) => [...x.options].some((o) => /\(default\)/.test(o.textContent)));
+        const changed = levels.filter((x) => !/\(default\)/.test(x.selectedOptions[0]?.textContent ?? '')).length;
+        chapterNow('s-thread', changed ? uiSaid('set-changed', '{n} changed', { n: changed }) : uiSaid('set-as-given', 'As given'));
+        const shortcuts = [...document.querySelectorAll('#settings-shortcuts .list-item b')].map((b) => b.textContent);
+        chapterNow('s-shortcuts', shortcuts.length ? shortcuts.slice(0, 3).join(' · ') + (shortcuts.length > 3 ? ` +${shortcuts.length - 3}` : '') : uiSaid('set-none', 'None'));
+        if ($('binders-agent-lists').value !== '') chapterNow('s-binders', uiSaid('set-binders-max', 'Agents make up to {n}', { n: $('binders-agent-lists').value }));
+        const admins = $('operators-rows').children.length;
+        chapterNow('s-operators', admins ? uiSaid(admins === 1 ? 'set-admin-1' : 'set-admins', admins === 1 ? '1 administrator' : '{n} administrators', { n: admins }) : '');
+        chapterNow('s-backup', uiSaid('set-backup-now', 'Export · import'));
+        const shelf = $('shelf-state').textContent.split(' · ')[0];
+        const keys = $('git-hosts').children.length;
+        chapterNow('s-advanced', join(shelf, uiSaid(keys === 1 ? 'set-git-key' : 'set-git-keys', keys === 1 ? '1 git key' : '{n} git keys', { n: keys }), uiSaid('set-restart', 'restart')));
+        chapterNow('s-about', $('settings-about').textContent);
+        chapterNow('s-logs', uiSaid('set-logs-now', 'Clavarium, machines, system'));
+        const u = lastUpdates;
+        if (u?.installed) chapterNow('s-updates', join(u.available ? uiSaid('set-update-out', '{v} is out', { v: u.available.version ?? u.available }) : uiSaid('set-up-to-date', 'Up to date · {v}', { v: u.version }), optionText('updates-channel').split(' ')[0], optionText('updates-mode').split(',')[0]));
+        else if (u) chapterNow('s-updates', u.version ? `Clavarium ${u.version}` : '');
+        const [wifi, mesh, events] = await Promise.all([
+            fetch(`${API}/wifi`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+            fetch(`${API}/meshcentral`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+            fetch(`${API}/events?limit=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        ]);
+        handWifi = wifi;
+        if (wifi) chapterNow('s-network', wifi.using?.ssid ? uiSaid('set-wifi-on', 'Wi-Fi · {name}', { name: wifi.using.ssid }) : (wifi.links ?? []).some((l) => l.kind === 'cable' && l.address) ? uiSaid('set-cable', 'Cable') : uiSaid('set-wifi-off', 'Wi-Fi not in use'));
+        if (mesh) chapterNow('s-remote-screen', mesh.running ? uiSaid('set-on', 'On') : uiSaid('set-off', 'Off'));
+        const last = Array.isArray(events) ? events[0] : null;
+        if (last) chapterNow('s-events', `${agoSaid(last.at)} · ${String(last.text).slice(0, 60)}`);
+        handBoxes = await fetch(`${API}/boxes`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        handFactsRead = true;
+        paintSettingsFacts();
+    }
+    for (const d of document.querySelectorAll('#settings details.chapter')) d.addEventListener('toggle', () => { if (!d.open) void paintSettingsStates(); });
     async function openSettings({ push = true } = {}) {
         enterPlace('settings', push);
+        settingsHandLoading(); serverLoading();
+        void paintSettingsFeatures().catch(() => {});
         void paintAlerts().catch(() => {});
         void paintWords().catch(() => {});
         void paintThreadLevels().catch(() => {});
+        void paintBinderSettings().catch(() => {});
         void paintChatWindow().catch(() => {});
         const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
         const list = $('settings-shortcuts'); list.replaceChildren();
@@ -4481,6 +8765,7 @@
         }
         void paintDictation();
         void paintOperators();
+        void paintApiKeys();
         /* With no shortcut, one line: how to add one (this is the only place to remove them). */
         $('settings-shortcuts-hint').textContent = saved.length ? 'Added under the terminal, with "+ Shortcut".' : 'No shortcut yet · add one under the terminal, with "+ Shortcut".';
         $('settings-people').textContent = (platform.operators ?? []).length
@@ -4488,19 +8773,23 @@
             : 'Development mode: anyone on this machine is the operator';
         $('settings-address').textContent = `Address: ${platform.address ?? 'not declared'}`;
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
-        void paintInstance();
+        void paintInstance(); void paintCompanionGeneral();
         if ($('settings-wifi-top').open) void paintWifi();
         if ($('settings-mesh-top').open) void paintScreen();
-        await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
+        if ($('settings-usage-top').open) void paintUsage();
+        await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates(), paintMachines()]);
+        await paintSettingsStates();
     }
 
-    /* ---------- Dictation, in Settings: the engine, chosen here (server/voice.mjs) ---------- */
+    /* ---------- Dictation, in Settings: two engines, main and backup (server/voice.mjs, dictation-engines.mjs) ---------- */
     let dictationProviders = [];
-    const dictationChoice = () => {
-        const lang = $('dictation-language').value;
-        return { provider: $('dictation-provider').value, url: $('dictation-url').value.trim(), model: $('dictation-model').value.trim(), secret: $('dictation-secret').value,
-            language: lang === 'other' ? $('dictation-language-code').value.trim() : lang };
-    };
+    const DICT_SLOTS = { main: 'dictation', backup: 'dictation-backup' };
+    const NEW_KEY = '__new';
+    const dq = (slot, what) => $(`${DICT_SLOTS[slot]}-${what}`);
+    const engineChoice = (slot) => ({ provider: dq(slot, 'provider').value, url: dq(slot, 'url').value.trim(), model: dq(slot, 'model').value.trim(),
+        secret: dq(slot, 'secret').value === NEW_KEY ? '' : dq(slot, 'secret').value });
+    const dictationLanguage = () => { const lang = $('dictation-language').value; return lang === 'other' ? $('dictation-language-code').value.trim() : lang; };
+    const dictationChoice = () => ({ language: dictationLanguage(), main: engineChoice('main'), backup: engineChoice('backup') });
     const dictationSay = (error, saved = '') => {
         $('dictation-error').textContent = error ?? ''; $('dictation-error').hidden = !error;
         $('dictation-saved').textContent = saved;
@@ -4511,36 +8800,124 @@
         $('dictation-language-code').value = known ? '' : code;
         $('dictation-language-code').hidden = known;
     };
+    /* The name offered for a new key (dictation-engines.mjs, newKeyName). */
+    const newKeyName = (provider, names) => {
+        const base = `${provider === 'ovh' ? 'OVH_AI_ENDPOINTS' : String(provider).toUpperCase()}_DICTATION_KEY`;
+        if (!names.includes(base)) return base;
+        for (let i = 2; ; i++) if (!names.includes(`${base}_${i}`)) return `${base}_${i}`;
+    };
+    const fillSecrets = (slot, names, keep) => {
+        const select = dq(slot, 'secret');
+        const options = [['', 'No key'], ...names.map((n) => [n, n]), [NEW_KEY, '+ New key...']];
+        select.replaceChildren(...options.map(([value, text]) => Object.assign(document.createElement('option'), { value, textContent: text })));
+        select.value = names.includes(keep) ? keep : '';
+    };
+    /* Its models: the provider's own list, read with the key chosen (kept a day on the server), else the known ones. */
+    const modelAsked = { main: 0, backup: 0 };
+    async function paintModels(slot, wanted = dq(slot, 'model').value) {
+        const provider = dq(slot, 'provider').value;
+        const pick = dq(slot, 'model-pick'); const typed = dq(slot, 'model');
+        const free = provider === 'other';
+        pick.hidden = free; typed.hidden = !free;
+        if (free || provider === 'none') return;
+        const asked = ++modelAsked[slot];
+        const secret = engineChoice(slot).secret;
+        const models = await getJson(`/dictation/models?${new URLSearchParams({ provider, secret })}`, null)
+            ?? dictationProviders.find((p) => p.id === provider)?.models ?? [];
+        if (asked !== modelAsked[slot]) return;
+        const list = wanted && !models.some((m) => m.id === wanted) ? [{ id: wanted, label: '' }, ...models] : models;
+        pick.replaceChildren(...list.map((m) => Object.assign(document.createElement('option'), { value: m.id, textContent: m.label ? `${m.id} · ${m.label}` : m.id })));
+        pick.value = list.some((m) => m.id === wanted) ? wanted : list[0]?.id ?? '';
+        typed.value = pick.value;
+    }
+    /* What a provider shows: the address only for "Other"; nothing but "None" for no backup. */
+    const showProvider = (slot) => {
+        const provider = dq(slot, 'provider').value;
+        const none = provider === 'none';
+        dq(slot, 'url-row').hidden = provider !== 'other';
+        dq(slot, 'other-hint').hidden = provider !== 'other';
+        for (const what of ['model-row', 'secret-row', 'try']) dq(slot, what).hidden = none;
+        if (none) { dq(slot, 'newkey').hidden = true; dq(slot, 'heard').hidden = true; }
+        if (none) dq(slot, 'dot').dataset.off = ''; else delete dq(slot, 'dot').dataset.off;
+    };
     async function paintDictation() {
         const [about, secrets] = await Promise.all([getJson('/dictation', null), getJson('/secrets', [])]);
         if (!about) { $('settings-dictation').textContent = 'Not set from here'; $('dictation-form').hidden = true; return; }
-        $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here`
+        const main = about.main; const backup = about.backup;
+        const short = (id) => about.providers.find((p) => p.id === id)?.short || about.providers.find((p) => p.id === id)?.label || id;
+        $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here${backup ? ` · backup: ${short(backup.provider)}` : ''}`
             : about.source === 'env' ? `On · "${about.env.model}" · set on the server` : 'Off · choose a provider';
         $('settings-dictation').dataset.tone = about.source ? 'ok' : '';
+        if (about.source === 'settings' && about.down) { $('settings-dictation').textContent = `${about.down} down · backup in use`; $('settings-dictation').dataset.tone = 'warn'; }
         /* Its key past its expiry day: not used (voice.mjs); said in red, a dot on the chapter. */
         if (about.source === 'settings' && about.secretExpired) { $('settings-dictation').textContent = 'Key expired: replace it in Assets > Secrets'; $('settings-dictation').dataset.tone = 'bad'; }
+        chapterNow('s-dictation', about.source === 'settings' ? (about.down ? uiSaid('set-dict-backup', 'Backup in use') : about.secretExpired ? uiSaid('set-dict-expired', 'Key expired') : `${uiSaid('set-on', 'On')}${main?.provider ? ` · ${short(main.provider)}` : ''}${backup ? ` · ${uiSaid('set-dict-with-backup', 'with backup')}` : ''}`)
+            : about.source === 'env' ? `${uiSaid('set-on', 'On')} · ${uiSaid('set-dict-server', 'set on the server')}` : uiSaid('set-off', 'Off'));
         if (about.secretMissing) dictationSay(`The secret "${about.secret}" is gone: choose another key.`);
+        else if (backup?.secretMissing) dictationSay(`Backup: the secret "${backup.secret}" is gone: choose another key.`);
+        if (about.down) dq('main', 'dot').dataset.down = ''; else delete dq('main', 'dot').dataset.down;
         dictationProviders = about.providers;
-        const provider = $('dictation-provider');
-        if (provider.options.length === 0) for (const p of about.providers) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; provider.append(o); }
-        const secret = $('dictation-secret');
-        secret.replaceChildren(secret.options[0] ?? Object.assign(document.createElement('option'), { value: '', textContent: 'No key' }));
-        for (const s2 of secrets) { const o = document.createElement('option'); o.value = s2.name; o.textContent = s2.name; secret.append(o); }
-        if ($('dictation-form').contains(document.activeElement)) return;
-        provider.value = about.provider ?? 'ovh';
-        const first = dictationProviders.find((p) => p.id === provider.value);
-        $('dictation-url').value = about.provider ? about.url : first?.url ?? '';
-        $('dictation-model').value = about.provider ? about.model : first?.model ?? '';
-        secret.value = [...secret.options].some((o) => o.value === about.secret) ? about.secret : '';
+        const names = secrets.map((s2) => s2.name);
+        for (const slot of ['main', 'backup']) {
+            const provider = dq(slot, 'provider');
+            if (provider.options.length === 0) {
+                for (const p of about.providers) provider.append(Object.assign(document.createElement('option'), { value: p.id, textContent: p.label }));
+                if (slot === 'backup') provider.append(Object.assign(document.createElement('option'), { value: 'none', textContent: 'None' }));
+            }
+        }
+        if ($('dictation-form').contains(document.activeElement)) { for (const slot of ['main', 'backup']) fillSecrets(slot, names, dq(slot, 'secret').value); return; }
+        for (const [slot, saved] of [['main', main], ['backup', backup]]) {
+            const first = dictationProviders.find((p) => p.id === (saved?.provider ?? 'ovh'));
+            dq(slot, 'provider').value = saved?.provider ?? (slot === 'main' ? 'ovh' : 'none');
+            dq(slot, 'url').value = saved ? saved.url : first?.url ?? '';
+            dq(slot, 'model').value = saved ? saved.model : first?.model ?? '';
+            fillSecrets(slot, names, saved?.secret ?? '');
+            dq(slot, 'newkey').hidden = true;
+            showProvider(slot);
+            void paintModels(slot, dq(slot, 'model').value);
+        }
         showLanguage(about.language ?? '');
-        $('dictation-other-hint').hidden = provider.value !== 'other';
         $('dictation-off').hidden = about.source !== 'settings';
     }
-    $('dictation-provider').addEventListener('change', () => {
-        const p = dictationProviders.find((x) => x.id === $('dictation-provider').value);
-        if (p) { $('dictation-url').value = p.url; $('dictation-model').value = p.model; }
-        $('dictation-other-hint').hidden = $('dictation-provider').value !== 'other';
-    });
+    for (const slot of ['main', 'backup']) {
+        dq(slot, 'provider').addEventListener('change', () => {
+            const p = dictationProviders.find((x) => x.id === dq(slot, 'provider').value);
+            if (p) { dq(slot, 'url').value = p.url; dq(slot, 'model').value = p.model; }
+            /* A key whose name reads as this provider's, when the one chosen does not. */
+            const keys = [...dq(slot, 'secret').options].map((o) => o.value).filter((v) => v && v !== NEW_KEY);
+            const looks = { ovh: /^OVH_AI_ENDPOINTS/, mistral: /^MISTRAL/, groq: /^GROQ/, openai: /^OPENAI/ }[p?.id];
+            if (looks && !looks.test(dq(slot, 'secret').value)) { const k = keys.find((n) => looks.test(n)); if (k) dq(slot, 'secret').value = k; }
+            dq(slot, 'newkey').hidden = true;
+            showProvider(slot);
+            void paintModels(slot, p?.model ?? '');
+        });
+        dq(slot, 'model-pick').addEventListener('change', () => { dq(slot, 'model').value = dq(slot, 'model-pick').value; });
+        dq(slot, 'secret').addEventListener('change', () => {
+            const adding = dq(slot, 'secret').value === NEW_KEY;
+            dq(slot, 'newkey').hidden = !adding;
+            if (adding) {
+                const names = [...dq(slot, 'secret').options].map((o) => o.value);
+                const p = dictationProviders.find((x) => x.id === dq(slot, 'provider').value);
+                dq(slot, 'newkey-name').textContent = `Kept as ${newKeyName(p?.id ?? 'other', names)}`;
+                dq(slot, 'newkey-value').placeholder = `Paste the ${p?.short || p?.label || ''} key`.replace('  ', ' ');
+                dq(slot, 'newkey-value').focus();
+            } else void paintModels(slot);
+        });
+        /* "+ New key": kept in the secrets, never shown again, then chosen. */
+        dq(slot, 'newkey-keep').addEventListener('click', async () => {
+            const value = dq(slot, 'newkey-value').value.trim();
+            if (!value) { dictationSay('Paste the key first.'); return; }
+            const names = [...dq(slot, 'secret').options].map((o) => o.value);
+            const name = newKeyName(dq(slot, 'provider').value, names);
+            try {
+                await post(`${API}/secrets`, { name, value });
+                dq(slot, 'newkey-value').value = ''; dq(slot, 'newkey').hidden = true; dictationSay(null, `Key kept: ${name}.`);
+                const secrets = await getJson('/secrets', []);
+                for (const s2 of ['main', 'backup']) fillSecrets(s2, secrets.map((x) => x.name), s2 === slot ? name : dq(s2, 'secret').value);
+                void paintModels(slot);
+            } catch (error) { dictationSay(error.message); }
+        });
+    }
     $('dictation-language').addEventListener('change', () => { $('dictation-language-code').hidden = $('dictation-language').value !== 'other'; });
     $('dictation-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -4550,24 +8927,45 @@
     $('dictation-off').addEventListener('click', async () => {
         try { await post(`${API}/dictation/off`); dictationSay(null, 'Turned off.'); void paintDictation(); } catch (error) { dictationSay(error.message); }
     });
-    /* "Try it": a few seconds from this microphone, sent to the engine in the form (nothing saved), its text shown. */
+    /* "Try it", per engine: a few seconds from this microphone, sent to the engine in its card (nothing saved). */
     let stopTrying = null;
-    const endTry = () => { stopTrying?.(); stopTrying = null; $('dictation-try').textContent = 'Try it'; };
-    $('dictation-try').addEventListener('click', async () => {
+    /* How loud the microphone is, in five thin bars beside what it says (voice.js: on.level): drawn once a
+       frame; it rises at once and falls slowly. Decorative: the words say the state. */
+    let tryLevels = []; let tryFrame = null;
+    const tryLevel = (slot, n) => {
+        if (!stopTrying || !window.clavariumVoice?.levelBars) return;
+        tryLevels = [Math.max(n, (tryLevels[0] ?? 0) * 0.8), ...tryLevels].slice(0, 3);
+        dq(slot, 'level').hidden = false;
+        tryFrame ??= requestAnimationFrame(() => {
+            tryFrame = null;
+            if (!stopTrying) return;
+            const bars = dq(slot, 'level').children;
+            window.clavariumVoice.levelBars(tryLevels).forEach((h, i) => { if (bars[i]) bars[i].style.transform = `scaleY(${h})`; });
+        });
+    };
+    const endTry = () => {
+        stopTrying?.(); stopTrying = null; tryLevels = [];
+        for (const slot of ['main', 'backup']) { dq(slot, 'try').textContent = 'Try it'; dq(slot, 'level').hidden = true; for (const bar of dq(slot, 'level').children) bar.style.transform = ''; }
+    };
+    for (const slot of ['main', 'backup']) dq(slot, 'try').addEventListener('click', async () => {
         if (stopTrying) { endTry(); return; }
         dictationSay(null);
-        const heard = $('dictation-heard');
+        const heard = dq(slot, 'heard');
+        for (const other of ['main', 'backup']) if (other !== slot) dq(other, 'heard').hidden = true;
         if (!window.clavariumVoice) { dictationSay('The microphone cannot be used on this page.'); return; }
-        const to = `${API}/dictation/try?${new URLSearchParams(dictationChoice())}`;
+        const to = `${API}/dictation/try?${new URLSearchParams({ ...engineChoice(slot), language: dictationLanguage() })}`;
         const words = { calibrating: 'Listening to the room...', listening: 'Speak now: a short sentence.', hearing: 'Hearing...', transcribing: 'Writing...' };
+        const began = Date.now();
         try {
-            heard.hidden = false; heard.textContent = 'Opening the microphone...';
+            heard.hidden = false; heard.dataset.tone = ''; heard.textContent = 'Opening the microphone...';
+            let spoke = began;
             const stop = await window.clavariumVoice.listen({
-                state: (w) => { if (stopTrying) heard.textContent = words[w] ?? w; },
-                phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; },
+                state: (w) => { if (w === 'transcribing') spoke = Date.now(); if (stopTrying) heard.textContent = words[w] ?? w; },
+                level: (n) => tryLevel(slot, n),
+                phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; heard.title = `${((Date.now() - spoke) / 1000).toFixed(1)} s`; },
                 error: (message) => { endTry(); heard.hidden = true; dictationSay(message); },
             }, { to });
-            stopTrying = stop; $('dictation-try').textContent = 'Stop';
+            stopTrying = stop; dq(slot, 'try').textContent = 'Stop';
             setTimeout(() => { if (stopTrying === stop) { endTry(); if (!heard.textContent.startsWith('Heard')) heard.textContent = 'Nothing was heard.'; } }, 15_000);
         } catch { heard.hidden = true; dictationSay('The microphone could not be opened.'); }
     });
@@ -4578,6 +8976,7 @@
         if (!about) return;
         $('instance-name').placeholder = about.defaultName;
         if (document.activeElement !== $('instance-name')) $('instance-name').value = about.given ? about.name : '';
+        chapterNow('s-general', about.name);
     }
     $('instance-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -4588,6 +8987,57 @@
             if (!installName()) pointManifest('');
         } catch (error) { $('instance-error').textContent = error.message; $('instance-error').hidden = false; }
     });
+
+    /* ---------- the sign-in companion (server/signinhelp.mjs, 15-11, #362) ---------- */
+    /* The conversation whose browser signs the tools in: one for all in Settings, and each conversation's own
+       (or none) in its settings. Never itself; one with no browser given is said so. */
+    const COMPANION_NONE = 'none';
+    const readCompanions = () => fetch(`${API}/signin-companion`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const companionWarn = (view, name) => (name && name !== COMPANION_NONE && !(view.browsers?.[name] ?? []).length ? 'No browser given to it yet' : '');
+    function fillCompanions(select, first, value, except) {
+        select.replaceChildren(...first.map(([v, t]) => new Option(t, v)), ...conversations.filter((c) => c.name !== except).map((c) => new Option(shownName(c), c.name)));
+        select.value = [...select.options].some((o) => o.value === value) ? value : first[0][0];
+    }
+    async function paintCompanionGeneral() {
+        if (DEVICE) return;
+        const view = await readCompanions();
+        if (!view) return;
+        fillCompanions($('companion-general'), [['', 'None']], view.general, null);
+        $('companion-general-hint').textContent = companionWarn(view, view.general) || 'Signs the tools in with its browser';
+        $('companion-clicks').checked = view.clicks === true;
+    }
+    $('companion-clicks').addEventListener('change', async () => {
+        $('companion-general-error').hidden = true;
+        try { await post(`${API}/signin-companion`, { clicks: $('companion-clicks').checked }); } catch (error) { $('companion-general-error').textContent = error.message; $('companion-general-error').hidden = false; }
+        await paintCompanionGeneral();
+    });
+    $('companion-general').addEventListener('change', async () => {
+        $('companion-general-error').hidden = true;
+        try { await post(`${API}/signin-companion`, { companion: $('companion-general').value }); } catch (error) { $('companion-general-error').textContent = error.message; $('companion-general-error').hidden = false; }
+        await paintCompanionGeneral();
+    });
+    async function paintCompanionHere() {
+        $('companion-here-row').hidden = DEVICE;
+        if (DEVICE || !current) return;
+        const name = current;
+        const view = await readCompanions();
+        if (!view || name !== current) return;
+        const general = view.general && view.general !== name ? conversations.find((c) => c.name === view.general) : null;
+        const own = view.per?.[name] ?? '';
+        fillCompanions($('companion-here'), [['', general ? `As in Settings: ${shownName(general)}` : 'As in Settings: none'], [COMPANION_NONE, 'None']], own, name);
+        $('companion-here-hint').textContent = companionWarn(view, own || (general ? view.general : '')) || 'Signs its tool in with its browser';
+    }
+    $('companion-here').addEventListener('change', async () => {
+        const v = $('companion-here').value;
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin-companion`, { companion: v === '' ? null : v }); } catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        await paintCompanionHere();
+    });
+    /* The button of the line "Signing in through « B »...": the link shown to the person instead. */
+    async function signinLinkToMe() {
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin-link`, {}); } catch { /* already over: the thread says how */ }
+        void thread?.refresh?.();
+    }
 
     /* ---------- Updates: what runs, what is out, how it updates itself (server/updates.mjs) ---------- */
     let updatesTimer; let updatesBusy = false;
@@ -4646,6 +9096,8 @@
             refused: () => ['Relay not kept up to date: it refuses this server\'s key', 'Once: sudo clavarium key on this server, then relay.sh again on the relay, with --key and --keeper-key.', true],
             'no-key': () => ['Relay not kept up to date: no maintenance key', 'sudo clavarium online --relay HOST sets one up.', true],
             failed: (r) => [`Relay update failed: ${r.why ?? 'unknown'} · tried again later`, '', true],
+            /* 07-11: a new generation of the relay (several homes) waits for the owner, never brought by itself. */
+            held: (r) => [`Relay ${r.version} ready, not installed`, 'When you want it: sudo clavarium relay update-relay', false],
         };
         const relayBox = $('updates-relay');
         relayBox.hidden = !relay || !RELAY_SAID[relay.state];
@@ -4655,6 +9107,15 @@
             if (todo) { const more = el('details', 'more'); more.append(el('summary', '', 'How'), el('span', '', todo)); relayBox.append(' ', more); }
             relayBox.className = asks ? 'callout' : 'hint';
             relayBox.dataset.state = relay.state;
+        }
+        /* Whether sudo keeps the host program's calls out of the system log, at the updater's last turn: one line. */
+        const q = u.sudoQuiet;
+        $('updates-sudo').hidden = !q;
+        if (q) {
+            const seen = [Number.isInteger(q.lines10m) ? uiSaid('set-sudo-seen', '{n} sudo lines in 10 min', { n: q.lines10m }) : '', q.sudo ?? ''].filter(Boolean).join(' · ');
+            $('updates-sudo').textContent = [q.on ? uiSaid('set-sudo-on', 'Sudo quiet: on ({setting})', { setting: q.setting ?? '' }) : uiSaid('set-sudo-off', 'Sudo quiet: not applied: {why}', { why: q.why ?? '?' }), seen].filter(Boolean).join(' · ');
+            /* Said loud when the journal still gets them: a line a second or more is the trouble seen 17-11. */
+            $('updates-sudo').className = !q.on || q.lines10m >= 300 ? 'callout' : 'hint';
         }
         paintUpdatesWhen(u);
         void paintCertificate();
@@ -4670,7 +9131,7 @@
         $('updates-state').textContent = running ? `${running.action === 'back' ? 'Going back to' : 'Updating to'} ${running.version}: ${running.step.toLowerCase()}...`
             : u.checkError ? 'Could not check just now.'
             : u.available ? `${u.available} is out.`
-            : u.checkedAt ? `Up to date · checked ${sinceWords(u.checkedAt)}` : 'Up to date';
+            : u.checkedAt ? `Nothing newer to install · checked ${sinceWords(u.checkedAt)}` : 'Nothing newer to install';
         $('updates-check').disabled = Boolean(running);
         $('updates-offer').hidden = !u.available || Boolean(running);
         /* A version that already failed here is not offered as usual: tried again only on purpose, warned. */
@@ -4680,7 +9141,8 @@
         apply.dataset.retry = String(failedHere);
         apply.className = failedHere ? '' : 'primary';
         apply.textContent = failedHere ? `Try ${u.available} again\u2026` : `Update to ${u.available ?? ''}`;
-        $('updates-retry-note').textContent = failedHere ? `It did not start here before. If it fails again, ${u.version} is put back.` : '';
+        const onlyFetch = failedHere && u.history.filter((h) => h.action === 'update' && h.to === u.available && h.result !== 'done').every((h) => h.fetch === true);
+        $('updates-retry-note').textContent = !failedHere ? '' : onlyFetch ? 'It could not be downloaded before; it is tried again by itself.' : `It did not start here before. If it fails again, ${u.version} is put back.`;
         $('updates-retry-note').hidden = !failedHere;
         $('updates-retry-yes').hidden = true; $('updates-retry-no').hidden = true; apply.hidden = false;
         /* The last thing that went wrong, said once at the top, in words: a version put
@@ -4689,7 +9151,7 @@
         const backFailed = /did not come back either/.test(last?.why ?? '');
         const news = !running && last && last.result !== 'done' ? (last.result === 'rolled-back' ? (backFailed ? `${last.to} did not start on this server, and putting ${last.from} back did not work either: ${last.why}` : `${last.to} did not start on this server, so ${last.from} was put back. ${last.from} runs normally.`) : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed: ${last.why ?? ''}`)
             : !running && u.refused && (!last || u.refused.at > last.at) && !/is not newer than/.test(u.refused.why ?? '') ? `Not done: ${u.refused.why}` : '';
-        $('updates-news').textContent = news.trim(); $('updates-news').hidden = !news;
+        $('updates-news').textContent = news.trim(); $('updates-news').hidden = !news; $('updates-news').dataset.tone = news ? 'warn' : 'ok';
         if (![$('updates-mode'), $('updates-from'), $('updates-to'), $('updates-channel')].includes(document.activeElement)) {
             $('updates-mode').value = u.mode; $('updates-channel').value = u.channel;
             [$('updates-from').value, $('updates-to').value] = u.window.split('-');
@@ -4736,7 +9198,7 @@
         await paintUpdates();
         /* The answer to the click, said next to it. */
         const u = lastUpdates;
-        if (!failed && u && !u.checkError) { $('updates-news').textContent = u.available ? `${u.available} is out.` : `No new version: ${u.version} is the latest.`; $('updates-news').hidden = false; }
+        if (!failed && u && !u.checkError) { $('updates-news').textContent = u.available ? `${u.available} is out.` : `No new version: ${u.version} is the latest.`; $('updates-news').hidden = false; $('updates-news').dataset.tone = u.available ? 'warn' : 'ok'; }
     });
     async function applyUpdate() {
         updatesError();
@@ -4786,13 +9248,27 @@
     const aboveWords = (aboveMb, reserveMb) => (aboveMb >= 0 ? `${GB(aboveMb)} above the ${GB(reserveMb)} reserve` : `${GB(-aboveMb)} into the ${GB(reserveMb)} reserve: new machines are refused`);
     function parts(dl, rows) {
         dl.replaceChildren();
-        for (const [label, value, sub] of rows) {
+        for (const [label, value, sub, slot] of rows) {
             if (value === null || value === undefined) continue;
             const dt = document.createElement('dt'); dt.textContent = label; if (sub) dt.className = 'sub';
+            if (slot !== undefined) dt.prepend(KIT.ShareKey(slot));
             const dd = document.createElement('dd'); dd.textContent = typeof value === 'number' ? GB(value) : value; dd.className = [sub ? 'sub' : '', typeof value === 'number' ? '' : 'words'].filter(Boolean).join(' ');
             dl.append(dt, dd);
         }
     }
+    /* WHO TAKES IT, AT A GLANCE (06-11): a small donut by machine beside each list, the list its legend.
+       A machine keeps its colour on both bars while the page lives. */
+    const shareSlots = new Map();
+    const shareWords = () => ({ others: uiSaid('set-share-others', 'Others'), rest: uiSaid('set-share-rest', 'System and others'), free: uiSaid('set-share-free', 'Free') });
+    const machineTitle = (name) => conversations.find((x) => x.name === name)?.title || name;
+    /* The slices, and each machine's slot for its row (a machine folded into "Others" takes its colour). */
+    function shareOf(machines, restMb, freeMb, rest) {
+        const slices = KIT.shareSlices(machines, { restMb, freeMb, slots: shareSlots, words: { ...shareWords(), ...(rest ? { rest } : {}) } });
+        const slot = new Map(slices.flatMap((x) => (x.keys ? x.keys.map((k) => [k, 0]) : [[x.key, x.slot]])));
+        return { slices, slot };
+    }
+    /* The donut, its middle the main figure: what is used, of how much. */
+    const shareDonut = (slices, label, usedMb, totalMb) => KIT.ShareDonut({ slices, label, fmt: GB, center: { top: uiSaid('set-share-used', 'Used'), main: GB(usedMb), sub: uiSaid('set-share-of', 'of {total}', { total: GB(totalMb) }) } });
     const TITLES = { machines: "Disk of the machines", data: "Disk of this server's data", folders: 'Disk of the shared folders' };
     /* One block per disk of the server, with what it holds. */
     function paintDisks(r) {
@@ -4817,6 +9293,7 @@
             note.textContent = machines ? aboveWords(d.freeMb - r.reserve.diskMb, r.reserve.diskMb) : 'No reserve here: the machines are not on this disk.';
             const dl = document.createElement('dl'); dl.className = 'server-parts';
             const rows = [];
+            let share = null;
             if (u) {
                 if (d.holds.includes('data')) rows.push(["This server's data", c.dataMb]);
                 if (d.holds.includes('folders')) {
@@ -4824,7 +9301,9 @@
                     rows.push(['Shared folders', sum(shared)], ...shared);
                 }
                 if (machines) {
-                    const each = [...m.each.slice(0, 8).map((x) => [x.name, x.mb, true]), ...(m.each.length > 8 ? [[`${m.each.length - 8} more`, m.each.slice(8).reduce((a, x) => a + x.mb, 0), true]] : []), ...(m.shelfMb ? [['ready-made machine', m.shelfMb, true]] : []), ['images', m.imagesMb, true]];
+                    const rest = Math.max(0, d.sizeMb - d.freeMb - m.each.reduce((a, x) => a + x.mb, 0));
+                    share = shareOf(m.each.map((x) => ({ key: x.name, label: machineTitle(x.name), mb: x.mb })), rest, d.freeMb, uiSaid('set-share-else', 'Everything else'));
+                    const each = [...m.each.slice(0, 8).map((x) => [machineTitle(x.name), x.mb, true, share.slot.get(x.name)]), ...(m.each.length > 8 ? [[`${m.each.length - 8} more`, m.each.slice(8).reduce((a, x) => a + x.mb, 0), true]] : []), ...(m.shelfMb ? [['ready-made machine', m.shelfMb, true]] : []), ['images', m.imagesMb, true]];
                     rows.push(['Machines', sum(each)], ...each);
                     if (m.othersMb) rows.push(['Other machines', m.othersMb]);
                 }
@@ -4836,7 +9315,10 @@
                 if (rest > 50) rows.push(['The system and other programs', rest]);
             } else rows.push(['What takes it', r.measuring ? 'measuring...' : 'not measured yet']);
             parts(dl, rows);
-            block.append(head, bar, note, dl);
+            const row = document.createElement('div'); row.className = 'share-row';
+            if (share?.slices.some((x) => x.key !== 'free')) row.append(shareDonut(share.slices, uiSaid('set-share-disk', 'Disk by machine'), d.sizeMb - d.freeMb, d.sizeMb));
+            row.append(dl);
+            block.append(head, bar, note, row);
             box.append(block);
         }
     }
@@ -4844,6 +9326,7 @@
        what can be done -- move the machines to it, mount it, prepare (erase) it -- or why not. */
     async function paintMoveMachines() {
         const size = (mb) => (mb >= 1024 * 1024 ? `${(mb / 1024 / 1024).toFixed(1)} TB` : GB(mb));
+        listLoading($('move-machines-rows'), 'move-machines', 2);
         const [p, m] = await Promise.all([fetch(`${API}/machines/disks`).then((r) => (r.ok ? r.json() : null)).catch(() => null), fetch(`${API}/machines/moving`).then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
         const old = await fetch(`${API}/machines/places`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const rows = $('move-machines-rows'); rows.replaceChildren();
@@ -4931,7 +9414,7 @@
         }
         if (!p.disks.some((d) => !d.system)) rows.append(el('p', 'hint', 'No other disk: plug one in (or add one to this server), then open this again.'));
     }
-    $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines(); });
+    $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines().finally(() => KIT.loading($('move-machines-rows'), false, 'move-machines')); });
     /* NETWORK: this server's Wi-Fi (server/wifi.mjs). The networks it sees, the one it is on, another
        joined with its password, one it keeps forgotten. A join only STARTS a switch: the host goes back
        to the network before by itself when the new one does not work within a minute -- this page may
@@ -5137,6 +9620,7 @@
     let eventsShown = []; let eventsAsk = 0;
     async function paintEvents({ more = false } = {}) {
         const ask = ++eventsAsk;
+        if (!more) listLoading($('events-list'), 'events', 6);
         const before = more && eventsShown.length ? eventsShown.at(-1).at : '';
         const q = new URLSearchParams({ kind: $('events-kind').value, q: $('events-q').value.trim(), limit: '100', ...(before ? { before } : {}) });
         const got = await fetch(`${API}/events?${q}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -5161,10 +9645,49 @@
             if (e.who && !e.text.includes(e.who)) li.append(el('span', 'event-who', e.who));
             list.append(li);
         }
+        KIT.loading(list, false, 'events');
         $('events-said').textContent = eventsShown.length ? '' : 'Nothing yet.';
         $('events-more').hidden = got.length < 100;
     }
     $('settings-events-top').addEventListener('toggle', () => { if ($('settings-events-top').open) void paintEvents(); });
+    /* JOBS (jobs.mjs): the day's, under way first, as in the badge's list; a line opened reads its log
+       (GET /api/jobs/log), kept open when the list is read again -- every 5 s while one is under way. */
+    let jobsTimer; const jobsOpen = new Set();
+    const jobClock = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    async function paintJobLog(box, id) {
+        const got = await fetch(`${API}/jobs/log?id=${encodeURIComponent(id)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const list = el('ol', 'job-log');
+        for (const line of got?.log ?? []) { const li = el('li'); const when = el('time', '', jobClock(line.at)); when.dateTime = line.at; li.append(when, el('span', '', line.text)); list.append(li); }
+        if (!list.children.length) list.append(el('li', 'hint', got ? uiSaid('set-jobs-nolog', 'Nothing logged') : uiSaid('set-jobs-unread', 'Cannot be read just now')));
+        box.querySelector('.job-log')?.remove(); box.append(list);
+    }
+    async function paintJobsChapter() {
+        clearTimeout(jobsTimer);
+        if (!$('settings-jobs-top').open) return;
+        listLoading($('jobs-list'), 'jobs', 2);
+        const got = await fetch(`${API}/jobs`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!got) { $('jobs-said').textContent = uiSaid('set-jobs-unread', 'Cannot be read just now'); return; }
+        const line = (j, result) => {
+            const box = el('details', 'job-line'); box.dataset.result = result;
+            const sum = el('summary');
+            sum.append(el('span', '', result === 'running' ? '⟳' : result === 'done' ? '✓' : '✗'), el('span', '', j.what),
+                el('small', '', result === 'running' ? (j.step || uiSaid('set-jobs-starting', 'Starting')) : [j.why, j.endedAt ? jobClock(j.endedAt) : ''].filter(Boolean).join(' · ')));
+            box.append(sum);
+            /* Clavarium's own updates have no log here: their story is in Updates. */
+            if (!j.id) { sum.addEventListener('click', (event) => event.preventDefault()); return box; }
+            box.dataset.job = j.id;
+            box.addEventListener('toggle', () => { if (box.open) { jobsOpen.add(j.id); void paintJobLog(box, j.id); } else jobsOpen.delete(j.id); });
+            if (jobsOpen.has(j.id)) box.open = true;
+            return box;
+        };
+        const parts = [];
+        if (got.running.length) parts.push(el('h3', '', uiSaid('set-jobs-running', 'Under way')), ...got.running.map((j) => line(j, 'running')));
+        if (got.done.length) parts.push(el('h3', '', uiSaid('set-jobs-today', 'Today')), ...got.done.map((j) => line(j, j.result === 'done' ? 'done' : 'failed')));
+        $('jobs-list').replaceChildren(...parts); KIT.loading($('jobs-list'), false, 'jobs');
+        $('jobs-said').textContent = parts.length ? '' : uiSaid('set-jobs-none', 'Nothing today');
+        if (got.running.length) jobsTimer = setTimeout(() => { void paintJobsChapter(); }, 5000);
+    }
+    $('settings-jobs-top').addEventListener('toggle', () => { void paintJobsChapter(); });
     $('events-kind').addEventListener('change', () => { void paintEvents(); });
     let eventsTyping;
     $('events-q').addEventListener('input', () => { clearTimeout(eventsTyping); eventsTyping = setTimeout(() => { void paintEvents(); }, 250); });
@@ -5173,19 +9696,88 @@
         const text = eventsShown.map((e) => `${e.at}\t${e.kind}\t${e.conversation ?? ''}\t${e.text}${e.who ? `\t${e.who}` : ''}`).join('\n');
         try { await navigator.clipboard.writeText(text); $('events-said').textContent = `Copied: ${eventsShown.length} lines.`; } catch { $('events-said').textContent = 'The clipboard is not available here.'; }
     });
+    /* LOAD: what this server asked of the host, by 5-minute window, the busiest commands first, and its own
+       event loop (server/vm.mjs HostTally; GET /api/server/load) -- when the journal is too big to read. */
+    let loadShown = null; let loadTimer;
+    const loadClock = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const loadSec = (ms) => (ms >= 10_000 ? Math.round(ms / 1000) : Math.round(ms / 100) / 10);
+    const loadKind = (k) => `${k.kind} ${k.count}× ${loadSec(k.ms)} s (max ${loadSec(k.maxMs)} s)`;
+    const loadHead = (w) => [`${loadClock(w.from)}–${w.open ? uiSaid('set-load-open', 'now') : loadClock(w.to)}`,
+        uiSaid('set-load-line', '{n} commands · {s} s', { n: w.commands, s: loadSec(w.ms) }),
+        w.loop ? uiSaid('set-load-loop', 'loop {p50}/{p99} ms', { p50: w.loop.p50, p99: w.loop.p99 }) : '',
+        w.loop?.cpuMs !== undefined && w.to > w.from ? uiSaid('set-load-cpu', 'CPU {p} %', { p: Math.round((100 * w.loop.cpuMs) / (w.to - w.from)) }) : ''].filter(Boolean).join(' · ');
+    async function paintLoad() {
+        clearTimeout(loadTimer);
+        if (!$('settings-load-top').open) return;
+        const got = await fetch(`${API}/server/load`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!got) { $('load-said').textContent = uiSaid('set-load-unread', 'Unreadable for now'); return; }
+        loadShown = got;
+        const rows = (got.windows ?? []).map((w) => {
+            const row = el('div', 'load-row');
+            row.append(el('span', '', loadHead(w)));
+            if (w.kinds?.length) row.append(el('span', 'load-kinds', w.kinds.slice(0, 3).map(loadKind).join(' · ')));
+            return row;
+        });
+        $('load-list').replaceChildren(...rows);
+        /* The measures it took by itself, the newest first: when, why, the functions that held it most. */
+        const auto = (got.profiles ?? []).map((p) => {
+            const row = el('div', 'load-row');
+            row.append(el('span', '', `${uiSaid('set-load-auto', 'Measured by itself at {at}', { at: `${new Date(p.at).toLocaleDateString([], { day: 'numeric', month: 'short' })} ${loadClock(p.at)}` })} · ${p.why}`));
+            row.append(el('span', 'load-kinds', (p.self ?? []).slice(0, 3).map((f) => `${f.fn} ${f.ms} ms`).join(' · ')));
+            return row;
+        });
+        $('load-auto').replaceChildren(...auto); $('load-auto').hidden = !auto.length;
+        const any = (got.windows ?? []).some((w) => w.commands);
+        $('load-said').textContent = any ? '' : uiSaid('set-load-none', 'Nothing counted yet');
+        $('load-copy').hidden = !rows.length;
+        loadTimer = setTimeout(() => { void paintLoad(); }, 30_000);
+    }
+    $('settings-load-top').addEventListener('toggle', () => { void paintLoad(); });
+    $('load-copy').addEventListener('click', async () => {
+        if (!loadShown) return;
+        /* All of it, as text: each window, then every kind it counted. */
+        const line = (f) => `  ${f.ms} ms  ${f.fn}  ${f.at}`;
+        const autoText = (loadShown.profiles ?? []).map((p) => [`auto ${p.at} · ${p.why} · cpu ${p.cpuMs} ms · idle ${p.idleMs} · gc ${p.gcMs}`, 'self:', ...(p.self ?? []).map(line), 'with what they call:', ...(p.total ?? []).map(line), ''].join('\n'));
+        const text = [...($('load-profile-out').hidden ? [] : [$('load-profile-out').textContent, '']), ...autoText, ...(loadShown.windows ?? []).map((w) => [loadHead(w), ...(w.kinds ?? []).map((k) => `  ${loadKind(k)}`),
+            ...(w.beats && (w.beats.read || w.beats.fallback) ? [`  beat read ${w.beats.read}×, fallback ${w.beats.fallback}×`] : []),
+            ...(w.loop ? [`  loop max ${w.loop.max} ms`] : [])].join('\n'))].join('\n');
+        try { await navigator.clipboard.writeText(text); $('load-said').textContent = uiSaid('set-load-copied', 'Copied'); } catch { $('load-said').textContent = 'The clipboard is not available here.'; }
+    });
+    /* WHAT HOLDS THE SERVER: 10 s of its own profiler, the functions that took the most time, as text
+       (server/profile.mjs) -- copied with the windows. */
+    $('load-profile').addEventListener('click', async () => {
+        const out = $('load-profile-out'); $('load-profile').disabled = true;
+        $('load-said').textContent = uiSaid('set-load-profiling', 'Measuring…');
+        try {
+            const r = await fetch(`${API}/server/profile`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seconds: 10 }) });
+            const p = await r.json().catch(() => null);
+            if (!r.ok || !p) { $('load-said').textContent = p?.error ?? `Not measured (${r.status}).`; return; }
+            const line = (f) => `  ${f.ms} ms  ${f.fn}  ${f.at}`;
+            out.textContent = [`profile ${p.seconds} s · cpu ${p.cpuMs} ms · sampled ${p.sampledMs} ms · idle ${p.idleMs} · gc ${p.gcMs} · program ${p.programMs}`,
+                'self:', ...p.self.map(line), 'with what they call:', ...p.total.map(line)].join('\n');
+            out.hidden = false; $('load-copy').hidden = false; $('load-said').textContent = '';
+        } catch { $('load-said').textContent = 'Not measured.'; } finally { $('load-profile').disabled = false; }
+    });
     /* WHAT THE SERVER'S PROGRAMS SAID: one source over a span, to read, copy whole or keep as a file. */
     let logsShown = null;
     $('logs-show').addEventListener('click', async () => {
         const source = $('logs-source').value; const span = $('logs-span').value;
         $('logs-said').textContent = 'Reading...'; $('logs-show').disabled = true;
         try {
-            const r = await fetch(`${API}/server/logs?source=${encodeURIComponent(source)}&span=${encodeURIComponent(span)}`);
-            const body = await r.json().catch(() => ({}));
+            /* A big journal takes a while: the server says "still reading" (202), and is asked again. */
+            let r; let body = {};
+            for (let i = 0; i < 30; i++) {
+                r = await fetch(`${API}/server/logs?source=${encodeURIComponent(source)}&span=${encodeURIComponent(span)}`);
+                body = await r.json().catch(() => ({}));
+                if (r.status === 202 || (r.status === 503 && body.down === true)) { $('logs-said').textContent = `Reading... (a big journal: ${(i + 1) * 12} s)`; continue; }
+                break;
+            }
+            if (r.status === 202) throw new Error('The logs take too long to read: try a shorter span.');
             if (!r.ok) throw new Error(body.error ?? `The logs could not be read (${r.status}).`);
             logsShown = body;
             $('logs-text').textContent = body.text || '';
             $('logs-text').hidden = !body.text; $('logs-acts').hidden = !body.text;
-            $('logs-said').textContent = body.lines ? `${body.lines} line${body.lines > 1 ? 's' : ''}${body.cut ? ' (the newest only: there were more)' : ''}.` : 'Nothing was said over that span.';
+            $('logs-said').textContent = `${body.lines ? `${body.lines} line${body.lines > 1 ? 's' : ''}${body.cut ? ' (the newest only: there were more)' : ''}.` : 'Nothing was said over that span.'}${body.note ? ` ${body.note}.` : ''}`;
             /* The newest at the bottom, in sight. */
             $('logs-text').scrollTop = $('logs-text').scrollHeight;
         } catch (error) { $('logs-said').textContent = error.message; }
@@ -5209,17 +9801,20 @@
         document.body.append(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
     });
-    /* THIS SERVER STARTED AGAIN: asked twice (the second says what it does). */
-    $('server-restart').addEventListener('click', () => {
-        const go = $('server-restart');
-        if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = 'Yes: restart this server now'; return; }
-        go.disabled = true;
-        void post(`${API}/server/restart`, {}).then(() => {
-            $('server-restart-said').textContent = 'Restarting: this page comes back by itself.';
-            /* The maintenance page waits for it (it answers a moment more before it stops), then comes back here. */
-            location.replace(`/maintenance.html?${new URLSearchParams({ kind: 'restart', back: location.pathname + location.search })}`);
-        }).catch((error) => { $('server-restart-said').textContent = error.message; go.disabled = false; delete go.dataset.sure; go.textContent = 'Restart this server...'; });
-    });
+    /* CLAVARIUM, OR THE WHOLE SERVER, STARTED AGAIN: asked twice (the second says what it does).
+       Clavarium: its program only, machines go on. The server (04-11): every machine stops with it. */
+    for (const [id, path, kind, sure, label] of [['server-restart', 'restart', 'restart', 'Yes: restart Clavarium now', 'Restart Clavarium...'], ['server-reboot', 'reboot', 'reboot', 'Yes: stop every machine and restart the server', 'Restart the server...']]) {
+        $(id).addEventListener('click', () => {
+            const go = $(id);
+            if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = sure; return; }
+            go.disabled = true;
+            void post(`${API}/server/${path}`, {}).then(() => {
+                $(`${id}-said`).textContent = 'Restarting: this page comes back by itself.';
+                /* The maintenance page waits for it (it answers a moment more before it stops), then comes back here. */
+                location.replace(`/maintenance.html?${new URLSearchParams({ kind, back: location.pathname + location.search })}`);
+            }).catch((error) => { $(`${id}-said`).textContent = error.message; go.disabled = false; delete go.dataset.sure; go.textContent = label; });
+        });
+    }
     /* THE CURVES (server/history.mjs): memory, CPU and disk over time, one small chart each, one
        line each on one scale (0 to 100 %); the reserve as a dotted level; a dot where a program
        was stopped for lack of memory. Hovered or touched: the value and the time under it. */
@@ -5259,7 +9854,25 @@
         const foot = el('div', 'curve-foot'); foot.append(el('span', '', curveTime(r.from, r.span)), el('span', '', 'now'));
         box.append(head, plot, foot);
         if (Number.isFinite(level)) box.append(el('small', 'hint curve-legend', '..... the reserve: what must stay free'));
+        /* Said, not only on hover (a tablet has none): what a red dot is, and how many. */
+        if (r.marks?.length) box.append(el('small', 'hint curve-legend curve-legend-oom', `● ${r.marks.length === 1 ? 'a program was' : `${r.marks.length} times a program was`} stopped for lack of memory`));
         return box;
+    }
+    /* Its three curves while they are read (14-11): their names, « … », a bone where each line goes -- the size
+       they will have; those of another machine are never left in sight meanwhile. The server's say its reserve. */
+    function curvesLoading(box, of = box.dataset.of) {
+        if (DEVICE || !of || box.dataset.drawn === of) return;
+        box.dataset.drawn = of;
+        box.querySelector('.curves-row').replaceChildren(...CURVES.map(([key, label]) => {
+            const f = el('figure', 'curve'); f.dataset.measure = key; f.dataset.loading = '';
+            const head = el('figcaption', 'curve-head'); head.append(el('b', '', label), el('span', 'curve-now', '…'), el('span', 'curve-max', ''));
+            const plot = el('div', 'curve-plot'); plot.append(KIT.Bone());
+            const foot = el('div', 'curve-foot'); foot.append(el('span', '', '\u00a0'));
+            f.append(head, plot, foot);
+            if (of === 'server' && key !== 'cpu') f.append(el('small', 'hint curve-legend', '\u00a0'));
+            return f;
+        }));
+        box.hidden = false; KIT.loading(box);
     }
     const curvesAt = new WeakMap();
     async function paintCurves(box, { force = false } = {}) {
@@ -5268,10 +9881,12 @@
         const was = curvesAt.get(box);
         if (!force && was && was.of === of && was.span === span && Date.now() - was.at < 30_000) return;
         curvesAt.set(box, { of, span, at: Date.now() });
+        curvesLoading(box, of);
         const r = await fetch(`${API}/history?of=${encodeURIComponent(of)}&span=${span}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
         if (box.dataset.of !== of) return;
-        box.hidden = !r; if (!r) return;
+        box.hidden = !r; if (!r) { delete box.dataset.drawn; curvesAt.delete(box); return; }
         box.querySelector('.curves-row').replaceChildren(...CURVES.map(([key, label]) => drawCurve(r, key, label)));
+        KIT.loading(box, false);
     }
     for (const box of document.querySelectorAll('.curves')) {
         box.querySelector('.curves-span').addEventListener('click', (event) => {
@@ -5283,11 +9898,286 @@
     }
     /* Kept current while in sight: a new look a minute. */
     setInterval(() => { for (const box of document.querySelectorAll('.curves')) if (box.offsetParent !== null) void paintCurves(box, { force: true }); }, 60_000);
+    /* SETTINGS, USAGE (server/history.mjs together(); GET /api/history/all): who takes the memory, the CPU
+       and the disk -- each machine and this server itself, in GB and cores, now (three tiles) and over time
+       (one stacked chart), then ranked. One colour per conversation, given by the order of the names: a
+       conversation keeps its colour whatever its rank, and from one span or measure to the next. */
+    const USAGE_WORD = { memory: 'Memory', cpu: 'CPU', disk: 'Disk' };
+    const USAGE_SPAN = { '1h': '1 h', '24h': '24 h', '7d': '7 days' };
+    const usage = { r: null, measure: 'memory', span: '24h', focus: null };
+    const uEsc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    const uKey = (m) => (m === 'cpu' ? 'cores' : `${m}Gb`);
+    const uFix = (v, d) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d);
+    const uFmt = (m, v) => (m === 'cpu' ? `${uFix(v, 1)} ${uFix(v, 1) === '1.0' ? 'core' : 'cores'}` : `${uFix(v, m === 'disk' && v >= 10 ? 0 : 1)} GB`);
+    const uAlloc = (m, v) => (m === 'cpu' ? `${v} ${v === 1 ? 'core' : 'cores'}` : `${uFix(v, Number.isInteger(v) ? 0 : 1)} GB`);
+    const uAgo = (ms) => { const m = Math.round(ms / 60_000); return m < 1 ? 'just now' : m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`; };
+    const uWhen = (t) => new Date(t).toLocaleString([], usage.span === '7d' ? { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+    /* Six colours, then the same six hatched; past twelve, the rest is one "others" (never a colour reused silently). */
+    const uFill = (x) => (x.hatch ? `repeating-linear-gradient(135deg, var(--${x.c}) 0 3px, transparent 3px 5px)` : `var(--${x.c})`);
+    function usageWho(r) {
+        const all = [...r.machines].sort((a, b) => a.name.localeCompare(b.name));
+        const many = all.length > 12; const shown = many ? all.slice(0, 11) : all;
+        const who = shown.map((x, i) => ({ ...x, key: x.name, c: `s${(i % 6) + 1}`, hatch: i >= 6 }));
+        if (many) {
+            const rest = all.slice(11);
+            const sum = (m) => r.t.map((_, i) => (rest.some((x) => x[m][i] !== null) ? rest.reduce((a, x) => a + (x[m][i] ?? 0), 0) : null));
+            const alloc = (k) => rest.reduce((a, x) => a + (x.alloc[k] ?? 0), 0);
+            who.push({ name: `${rest.length} others`, key: '__others', c: 's0', hatch: true, asleep: rest.every((x) => x.asleep), since: null, alloc: { memoryGb: alloc('memoryGb'), cores: alloc('cores'), diskGb: alloc('diskGb') }, memory: sum('memory'), cpu: sum('cpu'), disk: sum('disk'), marks: rest.flatMap((x) => x.marks) });
+        }
+        return who;
+    }
+    const uAsleep = (x, m) => x.asleep && m !== 'disk';
+    const uLast = (r, m) => { for (let i = r.t.length - 1; i >= 0; i -= 1) if (r.server[m][i] !== null) return i; return -1; };
+    const uCap = (r, m) => r.capacity[uKey(m)] ?? Math.max(1, ...r.server[m].filter((v) => v !== null));
+    function paintUsageTiles(r, who) {
+        const box = $('usage-tiles'); box.replaceChildren();
+        for (const m of ['memory', 'cpu', 'disk']) {
+            const i = uLast(r, m); const cap = uCap(r, m);
+            const parts = who.map((x) => ({ x, v: i < 0 ? 0 : x[m][i] ?? 0 }));
+            const itself = i < 0 ? 0 : r.itself[m][i] ?? 0;
+            const used = i < 0 ? 0 : r.server[m][i];
+            const top = [...parts].sort((a, b) => b.v - a.v)[0];
+            const b = el('button', 'u-tile'); b.type = 'button'; b.setAttribute('aria-pressed', String(usage.measure === m));
+            const seg = (name, v, fill, faded) => `<span title="${uEsc(name)} · ${uFmt(m, v)}" style="width:${(v / cap) * 100}%;background:${fill}${faded ? ';opacity:.25' : ''}"></span>`;
+            b.innerHTML = `<div class="u-tile-head"><span class="u-tile-what">${USAGE_WORD[m]}</span><span class="u-tile-pct u-num">${i < 0 ? '' : `${Math.round((used / cap) * 100)} %`}</span></div>
+                <div class="u-tile-big u-num">${i < 0 ? '—' : uFmt(m, used)} <small>of ${uAlloc(m, cap)}</small></div>
+                <div class="u-stack" aria-hidden="true">${parts.filter((p) => p.v > 0).map((p) => seg(p.x.name, p.v, uFill(p.x), usage.focus && usage.focus !== p.x.key)).join('')}${itself > 0 ? seg('This server itself', itself, 'var(--s0)', Boolean(usage.focus)) : ''}</div>
+                <div class="u-tile-foot"><span>Free ${i < 0 ? '—' : uFmt(m, Math.max(0, cap - used))}</span><span>${top?.v > 0 ? `Most: ${uEsc(top.x.name)}` : ''}</span></div>`;
+            b.addEventListener('click', () => { usage.measure = m; paintUsageAll(); });
+            box.append(b);
+        }
+    }
+    function paintUsageLegend(who) {
+        $('usage-legend').replaceChildren(...who.map((x) => {
+            const b = el('button', `u-chip${x.asleep ? ' asleep' : ''}`); b.type = 'button'; b.setAttribute('aria-pressed', String(usage.focus === x.key));
+            const sw = el('i'); sw.style.background = uFill(x);
+            b.append(sw, document.createTextNode(x.name)); if (x.asleep) b.append(document.createTextNode(' '), el('span', 'u-z', 'asleep'));
+            b.addEventListener('click', () => usageFocus(x.key));
+            return b;
+        }));
+    }
+    function uNiceStep(max, ticks) { const raw = max / ticks; const p = 10 ** Math.floor(Math.log10(raw)); for (const k of [1, 2, 2.5, 5, 10]) if (k * p >= raw) return k * p; return 10 * p; }
+    let usageGeo = null;
+    function paintUsageChart(r, who) {
+        const svg = $('usage-svg'); svg.replaceChildren(); $('usage-tip').hidden = true;
+        const m = usage.measure; const N = r.t.length;
+        const W = $('usage-plot').clientWidth || 600; usageWidth = W; const phone = W < 560; const H = phone ? 230 : 300;
+        const M = { l: phone ? 34 : 44, r: phone ? 6 : 128, t: 14, b: 24 };
+        svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H);
+        $('usage-chart-title').textContent = `${USAGE_WORD[m]} over time`;
+        $('usage-k-oom').hidden = m !== 'memory';
+        const cap = uCap(r, m);
+        /* The machines in their fixed order, bottom to top; the server itself on top. */
+        const layers = [...who.map((x) => ({ key: x.key, x, v: x[m] })), { key: '__sys', x: { c: 's0', name: 'This server itself' }, v: r.itself[m] }];
+        const tops = []; let acc = new Array(N).fill(0);
+        for (const L of layers) { const lo = acc; const hi = lo.map((a, i) => a + (L.v[i] ?? 0)); tops.push({ ...L, lo, hi }); acc = hi; }
+        const ymax = Math.max(cap, ...acc) * 1.06;
+        const step = uNiceStep(ymax, phone ? 4 : 5);
+        const t0 = r.from; const t1 = r.to; const pw = W - M.l - M.r;
+        const x = (t) => M.l + ((t - t0) / Math.max(1, t1 - t0)) * pw;
+        const y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
+        for (let v = 0; v <= ymax; v += step) { svg.append(svgEl('line', { class: v === 0 ? 'u-base' : 'u-gridline', x1: M.l, x2: W - M.r, y1: y(v), y2: y(v) })); const tx = svgEl('text', { x: M.l - 6, y: y(v) + 4, 'text-anchor': 'end' }); tx.textContent = String(Math.round(v * 10) / 10); svg.append(tx); }
+        const unit = svgEl('text', { x: M.l - 6, y: M.t - 4, 'text-anchor': 'end' }); unit.textContent = m === 'cpu' ? 'cores' : 'GB'; svg.append(unit);
+        /* Time ticks: midnights over a week, round hours (or ten minutes) else. */
+        const tickStep = usage.span === '7d' ? 24 * 3600_000 : usage.span === '1h' ? (phone ? 15 : 10) * 60_000 : (phone ? 6 : 3) * 3600_000;
+        const first = new Date(t0); if (usage.span === '7d') first.setHours(24, 0, 0, 0); else first.setTime(Math.ceil(t0 / tickStep) * tickStep);
+        for (let t = first.getTime(); t <= t1; t += tickStep) {
+            if (x(t) < M.l + 14 || x(t) > W - M.r - 14) continue;
+            const e = svgEl('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }); e.textContent = new Date(t).toLocaleString([], usage.span === '7d' ? { weekday: 'short', day: 'numeric' } : { hour: '2-digit', minute: '2-digit' }); svg.append(e);
+        }
+        /* Hatched fills, for the seventh conversation on. */
+        const defs = svgEl('defs', {}); svg.append(defs);
+        const fillOf = (L) => { if (!L.x.hatch) return `fill:var(--${L.x.c})`; const id = `u-h-${L.x.c}`; if (!defs.querySelector(`#${id}`)) { const p = svgEl('pattern', { id, width: 5, height: 5, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }); p.append(svgEl('rect', { width: 3, height: 5, style: `fill:var(--${L.x.c})` })); defs.append(p); } return `fill:url(#${id})`; };
+        /* A gap in the looks (the server was down) is a gap in the chart: one shape per run of looks. */
+        const gap = 3 * (usage.span === '7d' ? 15 * 60_000 : 60_000);
+        const runs = []; let run = null;
+        r.t.forEach((t, i) => { if (r.server[m][i] === null) { run = null; return; } if (!run || t - r.t[i - 1] > gap) { run = []; runs.push(run); } run.push(i); });
+        const g = svgEl('g', {}); svg.append(g);
+        for (const L of tops) {
+            const faded = usage.focus && usage.focus !== L.key; const focused = usage.focus === L.key;
+            for (const ix of runs) {
+                let d = ix.map((i, k) => `${k ? 'L' : 'M'}${x(r.t[i]).toFixed(1)},${y(L.hi[i]).toFixed(1)}`).join('');
+                const top = d;
+                d += [...ix].reverse().map((i) => `L${x(r.t[i]).toFixed(1)},${y(L.lo[i]).toFixed(1)}`).join('');
+                g.append(svgEl('path', { d: `${d}Z`, class: `u-band${faded ? ' u-faded' : ''}`, style: fillOf(L), 'fill-opacity': focused ? 0.95 : L.key === '__sys' ? 0.55 : 0.78 }));
+                if (!faded && L.key !== '__sys') g.append(svgEl('path', { d: top, class: 'u-band-top', style: `stroke:var(--${L.x.c})${L.x.hatch ? ';stroke-dasharray:4 2' : ''}` }));
+            }
+        }
+        svg.append(svgEl('line', { class: 'u-cap', x1: M.l, x2: W - M.r, y1: y(cap), y2: y(cap) }));
+        const capWord = svgEl('text', { x: M.l + 6, y: y(cap) - 6 }); capWord.textContent = `Capacity · ${uAlloc(m, Math.round(cap * 10) / 10)}`; svg.append(capWord);
+        /* Memory full: a red mark on the band of its conversation. */
+        if (m === 'memory') for (const L of tops) for (const at of L.x.marks ?? []) {
+            if (usage.focus && usage.focus !== L.key) continue;
+            const i = r.t.findIndex((t) => t >= at); if (i < 0) continue;
+            svg.append(svgEl('circle', { class: 'u-oom', cx: x(r.t[i]), cy: y(L.hi[i]), r: 5 }));
+            if (!phone) { const end = x(r.t[i]) > W - M.r - 50; const w = svgEl('text', { x: end ? x(r.t[i]) + 4 : x(r.t[i]), y: y(L.hi[i]) - 10, 'text-anchor': end ? 'end' : 'middle', class: 'u-oom-word' }); w.textContent = 'memory full'; svg.append(w); }
+        }
+        /* Names at the right end, for bands thick enough; pushed apart so none overlaps. */
+        const last = runs.at(-1)?.at(-1);
+        if (!phone && last !== undefined) {
+            const words = [];
+            for (const L of tops) { const h = y(L.lo[last]) - y(L.hi[last]); if (L.key === '__sys' || h >= 7) words.push({ L, y: (y(L.lo[last]) + y(L.hi[last])) / 2, text: L.key === '__sys' ? 'server' : L.x.name.length > 18 ? `${L.x.name.slice(0, 17)}…` : L.x.name }); }
+            words.sort((a, b) => b.y - a.y);
+            for (let k = 1; k < words.length; k += 1) if (words[k - 1].y - words[k].y < 14) words[k].y = words[k - 1].y - 14;
+            for (const w of words) { const e = svgEl('text', { x: W - M.r + 8, y: w.y + 4, class: `u-direct${w.L.key === '__sys' || (usage.focus && usage.focus !== w.L.key) ? ' dim' : ''}` }); e.textContent = w.text; svg.append(e); }
+        }
+        const cross = svgEl('line', { class: 'u-cross', y1: M.t, y2: H - M.b, visibility: 'hidden' }); svg.append(cross);
+        const hit = svgEl('rect', { x: M.l, y: 0, width: Math.max(0, pw), height: H, fill: 'transparent' }); svg.append(hit);
+        usageGeo = { x, y, W, H, M, tops, cross, ymax, pw, t0, t1 };
+        svg.setAttribute('aria-label', `${USAGE_WORD[m]} per conversation, ${USAGE_SPAN[usage.span]}. The table below gives the same figures.`);
+        hit.addEventListener('pointermove', usageHover); hit.addEventListener('pointerdown', usageHover);
+        hit.addEventListener('pointerleave', () => { $('usage-tip').hidden = true; cross.setAttribute('visibility', 'hidden'); });
+        hit.addEventListener('click', (event) => { const p = usagePick(event); if (!p) return; const L = usageGeo.tops.find((q) => q.key !== '__sys' && p.v >= q.lo[p.i] && p.v <= q.hi[p.i] && q.hi[p.i] > q.lo[p.i]); usageFocus(L ? L.key : null); });
+    }
+    function usagePick(event) {
+        const r = usage.r; if (!r?.t.length || !usageGeo) return null;
+        const at = $('usage-svg').getBoundingClientRect(); const px = event.clientX - at.left; const py = event.clientY - at.top;
+        const { M, H, ymax, pw, t0, t1 } = usageGeo;
+        const t = t0 + ((px - M.l) / pw) * (t1 - t0);
+        let i = 0; r.t.forEach((u, k) => { if (Math.abs(u - t) < Math.abs(r.t[i] - t)) i = k; });
+        return { i, px, v: ((H - M.b - py) / (H - M.t - M.b)) * ymax };
+    }
+    function usageHover(event) {
+        const p = usagePick(event); if (!p) return;
+        const r = usage.r; const m = usage.measure; const { i, px } = p; const { x, tops, cross, W } = usageGeo;
+        const tip = $('usage-tip');
+        if (r.server[m][i] === null) { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); return; }
+        cross.setAttribute('x1', x(r.t[i])); cross.setAttribute('x2', x(r.t[i])); cross.setAttribute('visibility', 'visible');
+        const rows = [...tops].reverse().map((L) => {
+            const zz = L.key !== '__sys' && L.v[i] === null;
+            return `<div class="u-tip-row${zz ? ' asleep' : ''}${usage.focus === L.key ? ' focus' : ''}"><i class="u-sw" style="background:${L.key === '__sys' ? 'var(--s0)' : uFill(L.x)}"></i><span>${L.key === '__sys' ? 'this server itself' : uEsc(L.x.name)}</span><b>${zz ? 'asleep' : uFmt(m, L.v[i] ?? 0)}</b></div>`;
+        }).join('');
+        const near = usage.span === '7d' ? 15 * 60_000 : 2 * 60_000;
+        const oom = m === 'memory' ? tops.find((L) => (L.x.marks ?? []).some((at) => Math.abs(at - r.t[i]) <= near)) : null;
+        tip.innerHTML = `<div class="u-tip-when">${uWhen(r.t[i])}${usage.span === '7d' ? ' <span class="hint">(peak of 15 min)</span>' : ''}</div>${rows}<div class="u-tip-total"><span>Total</span><b>${uFmt(m, r.server[m][i])} / ${uAlloc(m, Math.round(uCap(r, m) * 10) / 10)}</b></div>${oom ? `<div class="u-tip-oom">▲ ${uEsc(oom.x.name)}: memory full</div>` : ''}`;
+        tip.hidden = false;
+        if (getComputedStyle(tip).position === 'static') return;
+        const tw = tip.offsetWidth;
+        let left = px + 14; if (left + tw > W) left = px - tw - 14; if (left < 0) left = Math.max(0, Math.min(W - tw, px - tw / 2));
+        tip.style.left = `${left}px`;
+    }
+    function usageFacts(r, x, m) {
+        const a = x[m]; const A = x.alloc[uKey(m)] || 1; const pct = a.map((v) => (v === null ? null : (v / A) * 100));
+        const i = uLast(r, m); const now = i < 0 ? null : a[i];
+        let pk = -1; let pi = 0; pct.forEach((v, k) => { if (v !== null && v > pk) { pk = v; pi = k; } });
+        const known = pct.filter((v) => v !== null);
+        const high = known.filter((v) => v >= 95).length;
+        const over80 = known.length ? known.filter((v) => v >= 80).length / known.length : 0;
+        const ooms = m === 'memory' ? (x.marks ?? []).filter((t) => t >= r.from).length : 0;
+        let note = ''; let alert = false;
+        if (uAsleep(x, m)) note = x.since ? `asleep for ${uAgo(r.to - x.since)}` : 'asleep';
+        else if (ooms) { note = `${high ? 'reached 95 % · ' : ''}memory full ${ooms === 1 ? 'once' : `${ooms} times`}`; alert = true; }
+        else if (high) { note = m === 'cpu' ? 'used all its cores' : 'reached 95 %'; alert = m !== 'cpu'; }
+        else if (over80 > 0.2) note = 'often above 80 %';
+        else if (pk >= 0 && pk < 30 && m !== 'disk') note = 'roomy: little used';
+        return { now, nowP: now === null ? null : (now / A) * 100, pk, pkA: pk >= 0 ? a[pi] : 0, pkT: r.t[pi], note, alert, A };
+    }
+    function usageSpark(r, x, m, wide) {
+        const a = x[m]; const lim = x.alloc[uKey(m)] || 1; const W = wide ? 340 : 120; const H = wide ? 34 : 30;
+        const sx = (t) => ((t - r.from) / Math.max(1, r.to - r.from)) * W; const sy = (v) => H - 2 - (Math.min(v, lim) / lim) * (H - 4);
+        let d = ''; let pen = false;
+        a.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${sx(r.t[i]).toFixed(1)},${sy(v).toFixed(1)}`; pen = true; });
+        const marks = m === 'memory' ? (x.marks ?? []).map((at) => { const i = r.t.findIndex((t) => t >= at); return i < 0 || a[i] === null ? '' : `<circle class="u-oom" cx="${sx(r.t[i])}" cy="${sy(a[i])}" r="3.2"/>`; }).join('') : '';
+        const zz = uAsleep(x, m) ? `<line x1="${Math.max(0, sx(x.since ?? r.from))}" x2="${W}" y1="${H - 2}" y2="${H - 2}" stroke="var(--ink2)" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>` : '';
+        return `<svg class="u-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><line class="u-lim" x1="0" x2="${W}" y1="2" y2="2" vector-effect="non-scaling-stroke"/><path d="${d}" fill="none" stroke="var(--${x.c})" stroke-width="1.75"${x.hatch ? ' stroke-dasharray="4 2"' : ''} vector-effect="non-scaling-stroke" stroke-linejoin="round"/>${zz}${marks}</svg>`;
+    }
+    function paintUsageList(r, who) {
+        const m = usage.measure; const span = USAGE_SPAN[usage.span];
+        $('usage-list-title').textContent = `${USAGE_WORD[m]} per conversation`;
+        const rows = who.map((x) => ({ x, f: usageFacts(r, x, m) })).sort((a, b) => uAsleep(a.x, m) - uAsleep(b.x, m) || (b.f.now ?? -1) - (a.f.now ?? -1));
+        const name = (x) => `<span class="u-who"><i class="u-sw" style="background:${uFill(x)}"></i>${uEsc(x.name)}${uAsleep(x, m) ? ' <span class="u-zz">asleep</span>' : ''}</span>`;
+        const quiet = (x, f) => uAsleep(x, m) || f.now === null;
+        $('usage-rank').innerHTML = `<thead><tr><th>Conversation</th><th class="r">Now</th><th class="r">Peak · ${span}</th><th>Over ${span}</th><th class="r">Given</th><th>Note</th></tr></thead><tbody>${
+            rows.map(({ x, f }) => `<tr data-k="${uEsc(x.key)}" class="${uAsleep(x, m) ? 'asleep' : ''}" aria-selected="${usage.focus === x.key}" tabindex="0">
+                <td>${name(x)}</td>
+                <td class="r u-num">${quiet(x, f) ? '—' : `<span class="u-big">${uFmt(m, f.now)}</span><span class="u-sub">${Math.round(f.nowP)} % of given</span>`}</td>
+                <td class="r u-num">${f.pk < 0 ? '—' : `${uFmt(m, f.pkA)}<span class="u-sub">${Math.round(f.pk)} % · ${uAgo(r.to - f.pkT)} ago</span>`}</td>
+                <td>${usageSpark(r, x, m, false)}</td>
+                <td class="r u-num">${uAlloc(m, f.A)}</td>
+                <td><span class="u-note${f.alert ? ' alert' : ''}">${f.note}</span></td></tr>`).join('')}</tbody>`;
+        $('usage-cards').innerHTML = rows.map(({ x, f }) => `<div role="button" tabindex="0" class="u-card${uAsleep(x, m) ? ' asleep' : ''}" data-k="${uEsc(x.key)}" aria-selected="${usage.focus === x.key}">
+                ${name(x)}
+                <span class="u-now u-num">${quiet(x, f) ? '—' : `<span class="u-big">${uFmt(m, f.now)}</span> <span class="hint">${Math.round(f.nowP)} %</span>`}</span>
+                ${usageSpark(r, x, m, true)}
+                <span class="u-facts u-num"><span>Peak ${f.pk < 0 ? '—' : `${uFmt(m, f.pkA)} (${Math.round(f.pk)} %)`}</span><span>Given ${uAlloc(m, f.A)}</span></span>
+                ${f.note ? `<span class="u-note${f.alert ? ' alert' : ''}">${f.note}</span>` : ''}</div>`).join('');
+        for (const row of document.querySelectorAll('#usage-rank tbody tr, #usage-cards .u-card')) {
+            row.addEventListener('click', () => usageFocus(row.dataset.k));
+            row.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); usageFocus(row.dataset.k); } });
+        }
+    }
+    function paintUsageAll() {
+        const r = usage.r; if (!r) return;
+        for (const b of $('usage-measure').children) b.setAttribute('aria-pressed', String(b.dataset.m === usage.measure));
+        for (const b of $('usage-span').children) b.setAttribute('aria-pressed', String(b.dataset.span === usage.span));
+        const who = usageWho(r);
+        paintUsageTiles(r, who); paintUsageLegend(who); paintUsageChart(r, who); paintUsageList(r, who);
+    }
+    /* A second touch on the same one, or on nothing, shows them all again. */
+    const usageFocus = (key) => { usage.focus = usage.focus === key || !key ? null : key; paintUsageAll(); };
+    async function paintUsage() {
+        const span = usage.span;
+        const r = await fetch(`${API}/history/all?span=${span}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        if (span !== usage.span) return;
+        $('usage-none').hidden = Boolean(r?.t?.length);
+        $('usage-none').textContent = r ? 'Nothing measured yet: a look is taken every minute.' : 'Usage cannot be read just now.';
+        for (const id of ['usage-tiles', 'usage-legend']) $(id).hidden = !r?.t?.length;
+        $('usage').querySelector('.u-chart').hidden = !r?.t?.length; $('usage-rank').parentElement.hidden = !r?.t?.length;
+        if (!r?.t?.length) return;
+        usage.r = r;
+        if (usage.focus && !usageWho(r).some((x) => x.key === usage.focus)) usage.focus = null;
+        paintUsageAll();
+    }
+    $('usage-measure').addEventListener('click', (event) => { const b = event.target.closest('button[data-m]'); if (!b) return; usage.measure = b.dataset.m; paintUsageAll(); });
+    $('usage-span').addEventListener('click', (event) => { const b = event.target.closest('button[data-span]'); if (!b) return; usage.span = b.dataset.span; for (const x of $('usage-span').children) x.setAttribute('aria-pressed', String(x === b)); void paintUsage(); });
+    /* Usage (#203) is kept out of sight while it is reworked on real machines (operator, 30-10). */
+    const USAGE_SHOWN = false;
+    $('settings-usage-top').addEventListener('toggle', () => { if ($('settings-usage-top').open) void paintUsage(); });
+    /* Drawn again when its width changes only: a phone's bar of address, folding in a scroll, is a resize too. */
+    let usageResize; let usageWidth = 0;
+    addEventListener('resize', () => { clearTimeout(usageResize); usageResize = setTimeout(() => { const w = $('usage-plot').clientWidth; if (w !== usageWidth && $('settings-usage-top').open && $('usage').offsetParent !== null) paintUsageAll(); }, 80); });
+    /* Kept current while in sight: a new look a minute. */
+    setInterval(() => { if ($('settings-usage-top').open && $('usage').offsetParent !== null) void paintUsage(); }, 60_000);
+    /* RESOURCES WHILE THEY ARE READ (14-11): a disk and the memory, at the size they had the last time on this
+       device, bones in place of their bar, figures, donut and list -- never a figure made up. */
+    const partsBones = (n) => { const b = el('div', 'server-parts-bones'); for (let i = 0; i < n; i += 1) b.append(KIT.Bone({ w: i % 3 === 0 ? '70%' : '55%' })); return b; };
+    /* A list while it is read: a few bones, at the height it had the last time on this device. */
+    function listLoading(box, key, n = 3) {
+        if (box.children.length || box.getAttribute('aria-busy') === 'true') return;
+        const b = el(box.tagName === 'OL' || box.tagName === 'UL' ? 'li' : 'div', 'list-bones');
+        for (let i = 0; i < n; i += 1) b.append(KIT.Bone({ h: '1.4em', w: i % 2 ? '60%' : '80%' }));
+        box.replaceChildren(b); KIT.loading(box, true, key);
+    }
+    function serverLoading() {
+        if (DEVICE) return;
+        curvesLoading($('server-curves'));
+        const disks = $('server-disks');
+        if (!disks.children.length) {
+            const block = el('div', 'server-block'); block.dataset.loading = '';
+            const head = el('div', 'server-head'); head.append(el('b', '', uiSaid('set-disk', 'Disk')), el('span', 'server-figures', '…'));
+            const row = el('div', 'share-row'); row.append(KIT.Bone({ cls: 'share-donut' }), partsBones(5));
+            block.append(head, KIT.Bone({ cls: 'server-meter' }), el('p', 'server-note', '…'), row);
+            disks.replaceChildren(block); KIT.loading(disks, true, 'server-disks');
+        }
+        const mem = $('server-memory');
+        if (mem.hidden && !$('server-memory-figures').textContent) {
+            mem.hidden = false; mem.dataset.loading = '';
+            $('server-memory-figures').textContent = '…'; $('server-memory-note').textContent = '…';
+            $('server-memory-meter').classList.add('kit-bone');
+            $('server-memory-share').replaceChildren(KIT.Bone({ cls: 'share-donut' }));
+            $('server-memory-parts').replaceChildren(partsBones(4));
+            KIT.loading(mem, true, 'server-memory');
+        }
+        /* The reserve's lines, said once read: their room kept meanwhile. */
+        for (const id of ['reserve-now', 'promised-disk', 'promised-memory']) if (!$(id).textContent) { $(id).textContent = '…'; $(id).hidden = false; }
+    }
     async function paintServer() {
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
-        $('settings-server-top').hidden = !r; $('settings-server').hidden = !r;
+        $('settings-server-top').hidden = !r; $('settings-server').hidden = !r; $('settings-usage-top').hidden = !r || !USAGE_SHOWN;
+        void paintSettingsHand(r);
         if (!r) return;
+        if (r.memory) chapterNow('s-resources', uiSaid('set-res-now', 'Memory {m} % · disk {d} %', { m: Math.round(r.memory.usedPercent), d: Math.round((r.disk?.disks?.[0]?.usedPercent) ?? 0) }));
         void paintCurves($('server-curves'));
         /* The two settings of each: a fixed amount and a share; the larger is kept free. */
         const set = r.settings ?? { ...r.reserve, diskPercent: 0, memoryPercent: 0 };
@@ -5307,7 +10197,7 @@
         promised($('promised-memory'), r.promised?.memory, (mb, total) => `Memory given to running machines: ${mb} of ${total}.`);
         $('server-unknown').hidden = r.known;
         $('server-disks').hidden = !r.disk; $('server-memory').hidden = !r.memory;
-        if (r.disk) paintDisks(r);
+        if (r.disk) { paintDisks(r); KIT.loading($('server-disks'), false, 'server-disks'); }
         if (r.memory) {
             const mem = r.memory;
             $('server-memory-figures').textContent = `${GB(mem.freeMb)} free of ${GB(mem.totalMb)}`;
@@ -5315,11 +10205,17 @@
             $('server-memory-state').textContent = 'Short'; $('server-memory-state').hidden = !r.high.memory;
             $('server-memory-note').textContent = aboveWords(mem.freeMb - r.reserve.memoryMb, r.reserve.memoryMb);
             const held = r.machines.reduce((a, x) => a + x.rssMb, 0);
+            const rest = Math.max(0, mem.totalMb - mem.freeMb - held);
+            const named = r.machines.map((x, i) => ({ key: x.name ?? `vm-${i}`, label: x.shelf ? 'ready-made machine (being made)' : x.name ? machineTitle(x.name) : x.shared ? uiSaid('set-mem-shared', 'Shared « {m} »: {who}', { m: x.shared, who: (x.who ?? []).join(', ') }) : 'another machine', mb: x.rssMb, x }));
+            const share = shareOf(named, rest, mem.freeMb);
+            $('server-memory-share').replaceChildren(...(r.machines.length ? [shareDonut(share.slices, uiSaid('set-share-memory', 'Memory by machine'), mem.totalMb - mem.freeMb, mem.totalMb)] : []));
             parts($('server-memory-parts'), [
                 [`Running machines (${r.machines.length})`, held],
-                ...r.machines.map((x) => [x.shelf ? 'ready-made machine (being made)' : (x.name ?? 'another machine'), x.sizeMb ? `uses ${GB(x.rssMb)} · given ${GB(x.sizeMb)}` : `uses ${GB(x.rssMb)}`, true]),
-                ['The system and other programs', Math.max(0, mem.totalMb - mem.freeMb - held)],
+                ...named.map(({ key, label, x }) => [label, x.sizeMb ? `uses ${GB(x.rssMb)} · given ${GB(x.sizeMb)}` : `uses ${GB(x.rssMb)}`, true, share.slot.get(key)]),
+                ['The system and other programs', rest, false, 'rest'],
             ]);
+            delete $('server-memory').dataset.loading; $('server-memory-meter').classList.remove('kit-bone');
+            KIT.loading($('server-memory'), false, 'server-memory');
         }
         /* Still measuring: looked at again in a moment, while Settings is open. */
         if ((r.measuring || !r.usage) && !$('settings').hidden) serverTimer = setTimeout(() => { void paintServer(); }, 4000);
@@ -5335,6 +10231,89 @@
         try { await post(`${API}/server/reserve`, { diskMb, diskPercent, memoryMb, memoryPercent }); $('reserve-saved').textContent = 'Saved.'; } catch (error) { $('reserve-error').textContent = error.message; $('reserve-error').hidden = false; return; }
         await paintServer(); void paintGauge();
     });
+    /* SETTINGS, MACHINES (server/machinelist.mjs): each machine, its state, the memory its qemu holds, since
+       when, and Force stop (confirmed here); the machine manager, and Restart the manager (confirmed: every
+       machine is resumed); what is done when it hangs, and when memory is short. */
+    const ML_STATE = { Running: ['set-ml-running', 'Running', 'ok'], Suspended: ['set-ml-asleep', 'Asleep', 'ok'], Stopped: ['set-ml-stopped', 'Stopped', 'ok'],
+        Starting: ['set-ml-starting', 'Starting', 'warn'], Stopping: ['set-ml-stopping', 'Stopping', 'warn'], Unknown: ['set-ml-unknown', 'Unknown', 'warn'], Gone: ['set-ml-gone', 'Gone', 'bad'] };
+    const sinceSaid = (iso) => {
+        const d = new Date(iso);
+        const today = d.toDateString() === new Date().toDateString();
+        return uiSaid('set-ml-since', 'since {t}', { t: today ? d.toLocaleTimeString([], { timeStyle: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) });
+    };
+    let machinesAsk = null;
+    let machinesTimer;
+    async function paintMachines() {
+        clearTimeout(machinesTimer);
+        if (DEVICE) { $('settings-ch-machines').hidden = true; return; }
+        listLoading($('machines-rows'), 'machines', 2);
+        const r = await fetch(`${API}/server/machines`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        $('settings-ch-machines').hidden = !r;
+        if (!r) return;
+        const running = r.machines.filter((m) => m.state === 'Running').length;
+        chapterNow('s-machines', uiSaid('set-ml-now', '{n} running of {all}', { n: running, all: r.machines.length }));
+        const rows = $('machines-rows'); rows.replaceChildren();
+        $('machines-none').hidden = r.machines.length > 0;
+        for (const m of r.machines) {
+            const row = el('div', 'list-item machine-item'); row.dataset.name = m.name;
+            const [key, en, tone] = ML_STATE[m.state] ?? ['set-ml-unknown', m.state, 'warn'];
+            const what = el('div', 'set-what');
+            what.append(el('b', '', machineTitle(m.name)));
+            const line = el('small', 'status-line'); line.dataset.tone = tone;
+            line.textContent = [m.action ? uiSaid('set-ml-busy', 'Busy') : uiSaid(key, en), m.rssMb > 0 ? GB(m.rssMb) : '', m.since ? sinceSaid(m.since) : ''].filter(Boolean).join(' · ');
+            what.append(line);
+            const acts = el('div', 'set-control');
+            const force = el('button', 'danger', uiSaid('set-m-force', 'Force stop')); force.type = 'button'; force.dataset.act = 'force';
+            force.disabled = m.state === 'Stopped' || m.state === 'Gone';
+            force.addEventListener('click', () => askMachines({ kind: 'force', name: m.name }));
+            acts.append(force);
+            row.append(what, acts);
+            rows.append(row);
+        }
+        KIT.loading(rows, false, 'machines');
+        /* The machine manager: does it answer, since when not, waiting for its owner, the last restart. */
+        const g = r.manager;
+        const ml = $('manager-line');
+        if (g) {
+            ml.dataset.tone = g.reviving ? 'warn' : g.ok ? 'ok' : 'bad';
+            ml.textContent = g.reviving ? uiSaid('set-ml-reviving', 'Restarting…')
+                : g.ok ? [uiSaid('set-ml-answers', 'Answers'), g.last?.at ? uiSaid('set-ml-last', 'restarted {t}', { t: agoSaid(g.last.at) }) : ''].filter(Boolean).join(' · ')
+                : [uiSaid('set-ml-mute', 'Not answering'), g.downSince ? sinceSaid(g.downSince) : '', g.asked ? uiSaid('set-ml-asked', 'waits for you') : ''].filter(Boolean).join(' · ');
+            $('manager-restart').disabled = Boolean(g.reviving);
+            $('manager-restart').classList.toggle('primary', Boolean(g.asked));
+            for (const b of $('manager-mode').children) b.setAttribute('aria-pressed', String(b.dataset.mode === g.mode));
+        }
+        $('manager-row').hidden = !g;
+        for (const b of $('pressure-way').children) b.setAttribute('aria-pressed', String(b.dataset.way === r.pressure));
+        /* While it is in sight and something moves (an action, a restart of the manager): looked at again. */
+        if ($('settings-ch-machines').open && !$('settings').hidden && (g?.reviving || r.machines.some((m) => m.action))) machinesTimer = setTimeout(() => { void paintMachines(); }, 3000);
+    }
+    /* Asked in the page, in one line: what is lost. */
+    function askMachines(ask) {
+        machinesAsk = ask;
+        $('machines-confirm-text').textContent = ask.kind === 'force'
+            ? uiSaid('set-ml-force-q', 'Force stop {name}? Nothing is saved.', { name: machineTitle(ask.name) })
+            : uiSaid('set-ml-revive-q', 'Restart the manager? All machines are resumed.');
+        $('machines-confirm-yes').textContent = ask.kind === 'force' ? uiSaid('set-m-force', 'Force stop') : uiSaid('set-ml-revive-yes', 'Restart');
+        $('machines-confirm').hidden = false;
+        $('machines-confirm-yes').focus();
+    }
+    async function machinesPost(path, body) {
+        $('machines-error').hidden = true;
+        try { await post(`${API}${path}`, body); } catch (error) { $('machines-error').textContent = error.message; $('machines-error').hidden = false; }
+        await paintMachines();
+    }
+    $('machines-confirm-no').addEventListener('click', () => { machinesAsk = null; $('machines-confirm').hidden = true; });
+    $('machines-confirm-yes').addEventListener('click', () => {
+        const ask = machinesAsk; machinesAsk = null; $('machines-confirm').hidden = true;
+        if (!ask) return;
+        if (ask.kind === 'force') void machinesPost(`/server/machines/${encodeURIComponent(ask.name)}/force`, {});
+        else { $('manager-restart').disabled = true; $('manager-line').dataset.tone = 'warn'; $('manager-line').textContent = uiSaid('set-ml-reviving', 'Restarting…'); void machinesPost('/server/vm-manager/restart', { confirm: true }); }
+    });
+    $('manager-restart').addEventListener('click', () => askMachines({ kind: 'revive' }));
+    for (const b of $('manager-mode').children) b.addEventListener('click', () => void machinesPost('/server/vm-manager', { mode: b.dataset.mode }));
+    for (const b of $('pressure-way').children) b.addEventListener('click', () => void machinesPost('/server/pressure', { way: b.dataset.way }));
+    $('settings-ch-machines').addEventListener('toggle', () => { if ($('settings-ch-machines').open) void paintMachines(); });
     /* THE SMALL GAUGE at the bottom of the list: only when disk or memory is
        short. A click opens Settings, at This server. */
     async function paintGauge() {
@@ -5368,6 +10347,7 @@
         g.hidden = false;
     }
     $('server-gauge').addEventListener('click', async () => {
+        foldOnOpen();
         if (place !== 'settings') await openSettings(); else await paintServer();
         const top = openChapter('s-resources');
         top.scrollIntoView({ block: 'start' });
@@ -5440,14 +10420,15 @@
             const made = await post(`${API}/resources`, { name: $('git-name').value.trim(), type: 'git', from, ...(from ? { via } : {}) });
             /* The secrets typed are not kept in the page a moment longer. */
             $('git-new').reset(); viaTouched = false; showVia(); fillKeyChoice(via.key);
-            /* A new repository opens on its card, where it is attached: the next thing to do. */
-            assetOpen = `git:${made.name}`;
+            /* First contact with its host: said in the ending, kept there. */
             if (made.firstSeen) {
                 $('git-said').textContent = `${made.name} was cloned. First contact with ${hostOf(made.from)}: its host key (${made.firstSeen.join(', ')}) was recorded. A different key later will be refused.`;
                 $('git-said').hidden = false;
-            } else assetsAdding = '';
+            }
+            /* A new repository opens on its card, where it is attached: the next thing to do. */
+            await assetMade($('git-box'), { key: `git:${made.name}`, name: made.name, note: made.firstSeen ? $('git-said').textContent : '', give: (to, level) => attachTo(to, made.name, level, 'cassets-error') });
         } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
-        button.disabled = false; button.textContent = 'Add';
+        button.disabled = false; button.textContent = 'Create';
         await paintAssets();
     });
     /* ---------- a repository: what would go out, then send it ---------- */
@@ -5809,31 +10790,331 @@
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
     });
 
+    /* NEW MAILBOX (02-11): an IMAP mailbox is connected LIVE by default, as a Microsoft or Google one -- the
+       same levels, through Tether -- with its sending server (SMTP) too, unless "No sending". The former
+       read-only copy as files stays, ticked on purpose. */
+    let mailboxLooked = '';
+    /* An account connected: its targets (mail, calendar, contacts), the first opened, all given from Attach. */
+    const targetsMade = (made, user) => {
+        const targets = Array.isArray(made?.targets) ? made.targets : [];
+        return { key: targets[0] ? `connexion:${targets[0].id}` : '', name: targets[0]?.title ?? user, give: (to, level) => Promise.all(targets.map((t) => grantTarget(t.id, to, targetLevel(level)))) };
+    };
+    $('mailbox-user').addEventListener('change', async () => {
+        const user = $('mailbox-user').value.trim();
+        if (!user.includes('@') || user === mailboxLooked) return;
+        mailboxLooked = user;
+        try {
+            const found = await post(`${API}/accounts/lookup`, { user });
+            if (found?.imap && !$('mailbox-host').value.trim()) { const [h, p] = String(found.imap).split(':'); $('mailbox-host').value = h; if (p) $('mailbox-port').value = p; }
+            if (found?.smtp && !$('mailbox-smtp').value.trim()) $('mailbox-smtp').value = found.smtp;
+        } catch { /* typed by hand */ }
+    });
     $('mailbox-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('mailbox-error').hidden = true;
         const button = $('mailbox-new').querySelector('button[type=submit]');
-        button.disabled = true; button.textContent = 'Reading the mailbox...';
+        button.disabled = true; button.textContent = 'Trying it...';
+        const host = $('mailbox-host').value.trim(); const port = $('mailbox-port').value.trim();
         try {
-            await post(`${API}/mailboxes`, { name: $('mailbox-name').value.trim(), host: $('mailbox-host').value.trim(), port: $('mailbox-port').value.trim(), user: $('mailbox-user').value.trim(), password: $('mailbox-password').value });
-            assetOpen = `mailbox:${$('mailbox-name').value.trim()}`; assetsAdding = ''; $('mailbox-new').reset();
+            const user = $('mailbox-user').value.trim();
+            const made = await post(`${API}/accounts/classic`, { user, password: $('mailbox-password').value, imap: port ? `${host}:${port}` : host, smtp: $('mailbox-smtp').value.trim(), kinds: ['mail'] });
+            $('mailbox-new').reset(); mailboxLooked = '';
+            await assetMade($('mailbox-box'), targetsMade(made, user));
         } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
-        button.disabled = false; button.textContent = 'Add';
+        button.disabled = false; button.textContent = 'Create';
         await paintAssets();
     });
+    /* New mailbox: IMAP and SMTP, connected live (02-11). Gmail and Microsoft sign in instead (token kept on
+       the server): "Sign in with them" jumps to that form. */
+    const MAILBOX_PROVIDER = { google: 'Google', microsoft: 'Microsoft', classic: 'your host' };
+    /* Which kinds each provider can be connected for (from the server). */
+    let accountSupported = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'], classic: ['mail', 'calendar', 'contacts'] };
+    /* From New mailbox: the account form, on the host's kind ("Other") with what was typed here, unless it is Gmail or Microsoft. */
+    /* The kind of mailbox, in plain sight (02-11): Google or Microsoft sign in (the account form, on that
+       provider); any other is the IMAP + SMTP form right here. */
+    for (const b of $('mailbox-provider').querySelectorAll('button')) b.addEventListener('click', async () => {
+        const provider = b.dataset.provider;
+        if (provider === 'classic') return;
+        const user = $('mailbox-user').value.trim();
+        await newAssetKind($('mailbox-box'), 'connexion');
+        setConnexionProvider(provider);
+        if (user.includes('@')) $('connexion-email').value = user;
+    });
+    /* CONNECT AN ACCOUNT (Connexions): a live link through Tether. The person signs
+       in in their own browser; the token is kept on the server, never in a machine.
+       Both cover mail+calendar+contacts in one go, each landing on the same
+       copy-pastable http://127.0.0.1 address. */
+    const setConnexionProvider = (provider) => {
+        const form = $('connexion-new');
+        form.dataset.provider = provider;
+        for (const b of $('connexion-provider').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.provider === provider));
+        const classic = provider === 'classic';
+        $('connexion-classic').hidden = !classic;
+        $('connexion-open-row').hidden = classic;
+        $('connexion-notice').hidden = classic;
+        if (classic) showClassicFields();
+        const kinds = classic ? ['mail', 'calendar', 'contacts'] : accountSupported[provider] ?? ['mail'];
+        for (const [id, k] of [['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']]) { const c = $(id); const ok = kinds.includes(k); if (!ok) c.checked = false; c.disabled = !ok; $(`${id}-label`).classList.toggle('off', !ok); }
+        $('connexion-paste').hidden = true;
+        $('connexion-error').hidden = true;
+        const who = MAILBOX_PROVIDER[provider];
+        const all = kinds.includes('calendar') && kinds.includes('contacts');
+        /* Say plainly whose app Clavarium borrows (it is what the provider sees),
+           and -- before anyone clicks -- that allowing lands on a page that will
+           not load, which is expected: the address is what to copy back here. */
+        $('connexion-notice').textContent = `Clavarium signs in as Thunderbird's app — that is what ${who} sees.${all ? ' Mail, calendar and contacts together.' : ''} After you allow, your browser lands on an error page — that is normal, nothing is running at that address. Copy the whole address from the bar and paste it below.`;
+        $('connexion-open').textContent = `Open the ${who} sign-in page`;
+    };
+    for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));
+    /* A CLASSIC ACCOUNT (OVH, Infomaniak, Nextcloud...): a password and its servers,
+       filled from the address when known. Only the servers of the kinds ticked show. */
+    function showClassicFields() {
+        const on = (k) => $(`connexion-${k}`).checked;
+        for (const [f, k] of [['imap', 'mail'], ['smtp', 'mail'], ['caldav', 'calendar'], ['carddav', 'contacts']]) { $(`connexion-${f}`).hidden = !on(k); $(`connexion-${f}-label`).hidden = !on(k); }
+    }
+    for (const id of ['connexion-mail', 'connexion-calendar', 'connexion-contacts']) $(id).addEventListener('change', () => { if ($('connexion-new').dataset.provider === 'classic') showClassicFields(); });
+    let lookedUp = '';
+    $('connexion-email').addEventListener('change', async () => {
+        const user = $('connexion-email').value.trim();
+        if ($('connexion-new').dataset.provider !== 'classic' || !user.includes('@') || user === lookedUp) return;
+        lookedUp = user;
+        try {
+            const found = await post(`${API}/accounts/lookup`, { user });
+            for (const f of ['imap', 'smtp', 'caldav', 'carddav']) if (found?.[f] && !$(`connexion-${f}`).value.trim()) $(`connexion-${f}`).value = found[f];
+        } catch { /* filled by hand */ }
+    });
+    $('connexion-classic-connect').addEventListener('click', async () => {
+        $('connexion-error').hidden = true;
+        const kinds = connexionKinds();
+        if (!kinds.length) { $('connexion-error').textContent = 'Choose at least mail, calendar or contacts.'; $('connexion-error').hidden = false; return; }
+        const btn = $('connexion-classic-connect'); const was = btn.textContent; btn.disabled = true; btn.textContent = 'Trying the account…';
+        try {
+            const made = await post(`${API}/accounts/classic`, { user: $('connexion-email').value.trim(), password: $('connexion-password').value, kinds,
+                imap: $('connexion-imap').value.trim(), smtp: $('connexion-smtp').value.trim(), caldav: $('connexion-caldav').value.trim(), carddav: $('connexion-carddav').value.trim() });
+            const user = $('connexion-email').value.trim();
+            lookedUp = '';
+            $('connexion-new').reset(); setConnexionProvider('google');
+            await assetMade($('connexion-box'), targetsMade(made, user));
+        } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
+        $('connexion-password').value = '';
+        btn.disabled = false; btn.textContent = was;
+        await paintAssets();
+    });
+    /* ADD AN MCP SERVER (mcpx.mjs): the block the service gives, pasted -- its name, address and key read from it, shown
+       ticked, the key masked; or filled in by hand. The key goes to the server's vault on Add, never shown again. A block
+       naming its keys as secrets (${NAME}) is imported as it is; a program to start (stdio) is not run here. */
+    const mcpWord = (k, en, v) => uiSaid(k, en, v);
+    const mcpMask = (k) => (k.length <= 8 ? '••••' : `${k.slice(0, 4)}••••${k.slice(-3)}`);
+    /* Where a pasted block keeps its servers (20-11, the owner: not all say "mcpServers"): "mcpServers" (Claude, Cursor,
+       Windsurf), "servers" (VS Code's mcp.json), "mcp": { "servers" } (VS Code's settings), "mcp" (OpenCode),
+       "context_servers" (Zed), or one server by itself ({ "url": ... }). */
+    const OBJ = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
+    function serversOf(j) {
+        if (!OBJ(j)) return null;
+        const one = j.url || j.serverUrl || j.httpUrl;
+        return OBJ(j.mcpServers) ?? OBJ(j.servers) ?? OBJ(OBJ(j.mcp)?.servers) ?? (OBJ(j.mcp) && !OBJ(j.mcp).servers ? j.mcp : null) ?? OBJ(j.context_servers) ?? (one ? { [j.name || 'mcp']: j } : null);
+    }
+    /* A program to start, whatever its tool calls it (OpenCode: "type": "local", its command a list). */
+    const isProgram = (s) => s.command !== undefined || s.args !== undefined || s.type === 'stdio' || s.type === 'local';
+
+    function mcpRead(text) {
+        let j;
+        try { j = JSON.parse(text); } catch { return { error: mcpWord('set-mcp-notjson', 'Not JSON: paste the whole block.') }; }
+        const all = serversOf(j);
+        if (!all || typeof all !== 'object' || Array.isArray(all) || !Object.keys(all).length) return { error: mcpWord('set-mcp-noserver', 'No server in this block.') };
+        const servers = []; let refs = false;
+        for (const [name, s] of Object.entries(all)) {
+            if (!s || typeof s !== 'object') return { error: mcpWord('set-mcp-noserver', 'No server in this block.') };
+            if (isProgram(s)) return { error: mcpWord('set-mcp-program', '« {name} »: a program to start, refused here.', { name }) };
+            const heads = s.headers && typeof s.headers === 'object' ? Object.entries(s.headers) : [];
+            if (heads.length > 1) return { error: mcpWord('set-mcp-heads', '« {name} »: one header for its key at most.', { name }) };
+            let key = '', header = '';
+            if (heads.length) {
+                const [h, v] = heads[0]; const value = String(v ?? '').trim();
+                if (/\$\{[^}]+\}/.test(value)) refs = true;
+                const bearer = /^Bearer\s+(.+)$/i.exec(value);
+                if (h.toLowerCase() === 'authorization') { if (!bearer) return { error: mcpWord('set-mcp-basic', '« {name} »: not a « Bearer » key, fill in by hand.', { name }) }; key = bearer[1].trim(); }
+                else { key = value; header = h; }
+            }
+            servers.push({ name: String(name).slice(0, 120), url: String(s.url ?? s.serverUrl ?? s.httpUrl ?? ''), key, header });
+        }
+        return { servers, refs };
+    }
+    let mcpPasted = null, mcpPick = 0;
+    function mcpShow() {
+        const s = mcpPasted?.servers?.[mcpPick];
+        $('mcp-found').hidden = !s;
+        const n = mcpPasted?.servers?.length ?? 0;
+        $('mcp-add').textContent = n > 1 ? mcpWord('set-mcp-add-n', 'Add the {n}', { n }) : mcpWord('set-mcp-add', 'Add');
+        if (!s) return;
+        $('mcp-found-name').textContent = s.name; $('mcp-found-url').textContent = s.url;
+        $('mcp-found-keyline').classList.toggle('mcp-found-miss', !s.key);
+        $('mcp-found-key').textContent = !s.key ? mcpWord('set-mcp-nokey', 'none') : mcpPasted.refs ? s.key : `${mcpMask(s.key)}${s.header ? ` · ${s.header}` : ''}`;
+        if (n === 1 && !mcpPasted.refs) { $('mcp-name').value = s.name; $('mcp-url').value = s.url; $('mcp-key').value = s.key; }
+    }
+    function mcpPaste() {
+        const text = $('mcp-config').value.trim();
+        const drop = $('mcp-drop'); drop.classList.toggle('filled', !!text); drop.classList.remove('ok', 'bad');
+        $('mcp-error').hidden = true; mcpPasted = null; mcpPick = 0;
+        const pick = $('mcp-pick'); pick.replaceChildren(); pick.hidden = true;
+        if (text) {
+            const r = mcpRead(text);
+            if (r.error) { drop.classList.add('bad'); $('mcp-error').textContent = r.error; $('mcp-error').hidden = false; }
+            else {
+                mcpPasted = r; drop.classList.add('ok');
+                if (r.servers.length > 1) {
+                    r.servers.forEach((s, i) => { const b = el('button', '', s.name); b.type = 'button'; b.setAttribute('aria-pressed', String(i === 0));
+                        b.addEventListener('click', () => { mcpPick = i; [...pick.children].forEach((x, k) => x.setAttribute('aria-pressed', String(k === i))); mcpShow(); }); pick.append(b); });
+                    pick.hidden = false;
+                }
+            }
+        }
+        mcpShow();
+    }
+    $('mcp-config').addEventListener('input', mcpPaste);
+    const mcpClear = () => { $('mcp-new').reset(); $('mcp-config').value = ''; mcpPaste(); };
+    $('mcp-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('mcp-error').hidden = true;
+        const btn = $('mcp-add'); btn.disabled = true;
+        const fail = (message) => { $('mcp-error').textContent = message; $('mcp-error').hidden = false; };
+        try {
+            const many = mcpPasted && (mcpPasted.refs || mcpPasted.servers.length > 1);
+            if (mcpPasted?.refs) {
+                const made = await post(`${API}/tether/mcp-import`, { config: $('mcp-config').value });
+                const first = made.servers?.[0];
+                mcpClear();
+                if (first) await assetMade($('mcp-box'), { key: `connexion:${first.id}`, name: first.title, give: (to, level) => Promise.all(made.servers.map((x) => grantTarget(x.id, to, targetLevel(level)))) });
+            } else if (many) {
+                const made = [];
+                for (const s of mcpPasted.servers) made.push(await post(`${API}/tether/mcp-add`, { name: s.name, url: s.url, ...(s.key ? { key: s.key } : {}), ...(s.header ? { header: s.header } : {}) }));
+                mcpClear();
+                await assetMade($('mcp-box'), { key: `connexion:${made[0].id}`, name: made[0].title, give: (to, level) => Promise.all(made.map((x) => grantTarget(x.id, to, targetLevel(level)))) });
+            } else {
+                const name = $('mcp-name').value.trim(), url = $('mcp-url').value.trim(), key = $('mcp-key').value;
+                if (!name || !url) { $('mcp-hand').open = true; fail(mcpWord('set-mcp-need', 'Paste the block, or give a name and an address.')); return; }
+                const one = mcpPasted?.servers?.[0];
+                const header = one && one.key && one.key === key ? one.header : '';
+                const made = await post(`${API}/tether/mcp-add`, { name, url, key, ...(header ? { header } : {}) });
+                mcpClear();
+                await assetMade($('mcp-box'), { key: `connexion:${made.id}`, name: made.title, note: made.error ? uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: made.error }) : '',
+                    give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
+            }
+        } catch (error) { fail(error.message); }
+        finally { $('mcp-key').value = ''; btn.disabled = false; }
+        await paintAssets();
+    });
+    /* PAIR A BROWSER (browsers.mjs): one line to copy into the Tether extension's popup -- its address and a key good once,
+       for ten minutes; the page waits until the extension came with it. Or, as before, the code its popup shows. */
+    let browserWait = null;
+    const stopBrowserWait = () => { clearTimeout(browserWait); browserWait = null; };
+    async function browserClaimed(form, offer) {
+        stopBrowserWait();
+        let r;
+        try { r = await post(`${API}/tether/browser-offer-state`, { offer }); } catch { r = { state: 'waiting' }; }
+        if (r.state === 'claimed') {
+            $('browser-new').reset(); $('browser-made').hidden = true;
+            await assetMade(form, { key: `connexion:${r.target.id}`, name: r.target.title, give: (to, level) => grantTarget(r.target.id, to, targetLevel(level)) });
+            await paintAssets();
+            return;
+        }
+        if (r.state === 'expired') { $('browser-wait').textContent = uiSaid('set-br-expired', 'Expired: make a new one.'); return; }
+        if (!form.isConnected || form.hidden) return;
+        browserWait = setTimeout(() => void browserClaimed(form, offer), 2000);
+    }
+    $('browser-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('browser-error').hidden = true;
+        const btn = $('browser-make'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/browser-offer`, { name: $('browser-name').value.trim() });
+            $('browser-config').value = browserConfig(made.key);
+            $('browser-copy').textContent = uiSaid('set-br-copy', 'Copy');
+            $('browser-wait').textContent = uiSaid('set-br-wait', 'Waiting for the extension…');
+            $('browser-made').hidden = false;
+            const box = $('browser-box');
+            void browserClaimed(box, made.offer);
+        } catch (error) { $('browser-error').textContent = error.message; $('browser-error').hidden = false; }
+        btn.disabled = false;
+    });
+    $('browser-pair').addEventListener('click', async () => {
+        $('browser-error').hidden = true;
+        const btn = $('browser-pair'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/browser-pair`, { name: $('browser-name').value.trim(), code: $('browser-code').value.trim() });
+            stopBrowserWait(); $('browser-new').reset(); $('browser-made').hidden = true;
+            await assetMade($('browser-box'), { key: `connexion:${made.id}`, name: made.title, give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
+        } catch (error) { $('browser-error').textContent = error.message; $('browser-error').hidden = false; }
+        btn.disabled = false;
+        await paintAssets();
+    });
+    $('browser-address').value = browserAddress();
+    $('browser-copy').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText($('browser-config').value); $('browser-copy').textContent = uiSaid('set-br-copied', 'Copied'); }
+        catch { $('browser-config').select(); }
+    });
+    const connexionKinds = () => [['connexion-mail', 'mail'], ['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']].filter(([id]) => $(id).checked && !$(id).disabled).map(([, k]) => k);
+    $('connexion-open').addEventListener('click', async () => {
+        $('connexion-error').hidden = true;
+        const kinds = connexionKinds();
+        if (!kinds.length) { $('connexion-error').textContent = 'Choose at least mail, calendar or contacts.'; $('connexion-error').hidden = false; return; }
+        const btn = $('connexion-open'); btn.disabled = true;
+        try {
+            const { url } = await post(`${API}/accounts/consent`, { provider: $('connexion-new').dataset.provider, user: $('connexion-email').value.trim(), kinds });
+            window.open(url, '_blank', 'noopener');
+            $('connexion-paste').hidden = false;
+            $('connexion-code').focus();
+        } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
+        btn.disabled = false;
+    });
+    $('connexion-connect').addEventListener('click', async () => {
+        $('connexion-error').hidden = true;
+        const btn = $('connexion-connect'); const was = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting...';
+        try {
+            const made = await post(`${API}/accounts/connect`, { redirected: $('connexion-code').value.trim() });
+            const denied = Array.isArray(made?.denied) ? made.denied : [];
+            if (denied.length) {
+                /* A partial grant: say plainly what was allowed and what was not,
+                   from the token itself, and keep the form so they can allow the rest. */
+                const word = (k) => ({ mail: 'mail', calendar: 'calendar', contacts: 'contacts' }[k] || k);
+                const ok = (made.authorized || []).map(word);
+                const no = denied.map(word);
+                $('connexion-error').textContent = `${ok.length ? `Connected for ${ok.join(', ')}. ` : ''}Not allowed: ${no.join(', ')} — connect again and allow ${no.length > 1 ? 'them' : 'it'} on the provider's screen.`;
+                $('connexion-error').hidden = false;
+                $('connexion-code').value = ''; $('connexion-paste').hidden = true;
+            } else {
+                const user = $('connexion-email').value.trim();
+                $('connexion-new').reset(); setConnexionProvider('google');
+                await assetMade($('connexion-box'), targetsMade(made, user));
+            }
+        } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
+        btn.disabled = false; btn.textContent = was;
+        await paintAssets();
+    });
+    setConnexionProvider('google');
+    if (!DEVICE) getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = { ...d.supported, classic: ['mail', 'calendar', 'contacts'] }; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
     $('list-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('assets-error').hidden = true;
+        $('assets-error').hidden = true; $('cassets-error').hidden = true;
         const made = await binderCall('create-list', { template: $('listnew-template').value, title: $('listnew-title').value.trim(), lang: binderLang() });
-        if (made.ok) { $('listnew-title').value = ''; assetsAdding = ''; assetOpen = `list:${made.data.id}`; listOpen = assetOpen; remember(); }
-        else { $('assets-error').textContent = made.text; $('assets-error').hidden = false; }
+        if (made.ok) {
+            $('listnew-title').value = '';
+            const key = `list:${made.data.id}`;
+            const attaching = inGive($('list-box'));
+            await assetMade($('list-box'), { key, name: made.data.title ?? $('listnew-template').selectedOptions[0]?.textContent ?? '', give: (to, level) => grantList(made.data.id, to, level) });
+            if (!attaching) { listOpen = key; remember(); }
+        } else newAssetError($('list-box'), made.text);
         await paintAssets();
     });
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
-        try { const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; assetsAdding = ''; if (made?.name) assetOpen = `folder:${made.name}`; }
-        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        $('cassets-error').hidden = true;
+        try {
+            const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = '';
+            const name = made?.name ?? '';
+            await assetMade($('folder-box'), { key: name ? `folder:${name}` : '', name, give: name ? (to, level) => attachTo(to, name, level, 'cassets-error') : null });
+        } catch (error) { newAssetError($('folder-box'), error.message); }
         await paintAssets();
     });
 
@@ -6066,12 +11347,14 @@
     let editing = null;          /* the text file being edited: { tab, inner, name, version, saved, area } */
     let filesChanged = false;    /* edited: the list behind shows the new size and time */
     const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : n === 1 ? '1 byte' : `${n} bytes`);
-    const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
+    /* The conversation the files are read through: none when browsed from the Assets menu (the owner's own rights). */
+    const filesC = () => (filesOwner && place === 'assets' ? '' : current);
+    const filesQuery = (extra = {}) => new URLSearchParams({ c: filesC(), r: filesOf, p: filesAt, ...extra }).toString();
     /* When it was last changed, short: the time today, the day otherwise. */
     const whenOf = (iso) => {
         const d = new Date(iso); if (Number.isNaN(d.getTime())) return '';
         const now = new Date();
-        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
         return d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
     };
     const innerOf = (name) => (filesAt ? `${filesAt}/${name}` : name);
@@ -6140,24 +11423,49 @@
         return box;
     }
 
+    /* THE DEVICE'S FILES (/c/, assets step 6): the owner's one list (kit AssetList), scoped to this device -- by type, its
+       right on each row, no « + New », no « Give… » -- and the one chosen opened in the asset panel (AssetPanel), its
+       files inside it, read-only unless given to write. On a phone, the list or the one opened (« ‹ Files » back to the
+       list); wider, both side by side. One thing only: opened at once. */
+    let filesListing = false;
+    function paintDeviceAssets(items) {
+        const sheet = $('files');
+        const model = KIT.assetListModel({ items, scope: `device:${pairing}`, kinds: assetKinds() });
+        const chosen = items.find((i) => i.name === filesOf) ?? null;
+        sheet.dataset.open = chosen && (!filesListing || items.length <= 1) ? 'detail' : 'list';
+        sheet.dataset.many = String(items.length > 1);
+        paintAssetList($('files-assets'), model, { chosen: chosen?.key ?? '',
+            onOpen: (key) => { const i = items.find((x) => x.key === key); if (!i) return; filesListing = false; if (filesOf !== i.name) { filesOf = i.name; filesAt = ''; } void paintFiles(); } });
+        const holder = $('files-panel');
+        if (!chosen) { holder.replaceChildren(); holder.append($('files-body')); $('files-body').hidden = true; return; }
+        $('files-body').hidden = false;
+        const panel = KIT.AssetPanel(chosen, { back: items.length > 1 ? { label: `‹ ${uiSaid('set-dev-files', 'Files')}`, onBack: () => { filesListing = true; sheet.dataset.open = 'list'; } } : null,
+            parts: [{ title: uiSaid('set-dev-files', 'Files'), body: [$('files-body')] }], cls: 'files-asset' });
+        holder.replaceChildren(panel);
+    }
     /* `keep`: an error just said stays (painted after a change that failed in part). */
     async function paintFiles({ keep = false } = {}) {
         const ownerOthers = DEVICE ? [] : (await (await fetch(`${API}/resources`)).json().catch(() => [])).map((r) => ({ name: r.name, access: r.type === 'mailbox' ? 'read' : 'write', yours: true }));
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
         const attachedHere = here?.resources ?? [];
-        const mine = noTerminal() ? deviceShared.map((s) => ({ name: s.name, access: s.access, given: true })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere.map((r) => ({ ...r })),
+        /* ON A DEVICE (/c/, assets step 6): what it sees is the kit's (deviceItems), drawn as the owner's one list. */
+        const seen = DEVICE ? KIT.deviceItems({ shared: deviceShared, resources: attachedHere, work: here?.work, chatOnly: noTerminal(), conversation: shownName(here) || current }) : [];
+        const mine = DEVICE ? seen.map((i) => ({ name: i.name, access: i.access, given: i.via === 'device', own: i.via === 'work' })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere.map((r) => ({ ...r })),
             /* On a device: what it was given for itself, whatever the conversation. */
             ...deviceShared.filter((s) => !attachedHere.some((r) => r.name === s.name)).map((s) => ({ name: s.name, access: s.access, given: true })),
             /* For the owner: everything else that is kept here, attached to this conversation or not. */
             ...ownerOthers.filter((o) => !attachedHere.some((r) => r.name === o.name))];
+        /* Browsed from the Assets menu: that folder alone, as the owner has it. */
+        if (filesOwner && place === 'assets') mine.splice(0, mine.length, ...ownerOthers.filter((o) => o.name === filesOwner).map((o) => ({ ...o, yours: false })));
         /* Given to the device to write, attached to the conversation to read: the larger of the two holds. */
         for (const r of mine) if (deviceShared.some((s) => s.name === r.name && s.access === 'write')) r.access = 'write';
         filesTabs = mine;
         if (!mine.some((r) => r.name === filesOf)) { filesOf = mine[0]?.name ?? ''; filesAt = ''; }
         const tabs = $('files-tabs');
         tabs.replaceChildren();
-        for (const r of mine) {
+        if (DEVICE) paintDeviceAssets(seen);
+        for (const r of DEVICE ? [] : mine) {
             const b = document.createElement('button');
             b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access === 'write' ? 'read-write' : 'read-only'}${r.given ? ' (given to this device)' : r.yours ? ' (not attached here)' : ''}`; b.setAttribute('role', 'tab');
             b.setAttribute('aria-selected', r.name === filesOf ? 'true' : 'false');
@@ -6170,7 +11478,8 @@
         filesWritable = mine.find((r) => r.name === filesOf)?.access === 'write';
         $('files-actions').hidden = !filesOf || !filesWritable;
         $('files-readonly').hidden = !filesOf || filesWritable;
-        $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Read-only: given to this device to read. Nothing can be added or changed here.' : 'Read-only: attached to this conversation to read. Nothing can be added or changed here.';
+        $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Read-only: given to this device to read. Nothing can be added or changed here.'
+            : filesOwner && place === 'assets' ? 'Read-only: a copy of the mail. Nothing can be added or changed here.' : uiSaid('set-files-read-only', 'Read-only: attached to this conversation to read. Nothing can be added or changed here.');
         $('files-views').hidden = !filesOf;
         for (const b of $('files-views').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.view === filesView));
         if (!filesOf) { rows.replaceChildren(); path.replaceChildren(); $('files-empty').hidden = true; return; }
@@ -6200,7 +11509,7 @@
         path.hidden = parts.length === 0;
         for (const entry of listing.entries) rows.append(entryOf(entry));
         $('files-empty').hidden = listing.entries.length > 0;
-        $('files-empty').textContent = filesWritable ? (FINE_POINTER ? 'This folder is empty. Drop files or folders here, or use Upload.' : 'This folder is empty. Add files with Upload.') : 'This folder is empty.';
+        $('files-empty').textContent = filesWritable ? (FINE_POINTER ? 'This folder is empty. Drop files or folders here, or use Upload.' : 'This folder is empty. Add files with Upload.') : uiSaid('set-files-empty', 'This folder is empty.');
     }
     /* A mouse: dragging and dropping is offered; a finger: the buttons are. */
     const FINE_POINTER = window.matchMedia?.('(pointer: fine)').matches ?? true;
@@ -6470,7 +11779,7 @@
         if (total > DROP_BYTES) { filesFailed(`At most ${DROP_BYTES / 1073741824} GB at a time: this was ${sizeOf(total)}.`); return; }
         if (items.length === 0 && folders.length === 0) { filesFailed(notes.length ? `Nothing to upload: ${notes.join('; ')}.` : 'Nothing to upload.'); return; }
         /* Where it goes is fixed now: moving elsewhere meanwhile does not move the upload. */
-        const where = { c: current, r: filesOf, p: filesAt };
+        const where = { c: filesC(), r: filesOf, p: filesAt };
         const at = (route, extra = {}) => `${API}/files/${route}?${new URLSearchParams({ ...where, ...extra })}`;
         uploading = { stopped: false, xhr: null };
         try {
@@ -6625,7 +11934,21 @@
        is offered for download, and nothing is ever run. */
     const PREVIEW_MAX = 25 * 1024 * 1024;
     const TEXT_MAX = 1024 * 1024;
+    /* SOUNDS AND VIDEOS (02-11): played here, by the browser's own player. What it cannot read (an .avi, an
+       .mkv of another codec) says so, with Download. Up to MEDIA_MAX read whole (so it can be moved through),
+       beyond, played as it comes. */
+    const MEDIA = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac',
+        mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm', mkv: 'video/webm', ogv: 'video/ogg' };
+    const MEDIA_MAX = 200 * 1024 * 1024;
     const PICTURES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+    /* Office files (02-11), read in the page: spreadsheets by SheetJS, Word by mammoth (loaded on first use). */
+    const SHEETS = ['xlsx', 'xlsm', 'xls', 'ods'];
+    const SHEET_ROWS = 2000; const SHEET_COLS = 100;
+    const scriptsLoaded = new Map();
+    const loadScript = (url) => {
+        if (!scriptsLoaded.has(url)) scriptsLoaded.set(url, new Promise((ok, ko) => { const t = document.createElement('script'); t.src = url; t.onload = ok; t.onerror = () => { scriptsLoaded.delete(url); ko(new Error('The reader could not be loaded.')); }; document.head.append(t); }));
+        return scriptsLoaded.get(url);
+    };
     const TEXTS = ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'mjs', 'ts', 'py', 'sh', 'sql', 'c', 'h', 'go', 'rs', 'java', 'rb', 'php', 'tex', 'eml'];
     const PDF_PAGES = 30;
     /* Beyond this, a Markdown file is shown as its text: formatting it would hold the page. */
@@ -6634,13 +11957,15 @@
     /* The file is shown in a WINDOW over the screen, wherever it was asked
        from: closing it leaves the terminal, or the list, as it was. */
     function closePreview() {
+        if ($('viewer').classList.contains('viewer-full')) { $('viewer').classList.remove('viewer-full'); $('preview-full').setAttribute('aria-pressed', 'false'); try { if (document.fullscreenElement === $('viewer')) document.exitFullscreen?.(); } catch { /* already out */ } }
         if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
         for (const url of mdUrls) URL.revokeObjectURL(url);
         mdUrls.clear();
         editing = null;
         delete $('viewer').dataset.editing;
         $('preview-body').replaceChildren();
-        $('preview-edit').hidden = true;
+        $('preview-edit').hidden = true; $('preview-download').hidden = false;
+        $('viewer').classList.remove('viewer-sheet');
         offerCopy(null);
         const was = !$('viewer').hidden;
         $('viewer').hidden = true;
@@ -6663,12 +11988,14 @@
         const can = what && (what.text !== undefined || (what.picture && pictures));
         button.hidden = !can;
         copyLabel = what?.picture ? 'Copy image' : 'Copy';
-        button.textContent = copyLabel;
+        /* An icon: its word is its name (hover, long press, reader); "Copied" shows a moment as a tick of colour. */
+        const word = (w) => { button.title = w; button.setAttribute('aria-label', w); if (w === 'Copied') button.dataset.done = 'true'; else delete button.dataset.done; };
+        word(copyLabel);
         button.onclick = !can ? null : () => {
             const done = (ok, why) => {
-                button.textContent = ok ? 'Copied' : copyLabel;
+                word(ok ? 'Copied' : copyLabel);
                 if (!ok && why) { $('preview-note').textContent = why; $('preview-note').hidden = false; }
-                if (ok) setTimeout(() => { if (button.textContent === 'Copied') button.textContent = copyLabel; }, 1800);
+                if (ok) setTimeout(() => { if (button.dataset.done) word(copyLabel); }, 1800);
             };
             if (what.text !== undefined) {
                 const fallback = () => { const at = select?.(); done(false, at ? 'The browser did not let this page copy: the text is selected, copy it yourself (Ctrl+C, or a long press).' : 'The browser did not let this page copy.'); };
@@ -6839,15 +12166,18 @@
     }
     /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
        read it at instead (a file of the machine's own disk). */
-    async function preview(tab, inner, name, size, from) {
+    /* `opts.own`: a blob address of the page's own (an attachment of a mail), let go with the window; `opts.within`: the mail it came from;
+       `opts.bytes`: its bytes, already read. */
+    async function preview(tab, inner, name, size, from, opts = {}) {
         closePreview();
-        const address = from ?? `${API}/files/download?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
+        if (opts.own) mdUrls.add(opts.own);
+        const address = from ?? `${API}/files/download?${new URLSearchParams({ c: filesC(), r: tab, p: inner })}`;
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
         /* From the terminal, a way to the folder it sits in. */
         /* From the terminal or the chat, a way to the folder it sits in: the Assets tab, on it (Files, on a device). */
         $('preview-where').hidden = Boolean(from) || (!$('files').hidden && !$('files').classList.contains('embedded')) || noTerminal() || (!DEVICE && assetsShown);
-        $('preview-where').textContent = DEVICE ? 'Show in Files' : 'Show in Assets';
+        { const word = DEVICE ? 'Show in Files' : 'Show in Assets'; $('preview-where').title = word; $('preview-where').setAttribute('aria-label', word); }
         $('preview-where').onclick = async () => {
             closePreview();
             const folder = inner.split('/').slice(0, -1).join('/');
@@ -6861,24 +12191,80 @@
             if (!$('viewer').hidden) closePreview();
             return undefined;
         });
+        /* A mail cited by its reference: a sheet over the thread (a panel at the right on a wide screen), the thread seen behind. */
+        $('viewer').classList.toggle('viewer-sheet', Boolean(opts.mailRef));
         $('viewer').hidden = false;
         /* Text in a folder this conversation may write in: editable here. */
         $('preview-edit').hidden = Boolean(from) || !editable(name, size) || !canWrite(tab);
         $('preview-edit').onclick = () => { void editFile(tab, inner, name); };
+        /* A file of the shared folders: attached to a card from here (#180). */
+        $('preview-attach').hidden = (Boolean(from) && !opts.mailRef) || DEVICE;
+        /* Full screen: the file takes the whole screen (the real API where granted, else a cover); kept while it is open. */
+        const full = (on) => { $('viewer').classList.toggle('viewer-full', on); $('preview-full').setAttribute('aria-pressed', String(on)); const w2 = on ? 'Leave full screen' : 'Full screen'; $('preview-full').title = w2; $('preview-full').setAttribute('aria-label', w2); try { if (on) $('viewer').requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement === $('viewer')) document.exitFullscreen?.(); } catch { /* the cover stands in */ } };
+        $('preview-full').onclick = () => full(!$('viewer').classList.contains('viewer-full'));
+        $('preview-attach').onclick = () => void attachToCard(opts.mailRef ? { kind: 'mail', ref: opts.mailRef.got?.ref || opts.mailRef.ref, title: opts.mailRef.title || opts.mailRef.label || name } : { kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
-        const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
+        const origin = typeof opts.origin === 'string' ? opts.origin : opts.within ? uiSaid('set-mail-of', 'An attachment of {name}', { name: opts.within }) : opts.mailRef ? '' : from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
+        /* NOTHING TO SHOW (02-11): not an empty frame, but a file, why, and a Download button that is seen. */
+        const cannot = (why) => {
+            const box = el('div', 'preview-cannot');
+            const icon = el('div', 'preview-cannot-icon'); icon.setAttribute('aria-hidden', 'true');
+            icon.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+            const get = el('a', 'button primary preview-cannot-get'); get.href = address; get.setAttribute('download', name);
+            get.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>';
+            get.append(document.createTextNode(' Download'));
+            box.append(icon, el('b', 'preview-cannot-name', name), el('p', 'hint', why), get);
+            $('preview-body').replaceChildren(box); note('');
+        };
+        /* Its bytes: read from the server, or already here (an attachment of a mail: this page's rules fetch no blob:). */
+        const readIt = async () => {
+            if (opts.bytes) return opts.bytes.buffer.slice(opts.bytes.byteOffset, opts.bytes.byteOffset + opts.bytes.byteLength);
+            const r = await fetch(address);
+            if (!r.ok) { const said = await r.json().catch(() => ({})); throw Object.assign(new Error(said.error || 'The file could not be read.'), { kind: said.kind }); }
+            /* A mail read by its reference: where it was found, and its reference as it is now. */
+            if (opts.mailRef) { const h = (k) => { try { return decodeURIComponent(r.headers.get(k) ?? ''); } catch { return ''; } }; opts.mailRef.got = { box: h('x-mail-box'), folder: h('x-mail-folder'), ref: h('x-mail-ref') || opts.mailRef.ref, cut: r.headers.get('x-mail-cut') === '1' }; if (h('x-mail-of')) opts.mailRef.of = h('x-mail-of'); }
+            return r.arrayBuffer();
+        };
+        /* A mail that cannot be opened by its reference: one clear line (gone, not theirs, unreachable), never a download. */
+        const mailState = (error) => {
+            const LINES = { gone: ['set-mail-gone', 'This mail is no longer in the mailbox.'], 'not-yours': ['set-mail-not-yours', 'This mailbox is not yours to open.'], 'old-ref': ['set-mail-old-ref', 'Old reference: ask the AI to attach it again.'], unreachable: ['set-mail-unreachable', 'The mailbox cannot be reached just now.'] };
+            const line = LINES[error.kind];
+            const box = el('div', 'preview-cannot mail-state'); box.dataset.kind = error.kind || 'error'; box.setAttribute('role', 'status');
+            const icon = el('div', 'preview-cannot-icon'); icon.setAttribute('aria-hidden', 'true');
+            icon.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
+            box.append(icon, el('b', 'mail-state-line', line ? uiSaid(line[0], line[1]) : error.message));
+            if (error.kind === 'unreachable' || !line) {
+                const again = el('button', 'quiet mail-state-retry', uiSaid('set-mail-retry', 'Try again')); again.type = 'button';
+                again.addEventListener('click', () => { void openMailRef(opts.mailRef.ref, { label: opts.mailRef.label, of: opts.mailRef.of, room: opts.mailRef.of ? '' : opts.mailRef.room }); });
+                box.append(again);
+            }
+            $('preview-name').textContent = opts.mailRef.label || uiSaid('set-mail-mail', 'Mail');
+            $('preview-body').replaceChildren(box); note('');
+            $('preview-attach').hidden = true; $('preview-download').hidden = true;
+        };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
-        const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind);
-        if (!known) { note('This kind of file is not shown here. Download it to open it.'); return; }
-        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { note(`This file is too large to be shown here (${sizeOf(size)}). Download it to open it.`); return; }
+        if (MEDIA[kind]) {
+            const video = MEDIA[kind].startsWith('video/');
+            const player = document.createElement(video ? 'video' : 'audio');
+            player.controls = true; player.preload = 'metadata'; player.className = `preview-media${video ? ' preview-video' : ''}`;
+            player.setAttribute('playsinline', '');
+            player.addEventListener('error', () => { if (!$('viewer').hidden && $('preview-name').textContent === name) cannot(`${size ? `${sizeOf(size)} · ` : ''}This browser cannot play this file.`); }, { once: true });
+            if (size && size > MEDIA_MAX) { player.src = address; $('preview-body').replaceChildren(player); note(''); return; }
+            note('Loading...');
+            let got;
+            try { got = await readIt(); } catch (error) { cannot(error.message); return; }
+            if ($('viewer').hidden || $('preview-name').textContent !== name) return;
+            shownUrl = URL.createObjectURL(new Blob([got], { type: MEDIA[kind] }));
+            player.src = shownUrl; $('preview-body').replaceChildren(player); note('');
+            return;
+        }
+        const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind) || SHEETS.includes(kind) || kind === 'docx';
+        if (!known) { cannot(`${size ? `${sizeOf(size)} · ` : ''}This kind of file cannot be shown here.`); return; }
+        if (size > (TEXTS.includes(kind) && kind !== 'eml' ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
         note('Loading...');
         let bytes;
-        try {
-            const r = await fetch(address);
-            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
-            bytes = await r.arrayBuffer();
-        } catch (error) { note(error.message); return; }
+        try { bytes = await readIt(); } catch (error) { if (opts.mailRef) { if (!$('viewer').hidden && $('preview-name').textContent === name) mailState(error); return; } cannot(error.message); return; }
         if ($('viewer').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
         const body = $('preview-body');
         if (PICTURES[kind]) {
@@ -6886,6 +12272,41 @@
             const img = document.createElement('img'); img.alt = name; img.src = shownUrl;
             body.append(img); note('');
             offerCopy({ picture: new Blob([bytes], { type: PICTURES[kind] }) });
+        } else if (SHEETS.includes(kind)) {
+            /* A WORKBOOK: each sheet a table, tabs between them; its cells as text, never as markup. */
+            try {
+                await loadScript(`${DEVICE ? '/c/vendor' : '/vendor'}/xlsx.js`);
+                const book = window.XLSX.read(new Uint8Array(bytes), { type: 'array', cellDates: true, dense: true });
+                const tabs = el('div', 'sheet-tabs'); tabs.setAttribute('role', 'tablist');
+                const view = el('div', 'sheet-view');
+                const showSheet = (sheetName) => {
+                    for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.sheet === sheetName));
+                    const rows = window.XLSX.utils.sheet_to_json(book.Sheets[sheetName], { header: 1, raw: false, defval: '', blankrows: false });
+                    const table = el('table', 'sheet-table');
+                    const width = Math.min(SHEET_COLS, Math.max(0, ...rows.map((r) => r.length)));
+                    const head = el('tr'); head.append(el('th', 'sheet-corner', ''));
+                    for (let c = 0; c < width; c++) head.append(el('th', '', window.XLSX.utils.encode_col(c)));
+                    const thead = el('thead'); thead.append(head); table.append(thead);
+                    const tbody = el('tbody');
+                    rows.slice(0, SHEET_ROWS).forEach((r, i) => { const tr = el('tr'); tr.append(el('th', '', String(i + 1))); for (let c = 0; c < width; c++) tr.append(el('td', '', String(r[c] ?? ''))); tbody.append(tr); });
+                    table.append(tbody);
+                    view.replaceChildren(table);
+                    note(rows.length > SHEET_ROWS ? `The first ${SHEET_ROWS} rows of ${rows.length}. Download the file for the rest.` : '');
+                };
+                for (const sheetName of book.SheetNames) { const b = el('button', 'sheet-tab', sheetName); b.type = 'button'; b.dataset.sheet = sheetName; b.setAttribute('role', 'tab'); b.addEventListener('click', () => showSheet(sheetName)); tabs.append(b); }
+                body.append(...(book.SheetNames.length > 1 ? [tabs] : []), view);
+                showSheet(book.SheetNames[0]);
+            } catch { cannot('This spreadsheet could not be read here.'); }
+        } else if (kind === 'docx') {
+            /* A WORD DOCUMENT, as a readable page: in a frame where nothing runs, as a page written by the tool. */
+            try {
+                await loadScript(`${DEVICE ? '/c/vendor' : '/vendor'}/mammoth.js`);
+                const made = await window.mammoth.convertToHtml({ arrayBuffer: bytes });
+                const frame = document.createElement('iframe'); frame.className = 'doc-frame'; frame.setAttribute('sandbox', ''); frame.title = name;
+                const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+                frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>body{font:15px/1.55 system-ui,sans-serif;max-width:46rem;margin:24px auto;padding:0 16px;${dark ? 'background:#131a22;color:#e7edf4' : 'background:#fff;color:#17202b'}}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #8888;padding:4px 8px}a{color:inherit}</style>${made.value}`;
+                body.append(frame); note('Shown as a page: its exact layout is not kept. Download it for the original.');
+            } catch { cannot('This document could not be read here.'); }
         } else if (kind === 'pdf') {
             try {
                 const base = DEVICE ? '/c/vendor' : '/vendor';
@@ -6908,7 +12329,9 @@
                     if ($('viewer').hidden) return;
                 }
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
-            } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
+            } catch { cannot('This PDF could not be shown here.'); }
+        } else if (kind === 'eml') {
+            showMail({ bytes, name, tab, inner, from, note, ref: opts.mailRef });
         } else {
             const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
             const source = () => { const pre = document.createElement('pre'); pre.className = 'source'; pre.textContent = text; return pre; };
@@ -6925,7 +12348,7 @@
                 frame.setAttribute('sandbox', 'allow-scripts');
                 frame.setAttribute('referrerpolicy', 'no-referrer');
                 frame.title = `${name}, a page written by the tool`;
-                frame.src = `${API}/files/page?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
+                frame.src = `${API}/files/page?${new URLSearchParams({ c: filesC(), r: tab, p: inner })}`;
                 const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = 'Show its source';
                 let shown = 'page';
                 toggle.addEventListener('click', () => {
@@ -6941,7 +12364,7 @@
                 try {
                     page = await markdownPage(text, {
                         /* Pictures as the thumbnails of Files allow them (the server checks the folder and the bytes); a file of the machine's disk shows none. */
-                        picture: (src) => { const p = from ? null : besideFile(tab, inner, src); return p && /\.(png|jpe?g|gif|webp)$/i.test(p) ? `${API}/files/thumb?${new URLSearchParams({ c: current, r: tab, p })}` : null; },
+                        picture: (src) => { const p = from ? null : besideFile(tab, inner, src); return p && /\.(png|jpe?g|gif|webp)$/i.test(p) ? `${API}/files/thumb?${new URLSearchParams({ c: filesC(), r: tab, p })}` : null; },
                         open: (href) => { const p = from ? null : besideFile(tab, inner, href); return p ? () => { void preview(tab, p, p.split('/').pop(), 0); } : null; },
                         diagram: drawDiagram, highlight: colourCode,
                     });
@@ -6969,6 +12392,115 @@
                 note('');
             } else { body.append(source()); note(offline && (kind === 'html' || kind === 'htm') ? 'This conversation is offline: its page is shown as text, not run.' : ''); }
         }
+    }
+    /* A MAIL FILE (.eml), as a mail program shows it (05-11): subject, who, when, its words, its
+       attachments; its source one tap away (Copy, Download, Full screen: the file as it is). Read by
+       web/mail-view.js, here, in the page. Its HTML, which a stranger wrote, is drawn in a frame that
+       runs nothing (sandbox: no scripts, no same-origin; its own rules: nothing fetched), made harmless
+       first; remote pictures blocked till asked for -- then the server's page of it (files.mjs mailPage),
+       still no script. Nothing is fetched on opening. */
+    function showMail({ bytes, name, tab, inner, from, note, ref = null }) {
+        const body = $('preview-body');
+        const M = window.clavariumMail;
+        /* Its source: the first megabyte of a large one (Download for all of it). */
+        const raw = new TextDecoder('utf-8', { fatal: false }).decode(bytes.byteLength > TEXT_MAX ? bytes.slice(0, TEXT_MAX) : bytes) + (bytes.byteLength > TEXT_MAX ? '\n…' : '');
+        const source = el('pre', 'source', raw);
+        offerCopy({ text: raw }, { select: () => { show('source'); return selectAll(source); } });
+        let mail = null;
+        try { mail = M.parse(new Uint8Array(bytes)); } catch { mail = null; }
+        if (!mail || (!mail.headers.length && mail.html === null && mail.text === null)) { body.append(source); note(''); return; }
+        const view = el('div', 'mail-view');
+        /* Opened by its reference: its subject heads the window, where it is now is said, and its bytes are
+           what Download gives (read once, never fetched again for it). */
+        if (ref) {
+            $('preview-name').textContent = mail.subject || ref.label || name;
+            ref.title = [mail.subject || ref.label, mail.from[0]?.name || mail.from[0]?.address, mail.date ? mail.date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ');
+            const file = URL.createObjectURL(new Blob([bytes], { type: 'message/rfc822' })); mdUrls.add(file);
+            $('preview-download').href = file; $('preview-download').setAttribute('download', `${(mail.subject || 'mail').replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.eml`);
+            const where = [ref.got?.box, ref.got?.folder].filter(Boolean).join(' · ');
+            if (where) view.append(el('div', 'mail-where hint', where));
+            if (ref.got?.cut) view.append(el('div', 'mail-cut hint', uiSaid('set-mail-cut', 'Mail cut: attachments may be incomplete.')));
+        }
+        /* Who, to whom, when. */
+        const head = el('div', 'mail-head');
+        head.append(el('h2', 'mail-subject', mail.subject || uiSaid('set-mail-no-subject', '(no subject)')));
+        const who = (list) => { const span = el('span', 'mail-who'); list.forEach((a, i) => { if (i) span.append(', '); if (a.name) { span.append(el('b', '', a.name), ' '); span.append(el('span', 'hint mail-addr', `<${a.address}>`)); } else span.append(el('b', '', a.address)); }); return span; };
+        if (mail.from.length) { const line = el('div', 'mail-from'); line.append(who(mail.from)); head.append(line); }
+        const row = (label, value) => { const line = el('div', 'mail-line'); line.append(el('span', 'mail-label', label), value); head.append(line); };
+        if (mail.to.length) row(uiSaid('set-mail-to', 'To'), who(mail.to));
+        if (mail.cc.length) row(uiSaid('set-mail-cc', 'Cc'), who(mail.cc));
+        if (mail.date) row(uiSaid('set-mail-date', 'Date'), el('span', '', mail.date.toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
+        const details = el('button', 'quiet mail-details', uiSaid('set-mail-details', 'Show details')); details.type = 'button'; details.setAttribute('aria-expanded', 'false');
+        const all = el('pre', 'mail-headers', mail.head); all.hidden = true;
+        details.addEventListener('click', () => { all.hidden = !all.hidden; details.setAttribute('aria-expanded', String(!all.hidden)); details.textContent = all.hidden ? uiSaid('set-mail-details', 'Show details') : uiSaid('set-mail-hide-details', 'Hide details'); });
+        head.append(details, all);
+        view.append(head);
+        /* Reply: never sent from here -- the AI is asked in the chat, and its answer comes back as a request to approve. */
+        if (ref && (ref.of || DEVICE) && (!DEVICE || deviceParts.chat === 'write')) {
+            const acts = el('div', 'mail-acts');
+            const reply = el('button', 'mail-reply', uiSaid('set-mail-reply', 'Reply…')); reply.type = 'button';
+            reply.addEventListener('click', () => { void replyToMail({ ref: ref.got?.ref || ref.ref, of: ref.of }); });
+            acts.append(reply); view.append(acts);
+        }
+        /* Its words: the HTML in a frame that runs nothing, or the plain words with their links. */
+        const offline = conversations.find((x) => x.name === (ref ? ref.of : current))?.offline === true;
+        const frameOf = () => { const f = document.createElement('iframe'); f.className = 'mail-frame'; f.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox'); f.setAttribute('referrerpolicy', 'no-referrer'); f.title = mail.subject || name; return f; };
+        if (mail.html !== null) {
+            const page = M.pageOf(mail);
+            let frame = frameOf(); frame.srcdoc = page.html;
+            if (page.blocked) {
+                const bar = el('div', 'mail-remote'); bar.setAttribute('role', 'status');
+                bar.append(el('span', '', uiSaid('set-mail-remote', 'Remote pictures blocked')));
+                /* Shown by the server's page of the same file: one of a folder kept here, a conversation not cut off. */
+                /* A mail opened by its reference: the server's page of the same mail, read again then (asked for). */
+                if ((ref || !from) && !offline) {
+                    const go = el('button', 'quiet mail-remote-show', uiSaid('set-mail-show-remote', 'Show them')); go.type = 'button';
+                    const shown = ref ? `${API}/mail/page?${new URLSearchParams({ ref: ref.got?.ref || ref.ref, ...(ref.of ? { c: ref.of } : {}) })}` : `${API}/files/mail?${new URLSearchParams({ c: filesC(), r: tab, p: inner })}`;
+                    go.addEventListener('click', () => { const f = frameOf(); f.src = shown; frame.replaceWith(f); frame = f; bar.remove(); });
+                    bar.append(' · ', go);
+                }
+                view.append(bar);
+            }
+            view.append(frame);
+        } else if (mail.text !== null && mail.text.trim()) {
+            const words = el('div', 'mail-text');
+            for (const piece of M.linkify(mail.text)) {
+                if (!piece.href) { words.append(piece.text); continue; }
+                const a = el('a', '', piece.text); a.href = piece.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; words.append(a);
+            }
+            view.append(words);
+        } else view.append(el('p', 'hint mail-empty', uiSaid('set-mail-empty', 'This mail has no text.')));
+        /* Its attachments: each opens in this same window (or offers its download), as a file of a folder does. */
+        if (mail.attachments.length) {
+            const list = el('ul', 'mail-files');
+            list.setAttribute('aria-label', mail.attachments.length === 1 ? uiSaid('set-mail-file', '1 attachment') : uiSaid('set-mail-files', '{n} attachments', { n: mail.attachments.length }));
+            for (const a of mail.attachments) {
+                const li = el('li', 'mail-file');
+                const open = el('button', 'quiet mail-file-open'); open.type = 'button';
+                const ext = a.name.includes('.') ? a.name.split('.').pop().toUpperCase().slice(0, 4) : '';
+                open.append(el('span', 'kind', ext || '?'), el('b', '', a.name), el('small', '', `${sizeOf(a.size)} · ${a.type}`));
+                open.addEventListener('click', () => { const url = URL.createObjectURL(new Blob([a.bytes], { type: a.type })); void preview(tab, inner, a.name, a.size, url, { own: url, within: name, bytes: a.bytes }); });
+                const get = el('a', 'mail-file-get'); get.setAttribute('download', a.name); get.title = uiSaid('set-mail-download', 'Download'); get.setAttribute('aria-label', `${get.title} ${a.name}`);
+                get.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>';
+                /* Its address let go with the window. */
+                { const url = URL.createObjectURL(new Blob([a.bytes], { type: a.type })); mdUrls.add(url); get.href = url; }
+                li.append(open, get); list.append(li);
+            }
+            view.append(list);
+        }
+        /* Message, or its source. */
+        const switcher = el('div', 'md-switch'); switcher.setAttribute('role', 'group'); switcher.setAttribute('aria-label', 'Show');
+        const choice = (label, what) => { const b = el('button', '', label); b.type = 'button'; b.dataset.show = what; b.addEventListener('click', () => show(what)); return b; };
+        const asMail = choice(uiSaid('set-mail-message', 'Message'), 'mail'); const asSource = choice(uiSaid('set-mail-source', 'Source'), 'source');
+        switcher.append(asMail, asSource);
+        function show(what) {
+            asMail.setAttribute('aria-pressed', String(what === 'mail')); asSource.setAttribute('aria-pressed', String(what === 'source'));
+            /* The frame is kept as it is (moved, not made again): hidden, not removed. */
+            if (!view.isConnected) body.replaceChildren(switcher, view, source);
+            view.hidden = what !== 'mail'; source.hidden = what !== 'source';
+        }
+        show('mail');
+        note('');
     }
     $('preview-close').addEventListener('click', () => leavePreview());
     /* Outside the window, or Escape: closed too -- unless what is edited is not saved. */
@@ -7011,7 +12543,7 @@
     }
     async function editFile(tab, inner, name) {
         closePreview();
-        const query = new URLSearchParams({ c: current, r: tab, p: inner });
+        const query = new URLSearchParams({ c: filesC(), r: tab, p: inner });
         $('preview-name').textContent = name;
         $('preview-download').href = `${API}/files/download?${query}`; $('preview-download').setAttribute('download', name);
         $('preview-where').hidden = true; $('preview-edit').hidden = true;
@@ -7069,7 +12601,7 @@
         if (!editing) return;
         const e = editing;
         const text = e.area.value;
-        const query = new URLSearchParams({ c: current, r: e.tab, p: e.inner, ...(how === 'copy' ? { copy: '1' } : { version: how === 'any' ? 'any' : e.version }) });
+        const query = new URLSearchParams({ c: filesC(), r: e.tab, p: e.inner, ...(how === 'copy' ? { copy: '1' } : { version: how === 'any' ? 'any' : e.version }) });
         e.ask.hidden = true;
         let j;
         try {
@@ -7084,7 +12616,7 @@
             /* Saved beside it: what is edited from now on is the copy. */
             e.inner = [...e.inner.split('/').slice(0, -1), j.name].join('/'); e.name = j.name;
             $('preview-name').textContent = j.name;
-            $('preview-download').href = `${API}/files/download?${new URLSearchParams({ c: current, r: e.tab, p: e.inner })}`; $('preview-download').setAttribute('download', j.name);
+            $('preview-download').href = `${API}/files/download?${new URLSearchParams({ c: filesC(), r: e.tab, p: e.inner })}`; $('preview-download').setAttribute('download', j.name);
         }
         e.version = j.version; e.saved = text;
         e.tell(how === 'copy' ? `saved as "${j.name}"; the file the tool wrote is left as it was` : `saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
@@ -7099,7 +12631,7 @@
         look.addEventListener('click', async () => {
             look.disabled = true;
             try {
-                const r = await fetch(`${API}/files/text?${new URLSearchParams({ c: current, r: e.tab, p: e.inner })}`);
+                const r = await fetch(`${API}/files/text?${new URLSearchParams({ c: filesC(), r: e.tab, p: e.inner })}`);
                 const theirs = await r.json();
                 if (!r.ok) throw new Error(theirs.error || 'Its new version could not be read.');
                 const when = document.createElement('small'); when.className = 'hint';
@@ -7158,6 +12690,16 @@
        else on the machine's disk is said to be out of reach. */
     const PATH_ONLY = /^\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+$/;
     const PATH = /\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+/g;
+    /* FROM THE CHAT (02-11): a folder named in a message is listed, as in Assets -- not an empty preview. */
+    async function openFromChat(tab, inner) {
+        const clean = String(inner).replace(/\/+$/, '');
+        const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: clean })}`).catch(() => null);
+        if (asFolder?.ok) {
+            if (!DEVICE) { showInAssets(tab, clean); return; }
+            filesOf = tab; filesAt = clean; await paintFiles(); showFiles(); return;
+        }
+        await preview(tab, clean, clean.split('/').pop(), 0);
+    }
     async function openPath(text) {
         /* A finger on the terminal also calls the on-screen keyboard: it is
            sent away, the file is what was asked for. */
@@ -7239,9 +12781,10 @@
     });
 
     /* FILES, a sheet over the screen: on a device's page only (the owner's are in the Assets tab of a conversation). */
-    function showFiles() { nav.over('files', () => { if (!$('files').classList.contains('embedded')) { $('files').hidden = true; focusTerminal(); } }); $('files').hidden = false; }
-    $('files-open').addEventListener('click', async () => { await paintFiles(); showFiles(); });
-    $('files-close').addEventListener('click', () => { if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
+    function showFiles() { if ($('assets-detail').contains($('files'))) unembedFiles(); nav.over('files', () => { if (!$('files').classList.contains('embedded')) { $('files').hidden = true; focusTerminal(); } }); $('files').hidden = false; }
+    /* On a device, Files opens on its list (a phone): the one to open is chosen there. */
+    $('files-open').addEventListener('click', async () => { filesListing = DEVICE; await paintFiles(); showFiles(); });
+    $('files-close').addEventListener('click', () => { filesListing = false; if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
 
     /* ---------- sign-in mailbox ---------- */
     /* While a conversation with a mailbox is open, the page asks every few
@@ -7273,14 +12816,23 @@
     async function paintSignIn() {
         const j = await (await fetch(`${API}/conversations/${encodeURIComponent(current)}/signin`)).json();
         $('signin-setup').hidden = !j.available;
-        $('signin-state').textContent = j.configured ? `Watching ${j.user} on ${j.host}.${j.failure ? ` Not readable just now: ${j.failure}` : ''}` : 'No mailbox is set for this conversation.';
+        $('signin-state').textContent = j.configured ? `Watching ${j.mailbox ? `« ${j.mailbox} » (${j.user ?? '?'})` : `${j.user} on ${j.host}`}.${j.failure ? ` Not readable just now: ${j.failure}` : ''}` : 'No mailbox is set for this conversation.';
         $('signin-remove').hidden = !j.configured;
+        /* One of Assets' mailboxes, or one typed in (20-11, #395). */
+        const box = $('signin-box'); const offered = j.mailboxes ?? [];
+        box.replaceChildren(...offered.map((m) => { const o = document.createElement('option'); o.value = m.name; o.textContent = `${m.name} · ${m.user}`; return o; }));
+        const typed = document.createElement('option'); typed.value = ''; typed.textContent = uiSaid('signin-typed', 'Another, typed in'); box.append(typed);
+        box.value = j.mailbox ?? (j.configured ? '' : (offered[0]?.name ?? ''));
+        $('signin-box-row').hidden = !offered.length;
+        signinTyped();
     }
+    const signinTyped = () => { const typed = !$('signin-box').value; for (const id of ['signin-host', 'signin-user', 'signin-password']) $(id).hidden = !typed; };
+    $('signin-box').addEventListener('change', signinTyped);
     $('signin-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;
         $('signin-state').textContent = 'Reading the mailbox once, to check...';
-        try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, { host: $('signin-host').value, user: $('signin-user').value, password: $('signin-password').value }); $('signin-password').value = ''; }
+        try { const box = $('signin-box').value; await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, box ? { mailbox: box } : { host: $('signin-host').value, user: $('signin-user').value, password: $('signin-password').value }); $('signin-password').value = ''; }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         await paintSignIn(); void watchSignIn();
     });
@@ -7298,7 +12850,7 @@
        what). Nothing is ever chosen for the owner but the thing they came
        from; writing is never chosen for them. */
     const KINDS = [['', 'All'], ['conversation', 'Conversations'], ['folder', 'Folders'], ['git', 'Repositories'], ['mailbox', 'Mailboxes']];
-    const KIND_WORD = { conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox' };
+    const KIND_WORD = { conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', agenda: 'calendar', contacts: 'address book', acces: 'access' };
     const ago = (date) => {
         if (!date) return 'never opened';
         const minutes = Math.max(0, Math.round((Date.now() - Date.parse(date)) / 60000));
@@ -7317,56 +12869,35 @@
         $('sharing-top').hidden = which === 'manage';
     };
 
-    /* A two-way control: Read | Write. `onChange(rights)`. */
-    function levelControl(rights, onChange, label) {
-        const group = document.createElement('div'); group.className = 'levels'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', label);
-        for (const [value, text] of [['r', 'Read'], ['rw', 'Write']]) {
-            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.rights = value;
-            b.setAttribute('aria-pressed', String(value === rights));
-            b.addEventListener('click', () => { if (value !== rights) onChange(value); });
-            group.append(b);
-        }
-        return group;
-    }
-    const fixedRight = (type) => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = type === 'conversation' ? 'Use - the whole terminal' : 'Read only'; return s; };
-    /* A CONVERSATION IS GIVEN IN TWO PARTS, ticked one by one: its terminal
-       ("x") and its chat ("rw": read, and write there). At least one: the
-       last one ticked cannot be unticked (taking it all back is "Take back").
-       The server holds the device to it (see server/door.mjs). */
+    /* A DEVICE'S RIGHT ON ONE THING (07-11, assets step 6): the kit's RightsPicker, its device column -- a folder, a
+       repository: Read, Write; a mailbox: Read; a conversation in parts: Terminal, Chat, Both. « None » takes it back
+       where it is given; in the share basket it is not offered (« Remove » is). Was levelControl, partsControl, fixedRight. */
     const talksHere = (name) => Boolean(conversations.find((c) => c.name === name)?.talk);
     /* What is proposed when a conversation is added: its chat where it talks through the app, else its terminal. */
     const partsFor = (name) => (talksHere(name) ? 'rw' : 'x');
-    function partsControl(rights, onChange, name) {
-        const group = document.createElement('div'); group.className = 'parts'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', `What of ${name} it gets`);
-        const has = { terminal: rights.includes('x'), chat: rights.includes('r') };
-        const boxes = {};
-        for (const [part, text] of [['terminal', 'Terminal'], ['chat', 'Chat']]) {
-            const label = document.createElement('label'); label.className = 'check'; label.dataset.part = part;
-            const box = document.createElement('input'); box.type = 'checkbox'; box.checked = has[part];
-            box.addEventListener('change', () => {
-                const next = { ...has, [part]: box.checked };
-                /* The last one ticked stays ticked, and says why. */
-                if (!next.terminal && !next.chat) { box.checked = true; need.hidden = false; return; }
-                const chat = next.chat ? (has.chat ? rights.replace('x', '') : 'rw') : '';
-                onChange(`${chat}${next.terminal ? 'x' : ''}`);
-            });
-            boxes[part] = box;
-            label.append(box, ` ${text}`); group.append(label);
-        }
-        /* The one left ticked cannot be unticked: marked so, and said when tried. */
-        for (const [part, other] of [['terminal', 'chat'], ['chat', 'terminal']]) if (has[part] && !has[other]) boxes[part].setAttribute('aria-disabled', 'true');
-        const need = document.createElement('small'); need.className = 'hint parts-need'; need.hidden = true; need.textContent = 'At least one. To give nothing, take it back.';
-        group.append(need);
-        /* Its chat, given while it is off: said, so that nobody wonders why the device shows nothing. */
-        if (has.chat && !talksHere(name)) {
-            const off = document.createElement('small'); off.className = 'hint parts-off'; off.textContent = 'Its chat is off: the device waits until you turn it on (General).'; off.title = 'Given, and waiting: the device sees its chat once you turn it on, in This conversation, then General.';
-            group.append(off);
-        }
-        return group;
+    function deviceRight(type, name, rights, onChange, { who = '', none = true } = {}) {
+        const levels = KIT.rightsFor(type, 'device').filter((l) => none || l !== 'none');
+        return KIT.RightsPicker({ key: type, holder: 'device', value: rights, levels, label: uiSaid('set-acc-what', 'What {who} may do with {name}', { who: who || 'it', name }), onChange });
     }
-    /* The right control of a thing given: a conversation in parts, a folder or a repository to read or write. */
-    const rightControl = (type, name, rights, onChange, label) => (type === 'conversation' ? partsControl(rights, onChange, name)
-        : type === 'folder' || type === 'git' ? levelControl(rights, onChange, label) : fixedRight(type));
+    /* Its chat given while it is off: said, so that nobody wonders why the device shows nothing. */
+    function chatOff(type, name, rights) {
+        if (type !== 'conversation' || !String(rights ?? '').includes('r') || talksHere(name)) return null;
+        const off = el('small', 'hint parts-off', uiSaid('set-dev-chat-off', 'Chat off: the device waits'));
+        off.title = 'Given, and waiting: the device sees its chat once you turn it on, in This conversation, then General.';
+        return off;
+    }
+    /* One thing given, or to give, to a device: the asset it is (an AssetCard row), its right and gestures on its right. */
+    function deviceThing(asset, { sub, actions = [], cls = '' } = {}) {
+        const at = asset.indexOf(':'); const type = asset.slice(0, at); const name = asset.slice(at + 1);
+        const row = KIT.AssetCard({ key: asset, kind: type, name, sub: sub ?? KIND_WORD[type] ?? type }, { tag: 'div', cls: `given-row dev-thing${cls ? ` ${cls}` : ''}`, actions });
+        row.dataset.asset = asset;
+        return row;
+    }
+    /* A right set from any of these places: given at its level, or taken back (« None »). */
+    async function setDeviceRight(id, asset, level, stored) {
+        if (level === 'none') await post(`${API}/devices/${id}/take`, { asset }).catch(() => {});
+        else await post(`${API}/devices/${id}/give`, { asset, rights: stored }).catch(() => {});
+    }
 
     async function loadCatalog() {
         const things = await (await fetch(`${API}/resources`)).json().catch(() => []);
@@ -7414,13 +12945,12 @@
         const box = $('share-basket'); box.replaceChildren();
         for (const [asset, rights] of basket) {
             const [type, name] = asset.split(':');
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = asset;
-            const label = document.createElement('b'); label.textContent = name;
-            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-            const right = rightControl(type, name, rights, (value) => { basket.set(asset, value); paintCompose(); }, `What it may do with ${name}`);
-            const out = document.createElement('button'); out.type = 'button'; out.textContent = 'Remove'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
+            const out = el('button', '', uiSaid('set-dev-remove', 'Remove')); out.type = 'button'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
             out.addEventListener('click', () => { basket.delete(asset); paintCompose(); });
-            row.append(label, right, out); box.append(row);
+            const right = deviceRight(type, name, rights, (level, stored) => { basket.set(asset, stored); paintCompose(); }, { none: false });
+            const row = deviceThing(asset, { actions: [right, out], cls: 'folder' });
+            const off = chatOff(type, name, rights); if (off) row.append(off);
+            box.append(row);
         }
         $('share-basket-title').textContent = `It will get (${basket.size})`;
         $('share-basket-empty').hidden = basket.size > 0;
@@ -7438,17 +12968,14 @@
         const order = (c) => `${c.near ? 0 : 1}${KINDS.findIndex(([k]) => k === c.type)}${c.name}`;
         for (const c of [...catalog].sort((a, b2) => order(a).localeCompare(order(b2)))) {
             if ((shareKind && c.type !== shareKind) || (wanted && !c.name.includes(wanted))) continue;
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = c.asset;
-            const label = document.createElement('b'); label.textContent = c.name;
-            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[c.type]}${c.near && c.type !== 'conversation' ? ', attached here' : ''}`; label.append(kind);
-            const plus = document.createElement('button'); plus.type = 'button';
-            if (basket.has(c.asset)) { plus.textContent = 'Added'; plus.disabled = true; }
+            const plus = el('button'); plus.type = 'button';
+            if (basket.has(c.asset)) { plus.textContent = uiSaid('set-dev-added', 'Added'); plus.disabled = true; }
             else {
-                plus.textContent = '+ Add'; plus.setAttribute('aria-label', `Add ${c.name}`);
+                plus.textContent = uiSaid('set-dev-add', '+ Add'); plus.setAttribute('aria-label', `Add ${c.name}`);
                 /* A conversation is given whole; anything else to read -- writing is asked for, never assumed. */
                 plus.addEventListener('click', () => { basket.set(c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r'); paintCompose(); });
             }
-            row.append(label, plus); add.append(row);
+            add.append(deviceThing(c.asset, { sub: `${KIND_WORD[c.type]}${c.near && c.type !== 'conversation' ? ', attached here' : ''}`, actions: [plus], cls: 'folder' }));
         }
         sayChoice();
     }
@@ -7499,80 +13026,403 @@
         const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
         button.replaceWith(ask); sure.focus();
     }
-    function grantRow(device, g) {
+    /* One thing a device has, its right set in place; « None » takes it back. */
+    function deviceGrantRow(device, g) {
         const [type, name] = g.asset.split(':');
-        const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = g.asset;
-        const label = document.createElement('span'); label.textContent = name;
-        const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-        const right = rightControl(type, name, g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await repaintDevices(); }, `What ${device.label} may do with ${name}`);
-        const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
-        take.addEventListener('click', () => takeBack(take, `Take ${name} back from ${device.label}`, () => post(`${API}/devices/${device.id}/take`, { asset: g.asset })));
-        row.append(label, right, take);
+        const right = deviceRight(type, name, g.rights, async (level, stored) => { await setDeviceRight(device.id, g.asset, level, stored); await repaintDevices(); if (level === 'none') void refresh(); }, { who: device.label });
+        const row = deviceThing(g.asset, { actions: [right] });
+        const off = chatOff(type, name, g.rights); if (off) row.append(off);
         return row;
     }
     let manageBy = 'device';
-    const deviceShut = new Set();      /* the device cards folded on this page */
+    const deviceShut = new Set();      /* the device panels folded on this page */
     /* After a change to a device: its list (the Devices pane) or the map, drawn again. */
     async function repaintDevices() {
         if (place === 'access' && accessTab === 'devices') { await paintManage(); return; }
         await readDevices(); await links?.changed();
     }
-    /* One device's card: its name (renamed here), what it has, revoke it. On
-       the map's card of the device too (`onMap`: never folded). */
-    function deviceCard(device, only, onMap = false) {
-        const card = document.createElement('div'); card.className = 'device card'; card.dataset.device = device.id;
-        const name = document.createElement('b'); name.textContent = device.label;
-        const rename = document.createElement('button'); rename.type = 'button'; rename.textContent = 'Rename';
-        rename.addEventListener('click', () => {
-            const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this device');
-            const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
-            const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await repaintDevices(); };
-            save.addEventListener('click', () => { void done(); });
-            field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
-            name.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
-        });
-        const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)} · paired ${new Date(device.createdAt).toLocaleDateString()}`;
-        if (!device.seenAt) seen.className = 'warn';
-        const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
-        revoke.addEventListener('click', () => takeBack(revoke, `Revoke ${device.label}: it loses all ${device.grants.length} thing${device.grants.length > 1 ? 's' : ''}, now`, () => post(`${API}/devices/${device.id}/revoke`)));
-        /* A card that folds, as the chapters of a conversation do: open unless folded on purpose. */
+    const thingsSaid = (n) => (n === 1 ? uiSaid('set-dev-things-1', '1 thing') : uiSaid('set-dev-things-n', '{n} things', { n }));
+    /* ONE DEVICE OPENED (07-11, assets step 6): the asset panel -- its head (its name, how many things, when it was
+       last seen; folded here), what it has (each thing with its right, « None » takes it back), then + Give more,
+       Rename, Revoke device (asked in place). On the map's card of the device too (`onMap`: never folded). */
+    function devicePanel(device, only, onMap = false) {
         const shut = !onMap && deviceShut.has(device.id);
-        const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'card-fold'; fold.textContent = shut ? 'Expand' : 'Collapse';
-        fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${shut ? 'Expand' : 'Collapse'} ${device.label}`);
+        const fold = el('button', 'card-fold', shut ? uiSaid('set-dev-expand', 'Expand') : uiSaid('set-dev-collapse', 'Collapse')); fold.type = 'button';
+        fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${fold.textContent} ${device.label}`);
         fold.addEventListener('click', () => { if (shut) deviceShut.delete(device.id); else deviceShut.add(device.id); void repaintDevices(); });
-        const count = document.createElement('small'); count.className = 'device-count'; count.textContent = `${device.grants.length} thing${device.grants.length === 1 ? '' : 's'}`;
-        const sub = document.createElement('span'); sub.className = 'device-sub'; sub.append(count, ' · ', seen);
-        const head = document.createElement('div'); head.className = 'device-head'; head.append(name, sub, fold);
-        const given = document.createElement('div'); given.className = 'given';
+        const seen = uiSaid('set-dev-seen', '{ago} · paired {date}', { ago: ago(device.seenAt), date: new Date(device.createdAt).toLocaleDateString() });
+        const given = el('div', 'given');
         const mine = only ? device.grants.filter((g) => g.asset === only) : device.grants;
-        for (const g of mine) given.append(grantRow(device, g));
-        /* Several chats given while off: said once for the card, not under each. */
+        for (const g of mine) given.append(deviceGrantRow(device, g));
+        /* Several chats given while off: said once for the panel, not under each. */
         const waiting = [...given.querySelectorAll('.parts-off')];
         if (waiting.length > 1) {
             for (const w of waiting) w.remove();
-            const once = document.createElement('p'); once.className = 'hint parts-off'; once.title = waiting[0].title;
-            once.textContent = `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`;
+            const once = el('p', 'hint parts-off', `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`); once.title = waiting[0].title;
             given.prepend(once);
         }
         if (only && mine.length === 0) {
-            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = only;
-            const label = document.createElement('span'); label.textContent = accessFor;
-            const none = document.createElement('small'); none.className = 'hint'; none.textContent = ' not shared'; label.append(none);
-            const give = document.createElement('button'); give.type = 'button'; give.className = 'primary'; give.textContent = `Give ${accessFor}`;
+            const give = el('button', 'primary', `Give ${accessFor}`); give.type = 'button';
             give.addEventListener('click', async () => { give.disabled = true; await post(`${API}/devices/${device.id}/give`, { asset: only, rights: partsFor(accessFor) }).catch(() => {}); await repaintDevices(); void refresh(); });
-            row.append(label, give); given.append(row);
+            given.append(deviceThing(only, { sub: 'not shared', actions: [give] }));
         }
         /* What the filter leaves out is named, never only counted. */
-        if (only && device.grants.length > mine.length) { const rest = document.createElement('p'); rest.className = 'hint'; rest.textContent = `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`; given.append(rest); }
-        const more = document.createElement('button'); more.type = 'button'; more.textContent = '+ Give more';
+        if (only && device.grants.length > mine.length) given.append(el('p', 'hint', `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`));
+        const more = el('button', '', uiSaid('set-dev-more', '+ Give more')); more.type = 'button';
         more.addEventListener('click', () => { void openCompose([], device.id); });
-        const acts = document.createElement('div'); acts.className = 'action-row device-acts'; acts.append(more, rename, revoke);
-        const body = document.createElement('div'); body.className = 'card-body'; body.hidden = shut; body.append(given, acts);
-        card.append(head, body);
-        return card;
+        const rename = el('button', '', uiSaid('set-dev-rename', 'Rename')); rename.type = 'button';
+        const revoke = KIT.AssetDelete({ label: uiSaid('set-dev-revoke', 'Revoke device'), lost: uiSaid('set-dev-revoke-q', '{name} loses everything, now', { name: device.label }), yes: uiSaid('set-dev-revoke-yes', 'Revoke'),
+            onYes: async () => { await post(`${API}/devices/${device.id}/revoke`).catch(() => {}); await repaintDevices(); void refresh(); } });
+        const panel = KIT.AssetPanel({ key: `device:${device.id}`, kind: 'device', name: device.label, sub: `${thingsSaid(device.grants.length)} · ${seen}`, tone: device.seenAt ? '' : 'warn' },
+            { cls: 'device-panel', actions: onMap ? [] : [fold], parts: [{ title: uiSaid('set-dev-has', 'What it has'), body: [given] }], foot: [more, rename, revoke] });
+        panel.dataset.device = device.id;
+        if (shut) for (const part of panel.children) if (!part.classList.contains('as-title')) part.hidden = true;
+        rename.addEventListener('click', () => {
+            const name = panel.querySelector('.kit-asset-name');
+            const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', uiSaid('set-dev-name', 'Name of this device'));
+            const save = el('button', 'primary', uiSaid('set-dev-save', 'Save')); save.type = 'button';
+            const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await repaintDevices(); };
+            save.addEventListener('click', () => { void done(); });
+            field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
+            name?.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
+        });
+        return panel;
     }
+    /* ---- voice boxes (boxes.mjs): pairing codes, the flash from this browser, the list ---- */
+    /* THE WAKE WORD THAT LEARNS (wakelearn.mjs): normal, or each wake clip kept with its label to train a better one. */
+    function boxWake(b) {
+        const part = el('div', 'box-wake');
+        const choice = el('div', 'levels'); choice.setAttribute('role', 'group'); choice.setAttribute('aria-label', uiSaid('box-wake', 'Wake word'));
+        const modes = [['normal', uiSaid('box-wake-normal', 'Normal')], ['learn', uiSaid('box-wake-learn', 'Learns from home')]].map(([mode, word]) => { const x = el('button', '', word); x.type = 'button'; x.dataset.mode = mode; choice.append(x); return x; });
+        const lines = el('div', 'box-wake-lines');
+        const row = el('div', 'action-row box-wake-row'); row.append(el('span', '', uiSaid('box-wake', 'Wake word')), choice);
+        part.append(row, lines);
+        const day = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+        const paint = (w) => {
+            for (const x of modes) x.setAttribute('aria-pressed', String(x.dataset.mode === w.mode));
+            lines.replaceChildren();
+            if (w.mode !== 'learn' && !w.kept) return;
+            lines.append(el('small', 'hint', uiSaid('box-wake-kept', '{kept} kept \u00b7 {real} real \u00b7 {false} false \u00b7 {near} near', { kept: w.kept, real: w.real, false: w.false, near: w.near ?? 0 })));
+            lines.append(el('small', 'hint', w.model
+                ? uiSaid('box-wake-rate-model', 'False wakes: {before} a day \u2192 {after} a day since the model of {date}', { before: w.model.falsePerDayBefore, after: w.model.falsePerDayAfter, date: day(w.model.installedAt) })
+                : uiSaid('box-wake-rate', 'False wakes: {n} a day', { n: w.falsePerDay })));
+            const cut = (v) => Number(v).toFixed(2);
+            lines.append(el('small', 'hint', uiSaid('box-wake-missed', 'Missed calls: {n} a day \u00b7 threshold {cutoff}', { n: w.missedPerDay ?? 0, cutoff: cut(w.cutoff ?? 0.94) })));
+            const t = w.tuning;
+            if (t) lines.append(el('small', 'hint', t.better
+                ? (t.state === 'applied' ? uiSaid('box-wake-tuned', 'Tuned {date}: {from} \u2192 {to}', { date: day(t.appliedAt ?? t.at), from: cut(t.from), to: cut(t.to) })
+                    : t.state === 'refused' ? uiSaid('box-wake-tune-refused', 'Threshold {to} refused by the box', { to: cut(t.to) })
+                        : uiSaid('box-wake-tune-sent', 'Threshold {from} \u2192 {to}: waiting for the box', { from: cut(t.from), to: cut(t.to) }))
+                : t.reason === 'not-enough' ? uiSaid('box-wake-tune-few', 'Tuning: not enough clips yet')
+                    : uiSaid('box-wake-tune-kept', 'Tuned {date}: threshold {from} kept', { date: day(t.at), from: cut(t.from) })));
+            lines.append(el('small', 'hint', uiSaid('box-wake-private', 'Only the wake word\u2019s 1.6 s, on this server: nothing is sent elsewhere.')));
+            const acts = el('div', 'action-row');
+            if (w.mode === 'learn') {
+                const now = el('button', '', uiSaid('box-wake-improve', 'Improve now')); now.type = 'button';
+                now.addEventListener('click', async () => { now.disabled = true; try { await post(`${API}/boxes/${b.id}/wake-improve`, {}); const fresh = await getJson(`/boxes/${b.id}/wake`, null); if (fresh) paint(fresh); else now.disabled = false; } catch (error) { now.textContent = error.message; now.disabled = false; } });
+                acts.append(now);
+            }
+            if (w.kept) {
+                const erase = el('button', '', uiSaid('box-wake-erase', 'Erase all\u2026')); erase.type = 'button';
+                const sure = el('span', 'box-wake-sure'); sure.hidden = true;
+                const yes = el('button', 'danger', uiSaid('box-wake-erase-yes', 'Yes, erase')); yes.type = 'button';
+                sure.append(el('span', '', uiSaid('box-wake-erase-ask', 'Erase the {n} clips?', { n: w.kept })), ' ', yes);
+                erase.addEventListener('click', () => { sure.hidden = !sure.hidden; });
+                yes.addEventListener('click', async () => { yes.disabled = true; try { paint(await post(`${API}/boxes/${b.id}/wake-erase`, {})); } catch (error) { yes.textContent = error.message; yes.disabled = false; } });
+                acts.append(erase, sure);
+            }
+            if (acts.childElementCount) lines.append(acts);
+        };
+        for (const x of modes) x.addEventListener('click', async () => {
+            try { paint(await post(`${API}/boxes/${b.id}/wake-mode`, { mode: x.dataset.mode })); } catch (error) { lines.replaceChildren(el('small', 'warn', error.message)); }
+        });
+        paint({ mode: b.wake ?? 'normal', kept: 0 });
+        void getJson(`/boxes/${b.id}/wake`, null).then((w) => { if (w) paint(w); });
+        return part;
+    }
+    /* A LEARNING SESSION (boxcollect.mjs): the box's false wakes kept, nothing answered, the Google Home playing
+       the radio -- programmed here in one tap (today, local hours); its one line says where it stands. */
+    function boxCollect(b) {
+        const part = el('div', 'box-wake box-collect');
+        const at = (hhmm, after = 0) => { const d = new Date(); const [h, m] = String(hhmm).split(':').map(Number); d.setHours(h, m || 0, 0, 0); if (d.getTime() <= after) d.setDate(d.getDate() + 1); return d; };
+        const from = el('input'); from.type = 'time'; from.value = '09:00'; from.setAttribute('aria-label', uiSaid('set-collect-from', 'from'));
+        const to = el('input'); to.type = 'time'; to.value = '17:00'; to.setAttribute('aria-label', uiSaid('set-collect-to', 'to'));
+        const go = el('button', 'primary'); go.type = 'button';
+        const line = el('div', 'box-wake-lines');
+        const row = el('div', 'action-row box-wake-row');
+        row.append(el('span', '', uiSaid('set-collect', 'Learning session (radio)')), el('span', '', uiSaid('set-collect-from', 'from')), from, el('span', '', uiSaid('set-collect-to', 'to')), to, go);
+        part.append(row, line);
+        const hour = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        let busy = false;
+        const paint = (c) => {
+            const m = KIT.collectModel(c);
+            busy = m.state === 'scheduled' || m.state === 'running';
+            go.textContent = busy ? uiSaid('set-collect-stop', 'Stop') : uiSaid('set-collect-go', 'Schedule');
+            const hhmm = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+            if (busy) { from.value = hhmm(m.from); to.value = hhmm(m.until); }
+            from.disabled = busy; to.disabled = busy; go.disabled = false;
+            line.replaceChildren();
+            if (m.state === 'scheduled') line.append(el('small', 'hint', uiSaid('set-collect-scheduled', 'Scheduled from {from} to {to}', { from: hour(m.from), to: hour(m.until) })));
+            if (m.state === 'running') line.append(el('small', 'hint', uiSaid('set-collect-running', 'Running: {n} wakes kept', { n: m.kept })));
+            if (m.state === 'ended') {
+                const out = el('a', '', uiSaid('set-collect-export', 'Export')); out.href = `${API}/boxes/collect-export?tag=radio`; out.setAttribute('download', '');
+                const said = el('small', 'hint', `${uiSaid('set-collect-ended', 'Ended: {n} wakes', { n: m.kept })} \u2014 `); said.append(out);
+                line.append(said);
+            }
+        };
+        go.addEventListener('click', async () => {
+            go.disabled = true;
+            try {
+                if (busy) { paint(await post(`${API}/boxes/${b.id}/collect`, { on: false })); return; }
+                const start = at(from.value); const end = at(to.value, start.getTime());
+                paint(await post(`${API}/boxes/${b.id}/collect`, { from: start.toISOString(), until: end.toISOString(), tag: 'radio', radio: true }));
+            } catch (error) { go.disabled = false; line.replaceChildren(el('small', 'warn', error.message)); }
+        });
+        paint({});
+        void getJson(`/boxes/${b.id}/collect`, null).then((c) => { if (c) paint(c); });
+        return part;
+    }
+    async function paintBoxes() {
+        const list = await getJson('/boxes', []); await loadRooms();
+        const rows = $('box-list'); rows.replaceChildren();
+        const places = el('datalist'); places.id = 'box-places';
+        for (const p of [...new Set(list.map((b) => b.place).filter(Boolean))]) { const o = el('option'); o.value = p; places.append(o); }
+        rows.append(places);
+        if (!list.length) rows.append(el('p', 'hint', 'No voice box yet.'));
+        for (const b of list) {
+            const card = el('div', 'device card box-card'); card.dataset.box = b.id;
+            const head = el('div', 'device-head');
+            const conv = conversations.find((c) => c.name === b.conversation);
+            head.append(el('b', '', b.place ? `${b.name} \u00b7 ${b.place}` : b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : String(b.conversation ?? '').startsWith('room:') ? `room ${rooms.find((r) => `room:${r.id}` === b.conversation)?.name ?? '?'}` : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
+            const rename = el('button', '', 'Rename'); rename.type = 'button';
+            rename.addEventListener('click', () => {
+                const field = el('input'); field.value = b.name; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this voice box');
+                const save = el('button', 'primary', 'Save'); save.type = 'button';
+                const done = async () => { if (field.value.trim()) await post(`${API}/boxes/${b.id}/rename`, { name: field.value.trim() }).catch(() => {}); await paintBoxes(); };
+                save.addEventListener('click', () => { void done(); });
+                field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
+                rename.replaceWith(save); head.firstChild.replaceWith(field); focusField(field);
+            });
+            const remove = el('button', '', 'Remove'); remove.type = 'button';
+            remove.addEventListener('click', () => takeBack(remove, `Remove ${b.name}: its key stops working now, and it goes back to its setup`, () => post(`${API}/boxes/${b.id}/revoke`)));
+            /* Its conversation: where what it hears is said, and whose answers it speaks. Changed here at any time. */
+            const where = el('select'); where.setAttribute('aria-label', `Conversation of ${b.name}`);
+            for (const c of conversations) { const o = el('option', '', shownName(c)); o.value = c.name; where.append(o); }
+            /* Or a room (#281): it speaks there, and says what is sent to it there. */
+            if (rooms.length) { const g = document.createElement('optgroup'); g.label = 'Rooms'; for (const r of rooms) { const o = el('option', '', r.name); o.value = `room:${r.id}`; g.append(o); } where.append(g); }
+            where.value = b.conversation;
+            where.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/move`, { conversation: where.value }).catch(() => {}); await paintBoxes(); });
+            const whereRow = el('label', 'box-where'); whereRow.append('Speaks in ', where);
+            /* Where it is (a home): typed once, then offered for the next ones. */
+            const place = el('input'); place.value = b.place ?? ''; place.maxLength = 40; place.placeholder = 'Place (a home)'; place.setAttribute('list', 'box-places'); place.setAttribute('aria-label', `Place of ${b.name}`);
+            place.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/place`, { place: place.value.trim() }).catch(() => {}); await paintBoxes(); });
+            /* A box paired before it knew its time zone takes this page's: its lights follow the hours here. */
+            if (!b.zone || !b.lang) void post(`${API}/boxes/${b.id}/zone`, { zone: b.zone || Intl.DateTimeFormat().resolvedOptions().timeZone, lang: navigator.language }).catch(() => {});
+            /* Louder, softer: kept here, given to the box now or when it comes back. */
+            const vol = el('input'); vol.type = 'range'; vol.min = '0'; vol.max = '100'; vol.step = '5'; vol.value = String(b.volume ?? 80); vol.setAttribute('aria-label', `Volume of ${b.name}`);
+            const volSaid = el('small', 'hint', `${vol.value} %`);
+            vol.addEventListener('input', () => { volSaid.textContent = `${vol.value} %`; });
+            vol.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/volume`, { level: Number(vol.value) }).catch((error) => { volSaid.textContent = error.message; }); });
+            const volRow = el('label', 'box-volume'); volRow.append('Volume ', vol, volSaid);
+            const acts = el('div', 'action-row'); acts.append(whereRow, place, volRow, rename, remove);
+            card.append(head, acts);
+            card.append(boxWake(b), boxCollect(b));
+            /* TESTED FROM HERE (01-11): its sound -- it says a test sentence -- and its microphone -- it listens
+               once, and what it heard shows here, not in the conversation. */
+            if (b.online) {
+                const test = el('div', 'action-row box-test');
+                const sound = el('button', '', 'Test the sound'); sound.type = 'button';
+                const mic = el('button', '', 'Test the microphone'); mic.type = 'button';
+                const heard = el('small', 'hint box-test-heard', '');
+                sound.addEventListener('click', async () => {
+                    sound.disabled = true; heard.textContent = 'It says a test sentence…';
+                    try { await post(`${API}/boxes/${b.id}/test-sound`, {}); heard.textContent = 'Sent: you should hear « Test du son ».'; }
+                    catch (error) { heard.textContent = `Not played: ${error.message}`; }
+                    sound.disabled = false;
+                });
+                mic.addEventListener('click', async () => {
+                    mic.disabled = true; heard.textContent = 'It asks you to speak, then listens…';
+                    try { await post(`${API}/boxes/${b.id}/test-mic`, {}); }
+                    catch (error) { heard.textContent = `Not started: ${error.message}`; mic.disabled = false; return; }
+                    for (let i = 0; i < 50; i++) {
+                        await new Promise((r) => setTimeout(r, 1000));
+                        const r = await post(`${API}/boxes/${b.id}/test-result`, {}).catch(() => null);
+                        if (!r || r.state === 'listening') continue;
+                        heard.textContent = r.state === 'heard' ? `Heard: « ${r.text} »` : r.state === 'failed' ? `The dictation failed: ${r.text}` : 'Nothing heard.';
+                        break;
+                    }
+                    mic.disabled = false;
+                });
+                test.append(sound, mic, heard);
+                card.append(test);
+            }
+            /* ITS WI-FI NETWORKS (01-11): the box knows several and goes to the strongest it hears; one is added
+               here before it moves, from the networks it hears itself -- no phone, no button. */
+            if (b.online) {
+                const wifi = el('div', 'box-wifi');
+                const known = el('div', 'box-wifi-known');
+                const add = el('button', '', 'Add a Wi-Fi'); add.type = 'button';
+                const paintKnown = async () => {
+                    known.replaceChildren(el('small', 'hint', 'Its Wi-Fi networks…'));
+                    const r = await post(`${API}/boxes/${b.id}/wifi-known`, {}).catch(() => null);
+                    known.replaceChildren();
+                    if (!r) { known.append(el('small', 'hint', 'Its networks cannot be read just now.')); return; }
+                    for (const ssid of r.networks) {
+                        const chip = el('span', 'box-wifi-net', ssid === r.current ? `${ssid} (now)` : ssid);
+                        if (ssid !== r.current) {
+                            const x = el('button', 'quiet', '×'); x.type = 'button'; x.setAttribute('aria-label', `Forget ${ssid}`);
+                            x.addEventListener('click', async () => { await post(`${API}/boxes/${b.id}/wifi-forget`, { ssid }).catch(() => {}); await paintKnown(); });
+                            chip.append(x);
+                        }
+                        known.append(chip);
+                    }
+                };
+                add.addEventListener('click', async () => {
+                    add.disabled = true; add.textContent = 'Listening for networks…';
+                    const r = await post(`${API}/boxes/${b.id}/wifi-scan`, {}).catch(() => ({ networks: [] }));
+                    add.disabled = false; add.textContent = 'Add a Wi-Fi';
+                    const pick = el('select'); pick.setAttribute('aria-label', 'Network');
+                    for (const n of r.networks ?? []) { const o = el('option', '', `${n.ssid}${n.secure ? '' : ' (open)'}`); o.value = n.ssid; pick.append(o); }
+                    const pass = el('input'); pass.type = 'password'; pass.placeholder = 'Password'; pass.autocomplete = 'off'; pass.setAttribute('aria-label', 'Password of the network');
+                    const join = el('button', 'primary', 'Add'); join.type = 'button';
+                    const said = el('small', 'hint', '');
+                    join.addEventListener('click', async () => {
+                        join.disabled = true; said.textContent = 'The box tries it (up to 20 s); it comes back on its network after.';
+                        try { await post(`${API}/boxes/${b.id}/wifi-join`, { ssid: pick.value, password: pass.value }); said.textContent = `Added: ${pick.value}.`; form.remove(); await paintKnown(); }
+                        catch (error) { said.textContent = `Not joined: ${error.message}`; join.disabled = false; }
+                    });
+                    const form = el('div', 'action-row box-wifi-add'); form.append(pick, pass, join, said);
+                    wifi.append(form); focusField(pass);
+                });
+                wifi.append(el('small', 'hint', 'Wi-Fi it knows (it goes to the strongest): '), known, add);
+                card.append(wifi);
+                void paintKnown();
+            }
+            rows.append(card);
+        }
+    }
+    /* A NEW VOICE BOX: a kind of New asset (05-11, step 4), the same flow wherever it is asked for -- Assets, a
+       conversation's Attach, "+ Voice box" here and in a room, Features. Where it speaks (preselected from where it
+       was asked), plug it (a flash its conversation asked for waits here), pair it (the code, link and QR of before),
+       it answers (it shows among the boxes). The box itself is paired as it always was: one pairCode() for all. */
+    $('assets-forms').append($('box-add'));
+    /* Where it speaks, said: a conversation's name, or "room <name>". */
+    function whereName(where) {
+        const w = String(where ?? '');
+        if (w.startsWith('room:')) return `${uiSaid('set-na-room', 'room')} ${rooms.find((r) => `room:${r.id}` === w)?.name ?? '?'}`;
+        return shownName(conversations.find((c) => c.name === w)) || w;
+    }
+    const speaksLine = (where) => uiSaid('set-na-speaks', 'Will speak in {name}', { name: whereName(where) });
+    function stopBoxWait() { if (boxFlow?.timer) { clearTimeout(boxFlow.timer); boxFlow.timer = null; } }
+    function startBoxFlow(host) {
+        stopBoxWait();
+        boxFlow = { host, where: host.where ?? '', step: 'where', made: null, known: null, timer: null, until: 0 };
+        $('box-room').value = ''; $('box-ready').hidden = true; $('box-error').hidden = true; $('box-waiting').textContent = '';
+        if (!rooms.length) void loadRooms().then(() => { if (boxFlow?.host === host && boxFlow.step === 'where') fillBoxWhere(); });
+    }
+    /* Which conversation it speaks in, or a room (#281): chosen on purpose, never a silent default. */
+    function fillBoxWhere() {
+        const pick = $('box-conversation'); pick.replaceChildren();
+        const none = el('option', '', 'Choose a conversation...'); none.value = ''; pick.append(none);
+        for (const c of conversations) { const o = el('option', '', shownName(c)); o.value = c.name; pick.append(o); }
+        if (rooms.length) { const g = document.createElement('optgroup'); g.label = 'Rooms'; for (const r of rooms) { const o = el('option', '', r.name); o.value = `room:${r.id}`; g.append(o); } pick.append(g); }
+        pick.value = [...pick.options].some((o) => o.value === boxFlow?.where) ? boxFlow.where : '';
+    }
+    /* The form at its step, for the box that shows it (newAssetBox). */
+    function paintBoxFlow() {
+        if (!boxFlow) startBoxFlow({ where: '', repaint: () => {}, close: () => {} });
+        const form = $('box-add'); form.hidden = false;
+        for (const part of form.querySelectorAll('.box-step')) part.hidden = part.dataset.step !== boxFlow.step;
+        if (boxFlow.step === 'where') fillBoxWhere();
+        if (boxFlow.step === 'plug') void paintBoxJobs();
+        $('box-back').hidden = boxFlow.step === 'where';
+        $('box-next').hidden = boxFlow.step === 'pair';
+        return form;
+    }
+    /* A flash its conversation asked for (Tether, device-flash): its card, as in the thread -- started here. */
+    async function paintBoxJobs() {
+        const tether = await getJson('/tether', {});
+        const jobs = Array.isArray(tether.jobs) ? tether.jobs : [];
+        if (boxFlow?.step !== 'plug') return;
+        $('box-jobs').replaceChildren(...jobs.map((j) => jobCard(j, () => { if (boxFlow?.step === 'plug') void paintBoxJobs(); })));
+    }
+    const boxGo = (step) => { if (!boxFlow) return; boxFlow.step = step; $('box-error').hidden = true; boxFlow.host.repaint(); };
+    $('box-next').addEventListener('click', () => {
+        if (!boxFlow) return;
+        if (boxFlow.step === 'where' && !$('box-conversation').value) { $('box-error').textContent = 'Choose the conversation it speaks in first.'; $('box-error').hidden = false; $('box-conversation').focus(); return; }
+        boxGo(BOX_STEPS[BOX_STEPS.indexOf(boxFlow.step) + 1] ?? boxFlow.step);
+    });
+    $('box-back').addEventListener('click', () => { if (boxFlow) { stopBoxWait(); boxGo(BOX_STEPS[Math.max(0, BOX_STEPS.indexOf(boxFlow.step) - 1)]); } });
+    $('box-conversation').addEventListener('change', () => {
+        if (!boxFlow) return;
+        boxFlow.where = $('box-conversation').value;
+        const line = $('box-add').closest('.kit-newasset')?.querySelector('.kit-na-context > span');
+        if (line && boxFlow.where) line.textContent = speaksLine(boxFlow.where);
+    });
+    /* ONE PAIRING CODE for a voice box (boxes.mjs), whoever asks: this flow, a flash run from the thread. With
+       `origin` (this page's address), the server adds the setup key, its link and QR code. */
+    function pairCode({ conversation, name, origin = '' }) {
+        return post(`${API}/boxes/code`, { conversation, name, ...(origin ? { origin } : {}), zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    }
+    /* It answers: paired, it shows among the boxes -- read again until it does, while the code holds. */
+    function waitBoxPaired() {
+        stopBoxWait();
+        const flow = boxFlow;
+        const look = async () => {
+            if (boxFlow !== flow || flow.made || $('assets-forms').contains($('box-add')) || Date.now() > flow.until) return;
+            const list = await getJson('/boxes', null);
+            const fresh = Array.isArray(list) && flow.known ? list.find((b) => !flow.known.has(b.id)) : null;
+            if (boxFlow !== flow) return;
+            if (fresh) {
+                flow.made = { id: fresh.id, name: fresh.name, where: fresh.conversation };
+                flow.host.repaint();
+                if (!$('boxes').closest('[hidden]')) void paintBoxes();
+                return;
+            }
+            flow.timer = setTimeout(() => { void look(); }, 3000);
+        };
+        flow.timer = setTimeout(() => { void look(); }, 3000);
+    }
+    $('box-key-copy').addEventListener('click', async () => {
+        const key = $('box-key').textContent;
+        try { await navigator.clipboard.writeText(key); $('box-key-copy').textContent = 'Copied'; }
+        catch { const range = document.createRange(); range.selectNodeContents($('box-key')); getSelection().removeAllRanges(); getSelection().addRange(range); }
+        setTimeout(() => { $('box-key-copy').textContent = 'Copy the key'; }, 2000);
+    });
+    $('box-code').addEventListener('click', async () => {
+        if (!$('box-conversation').value) { boxGo('where'); $('box-error').textContent = 'Choose the conversation it speaks in first.'; $('box-error').hidden = false; return; }
+        try {
+            const before = await getJson('/boxes', null);
+            const r = await pairCode({ conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin });
+            $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
+            $('box-key').textContent = r.key ?? '';
+            $('box-link').href = r.link ?? '#';
+            $('box-qr').innerHTML = r.qr ?? '';
+            $('box-ready').hidden = false;
+            if (boxFlow && Array.isArray(before)) {
+                boxFlow.known = new Set(before.map((b) => b.id)); boxFlow.until = Date.now() + Number(r.minutes || 10) * 60_000;
+                $('box-waiting').textContent = uiSaid('set-na-box-waiting', 'Waiting for it to answer…');
+                waitBoxPaired();
+            }
+        } catch (error) { $('box-code-minutes').textContent = error.message; $('box-ready').hidden = false; }
+    });
+    /* "+ Voice box" of Access › Boxes: the New asset box, right here, on its kind; on the conversation Access is for. */
+    function paintBoxNew() {
+        const holder = $('box-newasset');
+        if (holder.contains($('box-add'))) $('assets-forms').append($('box-add'));
+        holder.hidden = false;
+        holder.replaceChildren(newAssetBox({ kind: 'box', boxHost: boxFlow.host }));
+    }
+    function closeBoxNew() { const holder = $('box-newasset'); if (holder.contains($('box-add'))) $('assets-forms').append($('box-add')); holder.replaceChildren(); holder.hidden = true; }
+    function openBoxNew() {
+        startBoxFlow({ where: accessFor && conversations.some((c) => c.name === accessFor) ? accessFor : '', repaint: paintBoxNew, close: closeBoxNew });
+        paintBoxNew();
+        focusFirst($('box-newasset'));
+    }
+    $('box-new').addEventListener('click', () => { if (!$('box-newasset').hidden) { stopBoxWait(); boxFlow = null; closeBoxNew(); } else openBoxNew(); });
     async function paintManage() {
         await readDevices();
+        void paintBoxes();
         $('share-by-device').setAttribute('aria-pressed', String(manageBy === 'device')); $('share-by-thing').setAttribute('aria-pressed', String(manageBy === 'thing'));
         const rows = $('sharing-devices'); rows.replaceChildren(); rows.hidden = manageBy !== 'device';
         const things = $('share-things'); things.replaceChildren(); things.hidden = manageBy !== 'thing';
@@ -7583,34 +13433,32 @@
         if (manageBy === 'device' || only) {
             rows.hidden = false; things.hidden = true;
             for (const device of [...sharedDevices].sort((a, b2) => String(b2.seenAt ?? '').localeCompare(String(a.seenAt ?? '')))) {
-                rows.append(deviceCard(device, only));
+                rows.append(devicePanel(device, only));
             }
             return;
         }
-        /* By thing: who can see this folder? What nobody has is folded away. */
+        /* By thing: who can see this folder? Each thing (an AssetCard), who has it (the kit's AccessList, devices only:
+           each with its right, « None » takes it back). What nobody has is folded away, each with « Share… ». */
         await loadCatalog();
         const alone = [];
         for (const c of catalog) {
             const holders = devicesWith(c.asset);
             if (holders.length === 0) { alone.push(c); continue; }
-            const block = document.createElement('details'); block.className = 'thing'; block.dataset.asset = c.asset; block.open = true;
-            const top = document.createElement('summary'); top.textContent = `${c.name} - ${KIND_WORD[c.type]} - ${holders.length} device${holders.length > 1 ? 's' : ''}`;
+            const block = el('details', 'thing'); block.dataset.asset = c.asset; block.open = true;
+            const top = el('summary');
+            top.append(KIT.AssetCard({ key: c.asset, kind: c.type, name: c.name, sub: `${KIND_WORD[c.type]} · ${holders.length === 1 ? uiSaid('set-device', '1 device') : uiSaid('set-devices', '{n} devices', { n: holders.length })}` }, { tag: 'span' }));
             block.append(top);
-            for (const device of holders) {
-                const row = grantRow(device, device.grants.find((g) => g.asset === c.asset));
-                row.firstChild.textContent = device.label;
-                block.append(row);
-            }
+            const model = KIT.accessModel({ key: c.type, holders: holders.map((d) => ({ id: `device:${d.id}`, name: d.label, sub: ago(d.seenAt), value: d.grants.find((g) => g.asset === c.asset).rights })) });
+            block.append(KIT.AccessList(model, { key: c.type, name: c.name, title: '', give: false,
+                onChange: async (row, level, stored) => { await setDeviceRight(row.id.slice('device:'.length), c.asset, level, stored); await repaintDevices(); if (level === 'none') void refresh(); } }));
             things.append(block);
         }
-        const rest = document.createElement('details'); rest.className = 'thing';
-        const top = document.createElement('summary'); top.textContent = `Not shared (${alone.length})`; rest.append(top);
+        const rest = el('details', 'thing');
+        rest.append(el('summary', '', uiSaid('set-dev-not-shared', 'Not shared ({n})', { n: alone.length })));
         for (const c of alone) {
-            const row = document.createElement('div'); row.className = 'given-row';
-            const label = document.createElement('span'); label.textContent = `${c.name} - ${KIND_WORD[c.type]}`;
-            const give = document.createElement('button'); give.type = 'button'; give.textContent = 'Share...';
+            const give = el('button', '', uiSaid('set-dev-share', 'Share…')); give.type = 'button';
             give.addEventListener('click', () => { void openCompose([[c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r']]); });
-            row.append(label, give); rest.append(row);
+            rest.append(deviceThing(c.asset, { actions: [give] }));
         }
         things.append(rest);
     }
@@ -7618,8 +13466,14 @@
     async function openManage() { await openAccessPage('devices'); }
     $('share-by-device').addEventListener('click', () => { manageBy = 'device'; void paintManage(); });
     $('share-by-thing').addEventListener('click', () => { manageBy = 'thing'; void paintManage(); });
+    /* A NEW DEVICE: a kind of New asset (05-11, step 4) -- the share sheet, the same for every way in (the Device
+       kind of the box, the map's "+", "+ New device" here and on the map). On a conversation (`of`), it is offered it. */
+    function newDevice(of = '') {
+        const c = String(of ?? '');
+        void openCompose(c && !c.startsWith('room:') ? [[`conversation:${c}`, partsFor(c)]] : []);
+    }
     /* Filtered on a conversation, a new device is offered that conversation. */
-    $('share-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
+    $('share-new-device').addEventListener('click', () => newDevice(accessFor));
     /* From a conversation: that conversation, and nothing else, is in the basket. */
     $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, partsFor(current)]]); });
     /* The Sharing chapter of a conversation: who has it, and which parts -- changed there, at once. */
@@ -7628,23 +13482,15 @@
         await readDevices();
         const box = $('share-here'); box.replaceChildren();
         const asset = `conversation:${current}`;
-        for (const device of devicesWith(asset)) {
-            const g = device.grants.find((x) => x.asset === asset);
-            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.device = device.id;
-            const label = document.createElement('span'); label.textContent = device.label;
-            const right = partsControl(g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset, rights: value }).catch(() => {}); await paintShareHere(); }, current);
-            const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
-            take.addEventListener('click', () => {
-                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Take ${current} back from ${device.label}`;
-                const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
-                keep.addEventListener('click', () => { void paintShareHere(); });
-                sure.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/take`, { asset }).catch(() => {}); await paintShareHere(); void refresh(); });
-                const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
-                take.replaceWith(ask); sure.focus();
-            });
-            row.append(label, right, take); box.append(row);
+        /* The devices that have it (the kit's AccessList): each with its parts, « None » takes it back. */
+        const holders = devicesWith(asset).map((d) => ({ id: `device:${d.id}`, name: d.label, sub: ago(d.seenAt), value: d.grants.find((x) => x.asset === asset).rights }));
+        if (holders.length) {
+            box.append(KIT.AccessList(KIT.accessModel({ key: 'conversation', holders }), { key: 'conversation', name: current, title: '', give: false,
+                onChange: async (row, level, stored) => { await setDeviceRight(row.id.slice('device:'.length), asset, level, stored); await paintShareHere(); if (level === 'none') void refresh(); } }));
+            const off = chatOff('conversation', current, holders.find((h) => String(h.value).includes('r'))?.value);
+            if (off) box.append(off);
         }
-        $('share-here-none').hidden = box.children.length > 0;
+        $('share-here-none').hidden = holders.length > 0;
     }
     /* Back from choosing or from the code: where it was opened from, as Back and Escape. */
     const leaveCompose = () => { void refresh(); if (!nav.close('compose')) leavePlace(); };
@@ -7696,15 +13542,63 @@
     $('share-done').addEventListener('click', leaveCompose);
 
     /* ---------- resting and archiving ---------- */
-    $('sleep').addEventListener('click', async () => {
+    async function sleepMachine() {
         const name = current;
         leavePanel();
         disconnect();
         say('going to sleep', 'connecting');
-        show('Going to sleep...');
-        try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); await refresh(); enter(); }
+        show('Going to sleep...'); mascot('asleep');
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { action: 'sleep' }); await refresh(); enter(); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
+    }
+    $('sleep').addEventListener('click', () => void sleepMachine());
+    $('m-start').addEventListener('click', () => void machineAct('start'));
+    $('m-stop').addEventListener('click', () => askMachine('stop'));
+    $('m-force').addEventListener('click', () => askMachine('force'));
+    $('m-confirm-no').addEventListener('click', () => { $('m-confirm').hidden = true; });
+    for (const b of $('m-escalate').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/machine`, { escalate: b.dataset.on === 'true' }); await refresh(); paintMachine(conversations.find((x) => x.name === current)); }
+            catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        });
+    }
+    /* ITS WATCHDOG (server/watchdog.mjs): Off, 30 min, 1 h (the default), 2 h, or minutes of its own. */
+    const DOG_CHOICES = [30, 60, 120];
+    function paintWatchdog(here) {
+        const on = here?.watchdog?.on !== false;
+        const min = Number.isInteger(here?.watchdog?.delayMin) ? here.watchdog.delayMin : 60;
+        const custom = on && !DOG_CHOICES.includes(min);
+        if ($('m-dog').dataset.of !== (here?.name ?? '')) { $('m-dog').dataset.of = here?.name ?? ''; $('m-dog').dataset.custom = 'false'; }
+        const choosing = $('m-dog').dataset.custom === 'true';
+        for (const b of $('m-dog').children) {
+            const pressed = b.dataset.min === '0' ? !on : b.dataset.min === 'custom' ? custom || (on && choosing) : on && !choosing && Number(b.dataset.min) === min;
+            b.setAttribute('aria-pressed', String(pressed));
+        }
+        $('m-dog-custom').hidden = !(custom || (on && choosing));
+        if (document.activeElement !== $('m-dog-min')) $('m-dog-min').value = String(min);
+    }
+    async function setWatchdog(watchdog) {
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/machine`, { watchdog }); await refresh(); paintMachine(conversations.find((x) => x.name === current)); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    }
+    for (const b of $('m-dog').children) {
+        b.addEventListener('click', () => {
+            const m = b.dataset.min;
+            $('m-dog').dataset.custom = String(m === 'custom');
+            if (m === 'custom') { paintWatchdog({ ...conversations.find((x) => x.name === current), watchdog: { on: true, delayMin: Number($('m-dog-min').value) || 60 } }); $('m-dog-min').focus(); return; }
+            void setWatchdog(m === '0' ? { on: false } : { on: true, delayMin: Number(m) });
+        });
+    }
+    $('m-dog-min').addEventListener('change', () => {
+        const n = Math.round(Number($('m-dog-min').value));
+        if (!Number.isFinite(n)) return;
+        void setWatchdog({ on: true, delayMin: Math.min(1440, Math.max(10, n)) });
     });
+    /* The quick actions at the top of the panel do the same as the Machine chapter's. */
+    $('hand-terminal').addEventListener('click', () => { leavePanel(); seeTerminal(); });
+    $('quick-wake').addEventListener('click', () => { leavePanel(); seeTerminal(); });
     async function rebuild() {
         const name = current;
         disconnect();
@@ -7726,6 +13620,36 @@
         catch (error) { show(error.message, 'Close', enter); }
     }
     $('archive').addEventListener('click', () => { void archive(false); });
+    /* RESET or DELETE FOR GOOD (01-11): whatever state its machine is in -- one that never started too. Both
+       erase, so its name is typed first; nothing is done until it matches. */
+    let sureAction = null;
+    function askSure(what, button, action) {
+        const c = conversations.find((x) => x.name === current); if (!c) return;
+        sureAction = { name: c.name, shown: shownName(c), action };
+        $('sure-what').textContent = `${what} Type « ${shownName(c)} » to confirm.`;
+        $('sure-go').textContent = button; $('sure-go').disabled = true; $('sure-name').value = '';
+        $('sure-form').hidden = false; focusField($('sure-name'));
+    }
+    const sureClose = () => { sureAction = null; $('sure-form').hidden = true; };
+    $('sure-name').addEventListener('input', () => { $('sure-go').disabled = !sureAction || $('sure-name').value.trim() !== sureAction.shown; });
+    $('sure-cancel').addEventListener('click', sureClose);
+    $('sure-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!sureAction || $('sure-name').value.trim() !== sureAction.shown) return;
+        const { name, action } = sureAction; sureClose(); void action(name);
+    });
+    $('reset-machine').addEventListener('click', () => askSure('Reset: its machine and its files are erased, and a new empty machine is built. Its settings and attached assets stay.', 'Reset', async (name) => {
+        leavePanel(); disconnect();
+        say('building', 'connecting'); show('Resetting: a new machine is being built...');
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/rebuild`, { reset: true, confirm: name }); await refresh(); enter(); }
+        catch (error) { show(error.message, 'Close', enter); }
+    }));
+    $('erase-conversation').addEventListener('click', () => askSure('Delete for good: its machine and its files are erased; nothing is put aside. Attached assets stay where they are.', 'Delete for good', async (name) => {
+        leavePanel(); disconnect();
+        say('archiving', 'connecting'); show('Deleting for good...');
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/erase`, { confirm: name }); await refresh(); select(''); }
+        catch (error) { show(error.message, 'Close', enter); }
+    }));
     /* "<" of a conversation (a phone): the list, as Back does. */
     $('back').addEventListener('click', () => { if (!nav.close('room')) select(''); });
 
@@ -7749,11 +13673,12 @@
        page ask (Chrome, Edge, Android), the button asks. On an iPhone or an
        iPad no page can ask: the button explains the two taps it takes.
        Already running as an app: there is nothing to offer. */
-    const asApp = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    const asApp = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
     const apple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     let installEvent = null;
     let installOffered = false;
-    const offerInstall = () => { installOffered = true; $('install').hidden = false; $('install-row').hidden = false; };
+    /* 06-11: offered where it is seen -- a button at the top of the list too, not only in Settings › This device. */
+    const offerInstall = () => { installOffered = true; $('install').hidden = false; $('install-row').hidden = false; if (!DEVICE) $('install-top').hidden = false; };
     /* Chrome reads the manifest again when its address changes, and may then
        offer the install anew: that offer, if it comes soon, is the one used. */
     let freshOffer = null;
@@ -7761,7 +13686,9 @@
         event.preventDefault(); installEvent = event; offerInstall();
         if (freshOffer) { const take = freshOffer; freshOffer = null; take(event); }
     });
-    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; $('install-row').hidden = true; $('install-name-form').hidden = true; });
+    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; $('install-row').hidden = true; $('install-name-form').hidden = true; $('install-top').hidden = true; });
+    /* The top button is the same gesture: Settings at This device, its Install pressed. */
+    $('install-top').addEventListener('click', () => { $('nav-settings').click(); openChapter('s-screen'); $('install-row').scrollIntoView({ block: 'center' }); $('install').click(); });
     if (apple && !asApp) offerInstall();
     /* FIRST A NAME FOR THIS DEVICE, then the browser's own question. */
     $('install').addEventListener('click', async () => {
@@ -7876,6 +13803,8 @@
             enter();
             /* Where it talks through the app, the chat is what this device opens on. */
             void chatFirst();
+            /* A link to a mail (?mail=mail:...): opened over it, if this device may read that mailbox (else it says so). */
+            if (/^mail:/.test(new URLSearchParams(location.search).get('mail') ?? '')) void openMailRef(new URLSearchParams(location.search).get('mail'), { of: current });
             return;
         } else {
             view(current ? 'room' : 'list');
@@ -7898,8 +13827,20 @@
             await chatFirst();
             goTab('lists', { pick: { list: arrived.get('binder'), ...(/^\d{1,9}$/.test(card) ? { card } : {}) } });
         }
+        /* A link to a mail (?mail=mail:TARGET/MESSAGE-ID): the mail viewer opened on it, over the page. */
+        if (/^mail:/.test(arrived.get('mail') ?? '')) void openMailRef(arrived.get('mail'), { of: current });
         /* Arriving on the address of a place (a reload, a link): it is opened. */
         if (home && new URLSearchParams(location.search).has('open')) await followAddress();
+        /* THE FIRST START (Features, features.js): nothing made yet, the welcome not passed -- the home
+           page opens on it, once; passed ("Skip", or a conversation made), it never comes back by itself. */
+        else if (home && !DEVICE && !current && conversations.length === 0) {
+            const d = await features?.refresh().catch(() => null);
+            if (d?.welcome && place === 'conversations' && !conversations.length) openDeck(false);
+        }
+        /* THE DESK, the page of arrival (16-11): the bare address opens on it where the list sits beside it; on a
+           phone the list stays the first screen, the desk one tap away (its title). An address that names a
+           conversation or a place opens on that instead. */
+        else if (home && !DEVICE && !current && !location.search && place === 'conversations' && !narrow()) openDeck(false);
     }
     void start();
 })();

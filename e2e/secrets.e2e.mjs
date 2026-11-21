@@ -21,14 +21,11 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.until('the secret is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="secret:MODEL_KEY"]').count()) === 1);
     assert.equal((await me.page.content()).includes('sk-not-shown-again'), false, 'the value is nowhere in the page');
     assert.equal(JSON.stringify((await me.api('/api/secrets')).body).includes('sk-not-shown-again'), false, 'nor in what the server gives back');
-    await me.page.locator('#assets-close').click();
-    /* Handed to this conversation's tool from Access, in two taps. */
-    await me.page.locator('#folders').click();
-    await me.page.locator('#attach-open').click();
-    await me.page.locator('#attach-rows .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Use' }).click();
-    await me.until('the reminder is shown', async () => /next time it starts/.test(await me.page.locator('#secret-note').innerText()));
-    await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').count()) === 1);
-    await me.page.goBack();
+    await me.leaveAssets();
+    /* Handed to this conversation's tool from its Assets tab: Give…, the secret, Use, Give. */
+    await me.access('MODEL_KEY', 'Use');
+    assert.match(await me.page.locator('#cassets-note').textContent(), /MODEL_KEY: handed to its tool at its next start/);
+    assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'MODEL_KEY').conversations, ['with-key']);
 
     const restart = async () => {
         await me.type('exit');
@@ -42,10 +39,10 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.type('echo "after=[$MODEL_KEY]"');
     await me.sees('after=[sk-not-shown-again]');
 
-    await me.page.locator('#folders').click();
-    await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Detach' }).click();
-    await me.until('it is no longer handed', async () => (await me.page.locator('#access-secrets .folder').count()) === 0);
-    await me.page.goBack();
+    /* « None » in its own panel: no longer handed, said; it stays in Assets. */
+    await me.access('MODEL_KEY', 'None');
+    assert.match(await me.page.locator('#cassets-note').textContent(), /MODEL_KEY: no longer handed from its next start/);
+    assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'MODEL_KEY').conversations, []);
     await restart();
     await me.type('echo "off=[$MODEL_KEY]"');
     await me.sees('off=[]');
@@ -72,12 +69,8 @@ test('a secret of several lines (a key) pasted into the line comes whole into it
     await me.until('the secret is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="secret:DEPLOY_KEY"]').count()) === 1);
     assert.equal((await me.page.content()).includes('line one'), false, 'the value is nowhere in the page');
     assert.equal(await me.page.locator('#secret-lines').isVisible(), false, 'back to one line for the next one');
-    await me.page.locator('#assets-close').click();
-    await me.page.locator('#folders').click();
-    await me.page.locator('#attach-open').click();
-    await me.page.locator('#attach-rows .folder[data-name="DEPLOY_KEY"]').locator('button', { hasText: 'Use' }).click();
-    await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="DEPLOY_KEY"]').count()) === 1);
-    await me.page.goBack();
+    await me.leaveAssets();
+    await me.access('DEPLOY_KEY', 'Use');
     await me.type('exit');
     await me.until('the tool has exited', async () => (await me.state()) === 'ended');
     await me.page.locator('#notice-action').click();
@@ -93,7 +86,7 @@ test('a secret of several lines (a key) pasted into the line comes whole into it
 test('a secret is renamed: its value and the conversation it is handed to go with it; its tool sees it under the new name at its next start', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('renamer');
+    await me.create('renamer', 'Shell', { chat: false });
     await me.api('/api/secrets', { name: 'OLD_KEY', value: 'kept-value' });
     await me.api('/api/conversations/renamer/secrets', { secret: 'OLD_KEY', attached: true });
     await me.page.reload();
@@ -107,7 +100,7 @@ test('a secret is renamed: its value and the conversation it is handed to go wit
     assert.equal((await me.api('/api/secrets/NEW_KEY/rename', { name: 'A B' })).status, 400);
     await me.api('/api/secrets', { name: 'TAKEN', value: 'x' });
     assert.equal((await me.api('/api/secrets/NEW_KEY/rename', { name: 'TAKEN' })).status, 409);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.type('exit');
     await me.until('the tool has exited', async () => (await me.state()) === 'ended');
     await me.page.locator('#notice-action').click();
@@ -151,7 +144,7 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     await me.page.fill('#secret-value', 'sk-soon-first');
     await me.page.fill('#secret-expires', day(3));
     await me.page.locator('#secret-new button[type=submit]').click();
-    const soonRow = me.page.locator('#assets-rows .as-row[data-asset="secret:SOON_KEY"] .as-sub');
+    const soonRow = me.page.locator('#assets-rows .as-row[data-asset="secret:SOON_KEY"] .kit-asset-sub');
     await me.until('its row says it is near', async () => (await soonRow.innerText().catch(() => '')) === 'Expires in 3 days');
     assert.equal(await soonRow.getAttribute('data-tone'), 'warn');
     await me.until('its sheet says it, with the day', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText().catch(() => '')) === `Expires in 3 days · ${day(3)}`);
@@ -163,11 +156,11 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     await me.api('/api/conversations/expiring/secrets', { secret: 'PAST_KEY', attached: true });
     const listed = (await me.api('/api/secrets')).body;
     assert.deepEqual(listed.map((x) => [x.name, x.expired, x.days]).sort(), [['PAST_KEY', true, -1], ['SOON_KEY', false, 3]]);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.openAsset('secret', 'PAST_KEY');
     await me.until('shown Expired, in red', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText().catch(() => '')).startsWith('Expired'));
     assert.equal(await me.page.locator('#assets-detail .secret-expiry-state').getAttribute('data-tone'), 'bad');
-    assert.equal(await me.page.locator('#assets-rows .as-row[data-asset="secret:PAST_KEY"] .as-sub').innerText(), 'Expired');
+    assert.equal(await me.page.locator('#assets-rows .as-row[data-asset="secret:PAST_KEY"] .kit-asset-sub').innerText(), 'Expired');
     /* Said once in What happened, with who had it. */
     await me.until('said in What happened', async () => (await me.api('/api/events?q=PAST_KEY')).body.some((e) => e.text.startsWith('Secret PAST_KEY expired')));
 
@@ -184,9 +177,9 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'SOON_KEY').conversations, ['expiring'], 'still given to it');
 
     /* Its own Assets show the expired one too. */
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.page.locator('#view-assets').click();
-    const pastHere = me.page.locator('#cassets-rows .as-row[data-asset="secret:PAST_KEY"] .as-sub');
+    const pastHere = me.page.locator('#cassets-rows .as-row[data-asset="secret:PAST_KEY"] .kit-asset-sub');
     await me.until('its own Assets say it expired', async () => (await pastHere.innerText().catch(() => '')) === 'Expired');
     assert.equal(await pastHere.getAttribute('data-tone'), 'bad');
     await me.until('a dot on its Assets', async () => (await me.page.locator('#view-assets[data-attention]').count()) === 1);
@@ -226,7 +219,7 @@ test('the sheets of a secret, photographed: near its expiry, expired, and Replac
         await me.page.locator('#secret-replace-open').click();
         await me.page.fill('#secret-replace-value', 'typed-not-shown');
         await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-replace.png`) });
-        await me.page.locator('#assets-close').click();
+        await me.leaveAssets();
         await me.addAsset('secret');
         await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-new.png`) });
         assert.equal(me.errors.length, 0, me.errors.join('\n'));

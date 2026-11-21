@@ -4,14 +4,14 @@
    itself, its verbs and its cleaning are tested where they live, in Parley. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync, symlinkSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync, symlinkSync, readdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
-import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, SETTLED_MS, READY_MAX_MS, typeCommand, enterCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
+import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, SETTLED_MS, READY_MAX_MS, typeCommand, TYPED_AT, RENUDGE_MS, enterCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
 import { Readable } from 'node:stream';
-import { WAKE, REREAD } from 'clavarium-parley/host';
+import { WAKE, REREAD, URGENT } from 'clavarium-parley/host';
 import { packageFile } from '../server/parley.mjs';
 const { run } = await import(packageFile('clavarium-parley', 'bin/parley.mjs'));
 
@@ -19,11 +19,11 @@ const BRIDGE = packageFile('clavarium-parley', 'server/parley-mcp.mjs');
 const until = async (what, check, ms = 5000) => { const end = Date.now() + ms; for (;;) { if (await check()) return; if (Date.now() > end) throw new Error(`never happened: ${what}`); await new Promise((r) => setTimeout(r, 20)); } };
 
 /* A conversation "helper" whose machine runs a tool, all of it stand-ins. */
-function bench(t, { work = 'kept', tools = true } = {}) {
+function bench(t, { work = 'kept', tools = true, before = [] } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-talk-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     mkdirSync(join(dir, 'work', 'helper'), { recursive: true });
-    const typed = []; const alerted = []; const warmed = [];
+    const typed = []; const alerted = []; const warmed = []; const logged = [];
     const world = { state: 'Running', awake: true, tmux: true, clock: 1_000_000, attached: ['notes'] };
     /* Every question to the VM manager and every command in the machine, in order. */
     const calls = [];
@@ -31,13 +31,13 @@ function bench(t, { work = 'kept', tools = true } = {}) {
         /* A line is typed by ONE tmux command: the line, a pause, Enter. */
         exec: async (name, argv) => {
             calls.push('exec');
-            if (!world.tmux) return { code: 1 };
+            if (!world.tmux || (world.lineFails && argv.length !== enterCommand().length)) return { code: 1 };
             if (argv.length === enterCommand().length) { assert.deepEqual(argv, enterCommand()); typed.push('Enter'); return { code: 0 }; }
-            assert.deepEqual(argv, typeCommand(argv[8]), 'one command: the line, a pause, Enter');
-            typed.push(argv[8], 'Enter');
+            assert.deepEqual(argv, typeCommand(argv[TYPED_AT]), 'one command: the line, a pause, Enter');
+            typed.push(argv[TYPED_AT], 'Enter');
             return { code: 0 };
         },
-        state: async () => { calls.push('state'); return world.state; },
+        state: async (name) => { calls.push('state'); return before.includes(name) ? new Promise(() => {}) : world.state; },
     };
     /* Parley is installed by the server before the invitation (toolbox.mjs); `world.install` says why it could not be. */
     const installs = [];
@@ -46,16 +46,18 @@ function bench(t, { work = 'kept', tools = true } = {}) {
     const channel = [];
     const terminal = { open: () => world.open === true, droppedAt: () => world.droppedAt, settled: () => (world.open === true ? world.settled ?? { openFor: 1e9, quietFor: 1e9 } : null), type: async (name, line, ms) => { calls.push('channel'); if (world.channelFails) return false; if (world.enterLost) { channel.push([line, ms]); typed.push(line); return 'enter'; } channel.push([line, ms]); typed.push(line, 'Enter'); return true; } };
     const health = { of: () => world.seen ?? null };
+    /* Conversations before "helper" in the store, whose machine never answers (`before`). */
+    if (before.length) { const s = new Store(join(dir, 'talk.json')); for (const name of before) { mkdirSync(join(dir, 'work', name, '.parley'), { recursive: true }); s.put({ name, on: true, reread: true }); } }
     const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox, terminal, health,
-        conversations: { list: () => [{ name: 'helper', work }], awake: () => (world.awake ? ['helper'] : []) },
+        conversations: { list: () => [...before, 'helper'].map((name) => ({ name, work })), awake: () => (world.awake ? [...before, 'helper'] : []) },
         resources: { workFolder: (name) => join(dir, 'work', name), of: () => world.attached.map((name) => ({ name, access: 'read' })) },
-        warm: async (name) => { warmed.push(name); }, alert: (payload) => alerted.push(payload), listenEveryMs: 30, now: () => world.clock, keptDir: join(dir, 'data', 'talk-kept') });
+        warm: async (name) => { warmed.push(name); }, alert: (payload) => alerted.push(payload), listenEveryMs: 30, now: () => world.clock, keptDir: join(dir, 'data', 'talk-kept'), log: (line) => logged.push(line) });
     const talk = make();
     t.after(() => talk.stop());
     const bridge = join(dir, 'work', 'helper', '.parley');
     /* The tool runs the command, from its work folder. */
     const parley = (...args) => run(args, { cwd: join(dir, 'work', 'helper'), env: {} });
-    return { dir, typed, alerted, warmed, world, talk, make, bridge, parley, installs, calls, channel };
+    return { dir, typed, alerted, warmed, world, talk, make, bridge, parley, installs, calls, channel, logged };
 }
 
 test('off until the owner turns it on; turned on, the bridge is put in the work folder and nothing is typed', async (t) => {
@@ -101,6 +103,16 @@ test('the invitation: typed once in its terminal, English, Parley installed by t
     assert.equal(bare.talk.of('helper').tools, false);
 });
 
+test('the page\'s own send (quick): answered once written, its tool woken after, by itself (14-11)', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    const said = await b.talk.say('helper', 'Short and quick.', undefined, [], undefined, { quick: true });
+    assert.deepEqual(said, { ok: true, told: 'later' });
+    assert.equal(b.talk.of('helper').unread, 1, 'written before the answer');
+    await until('woken all the same', () => b.typed.length === 2);
+    assert.deepEqual(b.typed, [WAKE, 'Enter']);
+});
+
 test('the line that wakes it: typed once until it has read, and the message itself never', async (t) => {
     const b = bench(t);
     await b.talk.set('helper', true);
@@ -119,6 +131,78 @@ test('the line that wakes it: typed once until it has read, and the message itse
     /* The owner asks to remind it: typed again, though it was typed already. */
     assert.equal((await b.talk.remind('helper')).told, 'typed');
     assert.equal(b.typed.length, 6);
+    /* #322: "Read it now" while it works -- the urgent line, typed at once. */
+    assert.equal((await b.talk.remind('helper', { urgent: true })).told, 'typed');
+    assert.deepEqual(b.typed.slice(6), [URGENT, 'Enter']);
+    assert.match(URGENT, /URGENT/);
+});
+
+test('read, then written to at once: the line is typed again, never left for a tick that puts "woke" back (17-11)', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    assert.equal((await b.talk.say('helper', 'one')).told, 'typed');
+    b.parley('read');
+    /* No tick between: the line typed was used by the read. */
+    assert.equal((await b.talk.say('helper', 'two')).told, 'typed');
+    assert.deepEqual(b.typed, [WAKE, 'Enter', WAKE, 'Enter']);
+    assert.equal((await b.talk.say('helper', 'three')).told, 'told', 'not read since: once is enough');
+});
+
+test('a machine that never answers holds no other conversation: its "woke" is put back, its line waiting is typed (17-11)', async (t) => {
+    const b = bench(t, { before: ['stuck'] });
+    /* "stuck" restarted, its docket to be told once its machine is seen running: asked, never answered. */
+    b.talk.restarted = () => true;
+    await b.talk.set('helper', true);
+    b.world.clock += REREAD_AFTER_MS + 1;
+    assert.equal((await b.talk.say('helper', 'one')).told, 'typed');
+    b.parley('read');
+    await until('it is known to have read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8')).find((r) => r.name === 'helper').woke === false);
+    b.world.awake = false;
+    assert.equal((await b.talk.say('helper', 'later')).told, 'asleep');
+    b.world.awake = true; b.world.clock += RETRY_MS + 1;
+    await until('the line that waited is typed', () => b.typed.length === 4);
+});
+
+test('a message left unread: its line typed again by itself, 1, 3, 10 minutes, then no more; a restart of the server goes on (17-11)', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    assert.equal((await b.talk.say('helper', 'hello')).told, 'typed');
+    const tick = () => new Promise((r) => setTimeout(r, 120));
+    await tick();
+    assert.equal(b.typed.length, 2, 'not before its time');
+    b.world.clock += RENUDGE_MS[0];
+    await until('typed again', () => b.typed.length === 4);
+    assert.match(b.logged.find((l) => /still unread/.test(l)), /^talk: helper: still unread 60 s after its line: typed again \(1\)$/);
+    b.world.clock += RENUDGE_MS[1] - 1;
+    await tick();
+    assert.equal(b.typed.length, 4, 'not before its time');
+    /* The server restarts meanwhile. */
+    b.talk.stop();
+    const again = b.make();
+    t.after(() => again.stop());
+    b.world.clock += 1;
+    await until('typed a third time, by the new server', () => b.typed.length === 6);
+    b.world.clock += RENUDGE_MS[2];
+    await until('typed a fourth time (the third again)', () => b.typed.length === 8);
+    /* Then no more, however long: never a reminder without end. */
+    for (let n = 0; n < 5; n += 1) { b.world.clock += RENUDGE_MS[2] * 3; await tick(); }
+    assert.equal(b.typed.length, 8, 'three times again at most');
+    assert.ok(b.typed.every((x) => x === WAKE || x === 'Enter'));
+    /* 19-11: its reminders used up, a NEW message is owed its line (a room's question was never told again). */
+    assert.equal((await again.say('helper', 'a new question')).told, 'typed', 'a message come since: told');
+    await until('typed for the new message', () => b.typed.length === 10);
+    /* Its own reminders, three again at most, then no more without another message. */
+    for (let n = 0; n < 8; n += 1) { b.world.clock += RENUDGE_MS[2] * 3; await tick(); }
+    assert.equal(b.typed.length, 16, 'three reminders for the new message, no more');
+    for (let n = 0; n < 5; n += 1) { b.world.clock += RENUDGE_MS[2] * 3; await tick(); }
+    assert.equal(b.typed.length, 16, 'never a reminder without end');
+    /* The owner's "Remind it" still types it. */
+    await again.remind('helper');
+    await until('typed when the owner asks', () => b.typed.length === 18);
+    /* Read: the next message wakes it as usual. */
+    b.parley('read');
+    await until('it is known to have read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
+    assert.equal((await again.say('helper', 'next')).told, 'typed');
 });
 
 test('the line waits: while somebody types in its terminal, while it sleeps, while its machine does not run; then it is typed, once', async (t) => {
@@ -258,8 +342,12 @@ test('what is wrong with its machine is said in its chat, once, where it happene
     assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['room', 'disk', 'seen']);
     /* Well again, then short of memory again: said again. Information alone is never said. */
     b.talk.machine('helper', { state: 'Running', level: 'info', problems: [{ level: 'info', kind: 'mount', key: 'remounted:/work', text: '/work had come loose' }] });
+    /* Gone, it is said once: the lines that asked are answered (the page offers their "Seen" no more). */
+    const ok = b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1);
+    assert.deepEqual([ok.event, ok.text, ok.level, ok.actions], ['machine-ok', 'Its memory is no longer short. What was wrong with its machine is gone. Its disk has room again.', 'news', []]);
+    b.talk.machine('helper', { state: 'Running', level: 'info', problems: [] });
     b.talk.machine('helper', memory);
-    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 4);
+    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 5, 'said once when gone; then short again: said again');
     assert.deepEqual(b.typed.filter((x) => x !== WAKE && x !== 'Enter'), [], 'nothing of it is typed to the tool');
 });
 
@@ -317,7 +405,6 @@ test('after a restart the line is typed only with the person\'s next message, an
     await b.talk.say('helper', 'Where are we?');
     b.world.clock += 60_000;
     await until('typed', () => b.typed.length === 2);
-    assert.deepEqual(b.channel, [[REREAD, ENTER_AFTER_MS]]);
     assert.deepEqual(b.typed, [REREAD, 'Enter']);
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(b.typed.length, 2, 'once');
@@ -415,45 +502,54 @@ test('the line is typed fast: one command, and the machine asked about only when
     }
 });
 
-test('the line goes down the terminal already open when there is one: nothing sent into the machine; the command in the machine when that fails', async (t) => {
+test('the line goes by the command in the machine, which leaves copy mode first -- even with a terminal open; down that terminal when the command fails (17-11)', async (t) => {
     const b = bench(t);
     await b.talk.set('helper', true);
     b.world.open = true;
     assert.equal((await b.talk.say('helper', 'hello')).told, 'typed');
-    assert.deepEqual(b.calls, ['channel'], 'no question, no command');
-    assert.deepEqual(b.channel, [[WAKE, ENTER_AFTER_MS]], 'the line, and Enter apart');
+    assert.deepEqual(b.calls, ['exec'], 'one command, no question');
     assert.deepEqual(b.typed, [WAKE, 'Enter']);
+    assert.deepEqual(b.logged, ['talk: helper: typed (wake)']);
     b.parley('read');
-    await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
-    /* The channel refuses (a screen pressed the tmux prefix, it closed meanwhile): the command, once. */
-    b.world.channelFails = true;
+    /* The command fails (its machine slow to answer): down the terminal open, the line and Enter apart. */
+    b.world.tmux = false;
     assert.equal((await b.talk.say('helper', 'again')).told, 'typed');
-    assert.deepEqual(b.calls, ['channel', 'channel', 'exec']);
-    assert.deepEqual(b.typed, [WAKE, 'Enter', WAKE, 'Enter']);
+    assert.deepEqual(b.calls, ['exec', 'exec', 'channel']);
+    assert.deepEqual(b.channel, [[WAKE, ENTER_AFTER_MS]]);
+    assert.match(b.logged.at(-1), /^talk: helper: typed down its terminal \(wake\), the command in the machine failed \(exit 1\)$/);
+    /* Both refuse: said in the log, and tried again. */
+    b.parley('read');
+    b.world.channelFails = true;
+    assert.equal((await b.talk.say('helper', 'lost')).told, 'failed');
+    assert.match(b.logged.at(-1), /^talk: helper: NOT typed \(wake\): exit 1; its terminal refused too$/);
+    b.world.tmux = true; b.world.channelFails = false; b.world.clock += RETRY_MS + 1;
+    await until('typed when it can be', () => b.typed.length === 6);
     /* Still never while somebody types in the terminal. */
     b.parley('read');
-    await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
-    b.world.channelFails = false;
     b.talk.typed('helper');
     assert.equal((await b.talk.say('helper', 'wait')).told, 'typing');
-    assert.equal(b.typed.length, 4);
+    assert.equal(b.typed.length, 6);
 });
 
 test('the line went down the channel but its Enter could not (the channel closed meanwhile): the Enter alone, never the line twice', async (t) => {
     const b = bench(t);
     await b.talk.set('helper', true);
     b.world.open = true; b.world.enterLost = true;
+    /* The command fails for the line, then answers for the Enter alone. */
+    b.world.lineFails = true;
     assert.equal((await b.talk.say('helper', 'hello')).told, 'typed');
-    assert.deepEqual(b.calls, ['channel', 'exec']);
+    assert.deepEqual(b.calls, ['exec', 'channel', 'exec']);
     assert.deepEqual(b.typed, [WAKE, 'Enter'], 'the line once, then Enter');
 });
 
 test('the one tmux command: the line as it is, a pause, Enter; a last ";" kept as text', () => {
     const argv = typeCommand('Read this.');
-    assert.deepEqual(argv.slice(0, 9), ['tmux', '-L', 'clavarium', 'send-keys', '-t', '=main:', '-l', '--', 'Read this.']);
-    assert.deepEqual(argv.slice(9), [';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', '=main:', 'Enter']);
-    assert.equal(typeCommand('a;')[8], 'a\\;');
-    assert.equal(typeCommand('a ; b')[8], 'a ; b');
+    /* A pane left in copy mode (a screen scrolled back) leaves it first, or the line is copy-mode keys (17-11). */
+    assert.deepEqual(argv.slice(0, 10), ['tmux', '-L', 'clavarium', 'if-shell', '-F', '-t', '=main:', '#{pane_in_mode}', 'send-keys -t =main: -X cancel', ';']);
+    assert.deepEqual(argv.slice(10, TYPED_AT + 1), ['send-keys', '-t', '=main:', '-l', '--', 'Read this.']);
+    assert.deepEqual(argv.slice(TYPED_AT + 1), [';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', '=main:', 'Enter']);
+    assert.equal(typeCommand('a;')[TYPED_AT], 'a\\;');
+    assert.equal(typeCommand('a ; b')[TYPED_AT], 'a ; b');
 });
 
 test('the thread\'s own lines: a level per kind of event, the owner\'s choice over it, only where the chat is on, never unread, bounded', async (t) => {
@@ -464,12 +560,24 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     const sent = b.talk.event('helper', { kind: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', topic: 'Sent', brief: 'preprod', actions: ['review:app', 'bad action!', 'x'.repeat(30)] });
     assert.deepEqual({ ...sent, id: 'id', at: 'at' }, { id: 'id', at: 'at', event: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', level: 'news', topic: 'Sent', brief: 'preprod', actions: ['review:app'] });
     const levels = Object.fromEntries(Object.keys(EVENT_LEVELS).map((kind) => [kind, b.talk.event('helper', { kind, text: kind }).level]));
-    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news', 'tools-updated': 'news', 'docket-done': 'trace', 'docket-failed': 'needs-you', 'docket-unhandled': 'needs-you', 'docket-reminder': 'trace' });
+    assert.deepEqual(levels, { sent: 'news', 'room-hops': 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', 'machine-ok': 'news', restarted: 'news', 'tools-updated': 'news', 'docket-done': 'trace', 'docket-failed': 'needs-you', 'docket-unhandled': 'needs-you', 'docket-reminder': 'trace', 'signin-help': 'news', 'tether-demande': 'needs-you', 'tether-done': 'trace', 'tether-notice': 'news' });
     assert.throws(() => b.talk.event('helper', { kind: 'gossip', text: 'x' }), /No such kind/);
     assert.equal(b.talk.event('helper', { kind: 'sent', text: '  ' }), null, 'nothing to say: no line');
     /* Bounds: topic, brief, text; a tone only of the two. */
     const long = b.talk.event('helper', { kind: 'refused', text: 'y'.repeat(900), topic: 't'.repeat(90), brief: 'b'.repeat(90), tone: 'pink' });
     assert.deepEqual([long.text.length, long.topic.length, long.brief.length, long.tone], [500, 40, 60, undefined]);
+    /* In the reader's words (Parley 0.17.71): a word, its values and its English kept as given, bounded; a word without its English is none. */
+    const keyed = b.talk.event('helper', { kind: 'tether-done', text: { k: 'line-failed', v: { verb: 'mail.send', reason: 'r'.repeat(900), 'Bad name': 'x', head: { k: 'notice-later', t: 'Later news' } }, t: 'Failed: mail.send' }, topic: { k: 'line-topic-request', t: 'Request' }, brief: 'q1' });
+    assert.deepEqual(keyed.text, { k: 'line-failed', v: { verb: 'mail.send', reason: 'r'.repeat(500), head: { k: 'notice-later', t: 'Later news' } }, t: 'Failed: mail.send' });
+    assert.deepEqual([keyed.topic, keyed.brief], [{ k: 'line-topic-request', t: 'Request' }, 'q1']);
+    assert.equal(b.talk.event('helper', { kind: 'tether-done', text: { k: 'line-done', v: { verb: 'x' } } }), null, 'no English: no line');
+    assert.equal(b.talk.event('helper', { kind: 'tether-done', text: { k: 'Not a word!', t: 'x' } }), null);
+    assert.equal(b.talk.event('helper', { kind: 'tether-done', text: 'Done.', topic: { k: 'line-topic-request' } }).topic, undefined, 'a topic without its English: none');
+    /* What a line is about (the mail that came back): kept as given, bounded; anything else, none. */
+    const re = { ref: 'mail:box/m1%40example.com', label: 'Quote', lead: { k: 'line-re-sent', t: 'the mail sent' } };
+    assert.deepEqual(b.talk.event('helper', { kind: 'tether-notice', text: 'Mail came back.', re }).re, re);
+    assert.equal(b.talk.event('helper', { kind: 'tether-notice', text: 'Mail came back.', re: { label: 'x' } }).re, undefined);
+    assert.equal(b.talk.event('helper', { kind: 'tether-notice', text: 'Mail came back.', re: { ref: 'm'.repeat(2001) } }).re, undefined);
     /* The owner moves a kind: what is stored next follows, what was stored stays. */
     assert.throws(() => b.talk.setThread({ levels: { origin: 'loud' } }), /A level is one of/);
     assert.throws(() => b.talk.setThread({ levels: { gossip: 'news' } }), /no such kind/);
@@ -577,4 +685,90 @@ test('the thread is kept in this server\'s data, out of its machine: a line the 
     assert.deepEqual(b.talk.of('helper').messages.map((m) => m.text).at(-1), 'Done.');
     b.talk.forget('helper');
     assert.equal(existsSync(kept), false, 'gone with the conversation');
+});
+
+test('a text this server gives the tool to read: in the bridge folder, a folder of its own; never through a link; nothing when the chat is off', async (t) => {
+    const b = bench(t);
+    assert.equal(b.talk.keepText('helper', 'git-remote-refused.txt', 'all of it'), null, 'chat off');
+    await b.talk.set('helper', true);
+    const path = b.talk.keepText('helper', 'git remote/../refused.txt', 'line 1\nline 2');
+    assert.match(path, /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/git-remote-..-refused\.txt$/);
+    assert.equal(readFileSync(join(b.dir, 'work', 'helper', path.slice(6)), 'utf8'), 'line 1\nline 2');
+    /* Kept a week, ten at most: the older ones go when another is given. */
+    const files = join(b.bridge, 'files');
+    const given = Array.from({ length: 12 }, (_, i) => b.talk.keepText('helper', 'git-remote-refused.txt', `n${i}`));
+    const left = () => readdirSync(files).filter((d) => existsSync(join(files, d, 'git-remote-refused.txt')));
+    assert.equal(left().length, 10);
+    for (const d of left().slice(3)) rmSync(join(files, d), { recursive: true });
+    const old = left()[0];
+    utimesSync(join(files, old, 'git-remote-refused.txt'), new Date(Date.now() - 8 * 86_400_000), new Date(Date.now() - 8 * 86_400_000));
+    b.talk.keepText('helper', 'git-remote-refused.txt', 'newest');
+    assert.ok(!existsSync(join(files, old)), 'a week old: gone');
+    assert.ok(existsSync(join(b.dir, 'work', 'helper', path.slice(6))), 'another name is left alone');
+    const outside = join(b.dir, 'outside-text'); mkdirSync(outside);
+    rmSync(join(b.bridge, 'files'), { recursive: true, force: true });
+    symlinkSync(outside, join(b.bridge, 'files'));
+    assert.equal(b.talk.keepText('helper', 'x.txt', 'x'), null);
+    assert.deepEqual(readdirSync(outside), []);
+});
+
+test('a tool asks to be restarted by a file beside its chat: seen, then taken; a link is not it; nothing when the chat is off (02-11)', async (t) => {
+    const b = bench(t);
+    assert.equal(b.talk.restartAsked('helper'), false, 'chat off');
+    await b.talk.set('helper', true);
+    const dir = join(b.dir, 'work', 'helper', '.parley');
+    assert.equal(b.talk.restartAsked('helper'), false);
+    writeFileSync(join(dir, 'restart-asked'), '');
+    assert.equal(b.talk.restartAsked('helper'), true);
+    b.talk.restartTaken('helper');
+    assert.equal(b.talk.restartAsked('helper'), false, 'taken: asked once');
+    symlinkSync('/etc/hostname', join(dir, 'restart-asked'));
+    assert.equal(b.talk.restartAsked('helper'), false, 'a link is not a request');
+});
+
+test('when its thread is archived: Parley\'s default till the owner chooses; set, read back, kept in its bridge folder; values out of range refused', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    assert.deepEqual(b.talk.split('helper'), { messages: 5000 }, 'Parley\'s default');
+    assert.deepEqual(b.talk.of('helper', new URLSearchParams('state=1')).split, { messages: 5000 }, 'with the chat\'s state');
+    const settings = () => JSON.parse(readFileSync(join(b.bridge, 'settings.json'), 'utf8')).split;
+    assert.deepEqual(b.talk.setSplit('helper', { messages: 2000 }), { split: { messages: 2000 } });
+    assert.deepEqual(settings(), { messages: 2000 });
+    assert.deepEqual(b.talk.setSplit('helper', { days: 0.5 }), { split: { days: 0.5 } });
+    assert.deepEqual(b.talk.split('helper'), { days: 0.5 });
+    assert.deepEqual(b.talk.setSplit('helper', { off: true }), { split: false });
+    assert.equal(settings(), false);
+    assert.equal(b.talk.of('helper').split, false, 'with the thread');
+    for (const bad of [{ messages: 499 }, { messages: 100_001 }, { messages: 2500.5 }, { messages: '2000' }, { days: 0.4 }, { days: 366 }, { days: '7' }, { days: Infinity }, {}, { off: 'yes' }]) {
+        assert.throws(() => b.talk.setSplit('helper', bad), (e) => e.status === 400, JSON.stringify(bad));
+    }
+    assert.equal(settings(), false, 'a refused value changes nothing');
+    assert.deepEqual(b.talk.setSplit('helper', { messages: 100_000 }), { split: { messages: 100_000 } });
+    assert.deepEqual(b.talk.setSplit('helper', { days: 365 }), { split: { days: 365 } });
+    assert.throws(() => b.talk.setSplit('nobody', { days: 7 }), /No such conversation/);
+    const disk = bench(t, { work: 'disk' });
+    assert.throws(() => disk.talk.setSplit('helper', { days: 7 }), (e) => e.status === 409);
+});
+
+/* Restarted and nothing written since (15-11, its owner's ask): its docket says it -- once its tool is READY, as
+   the line above -- and nothing is typed here; once. */
+test('after a restart with nothing written since, its docket is told once the tool is ready; nothing typed', async (t) => {
+    const b = bench(t);
+    b.world.clock = Date.now();
+    await b.talk.set('helper', true);
+    b.world.open = true;
+    const posted = []; b.talk.restarted = (name, why) => { posted.push([name, why]); return true; };
+    b.world.settled = { openFor: 300, quietFor: 0 };
+    b.talk.renewed('helper', 'Its machine was restarted: the tool started again.', true);
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(posted, [], 'not ready: not yet');
+    b.world.settled = { openFor: REREAD_AFTER_MS + 3000, quietFor: SETTLED_MS + 1 };
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await until('posted', () => posted.length === 1);
+    assert.deepEqual(posted, [['helper', 'Its machine was restarted: the tool started again.']]);
+    b.world.clock += 60_000;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(posted.length, 1, 'once');
+    assert.deepEqual(b.typed, [], 'nothing typed: its docket tells it when it is free');
 });

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanDictation, withoutLoop, transcribe, voiceConfig, Dictation, PROVIDERS, dictationProblem, isPrivateHost, withoutCharLoop, withoutPhantoms, capToDuration, wavSeconds, languageOf, deviceLanguage } from '../server/voice.mjs';
-import { Detector, Segmenter, toWav, loudness, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS } from '../web/voice-core.js';
+import { Detector, Segmenter, toWav, loudness, levelOf, levelBars, LEVEL_BARS, LEVEL_DOT, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS, inOrder } from '../web/voice-core.js';
 
 const wav = Buffer.from(toWav([new Float32Array(BLOCK).fill(0.1)]));
 
@@ -152,8 +152,20 @@ test('a loop inside a word is brought back to once', () => {
 });
 test('the credits an engine writes on silence (learned from subtitles) are removed, and only those', () => {
     assert.equal(withoutPhantoms("Sous-titrage ST' 501"), '');
+    assert.equal(withoutPhantoms("Sous-titrage ST'"), '', 'without its number too (01-11)');
+    assert.equal(withoutPhantoms('Sous 谢谢 大家'), '');
+    assert.equal(withoutPhantoms('Sous.'), '');
+    assert.equal(withoutPhantoms('Sous la table.'), 'Sous la table.');
     assert.equal(withoutPhantoms("Sous-titres réalisés par la communauté d'Amara.org"), '');
+    assert.equal(withoutPhantoms('Thank you for watching and see you in the next video!'), '');
+    assert.equal(withoutPhantoms('There you go.'), '', '03-11: alone, on a near silence');
+    assert.equal(withoutPhantoms('There you go, the door is open.'), 'There you go, the door is open.', 'part of a sentence: kept');
+    assert.equal(withoutPhantoms("Merci d'avoir regardé cette vidéo !"), '');
+    assert.equal(withoutPhantoms('Thank you for watching the weather'), 'Thank you for watching the weather', 'only when it is all of it');
     assert.equal(withoutPhantoms("Lance les tests. Sous-titrage ST' 501"), 'Lance les tests.');
+    assert.equal(withoutPhantoms('Sous-titres par Jérémy Diaz'), '');
+    assert.equal(withoutPhantoms('Les sous-titres par Jérémy sont bons'), 'Les sous-titres par Jérémy sont bons');
+    assert.equal(withoutPhantoms('Bonjour, quelle heure est-il dans le salon ? Sous-titrage FR ?'), 'Bonjour, quelle heure est-il dans le salon ?');
     assert.equal(withoutPhantoms('Le sous-titrage de la vidéo est faux'), 'Le sous-titrage de la vidéo est faux');
 });
 test('those credits in any language the engine learned them in', () => {
@@ -303,4 +315,78 @@ test('a French device gets French asked of the engine, never a guess per phrase'
     const auto = dictation({ env: { CLAVARIUM_TRANSCRIPTION_URL: 'https://env.example.com/v1/audio/transcriptions', CLAVARIUM_TRANSCRIPTION_LANGUAGE: 'auto' } });
     await auto.d.transcribe(wav, 'fr-FR');
     assert.equal(auto.sent.at(-1).language, null, 'the environment may ask for "auto" too');
+});
+
+test('a voice box keeps the voice that spoke first: a TV after it is left out', async () => {
+    const { firstVoice } = await import('../server/voice.mjs');
+    assert.equal(firstVoice({ diarization: [{ speaker: 0, text: ' Regarde la météo. ' }, { speaker: 1, text: 'Il était une fois' }, { speaker: 0, text: 'du week-end.' }] }), 'Regarde la météo. du week-end.');
+    assert.equal(firstVoice({ text: 'no voices told apart' }), null);
+});
+
+test('a short reaction to what was said, in its language, from the dictation service\'s chat model; none elsewhere', async () => {
+    const { quickReaction } = await import('../server/voice.mjs');
+    const ovh = { url: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/audio/transcriptions', key: 'k' };
+    let asked;
+    const fetcher = async (url, init) => { asked = [url, JSON.parse(init.body)]; return new Response(JSON.stringify({ choices: [{ message: { content: '« Bonne question, voyons… »' } }] })); };
+    assert.equal(await quickReaction(ovh, 'Comment marche une pompe à chaleur ?', fetcher), 'Bonne question, voyons…');
+    assert.equal(asked[0], 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions');
+    assert.equal(await quickReaction({ ...ovh, url: 'https://api.example.org/v1/audio/transcriptions' }, 'x', fetcher), null);
+    assert.equal(await quickReaction(ovh, 'x', async () => new Response('{}', { status: 500 })), null);
+});
+
+test('a voice box: any language heard; one neither its own nor English heard again in its own (02-11)', async () => {
+    const { hearBox, codeOfLanguage } = await import('../server/voice.mjs');
+    assert.equal(codeOfLanguage('french'), 'fr'); assert.equal(codeOfLanguage('en'), 'en'); assert.equal(codeOfLanguage('fr-FR'), 'fr'); assert.equal(codeOfLanguage(''), null);
+    const calls = [];
+    const dictation = (answers) => ({ transcribe: async (wav, lang, how) => { calls.push([lang, Boolean(how?.withLanguage)]); return how?.withLanguage ? answers.shift() : 'Quelle heure est-il ?'; } });
+    assert.equal(await hearBox(dictation([{ text: 'What time is it?', language: 'english' }]), 'w', 'fr-FR'), 'What time is it?', 'English kept');
+    assert.equal(await hearBox(dictation([{ text: 'Bonjour', language: 'french' }]), 'w', 'fr-FR'), 'Bonjour');
+    calls.length = 0;
+    assert.equal(await hearBox(dictation([{ text: 'Fertiliseringskontrollen', language: 'danish' }]), 'w', 'fr-FR'), 'Quelle heure est-il ?', 'Danish heard again in French');
+    assert.deepEqual(calls, [[undefined, true], ['fr-FR', false]]);
+    assert.equal(await hearBox(dictation([{ text: 'Hej', language: 'danish' }]), 'w', null), 'Hej', 'no language known: as heard');
+});
+
+test('how loud, to draw: a block\'s loudness becomes a level from 0 to 1, in decibels', () => {
+    assert.equal(levelOf(0), 0, 'silence');
+    assert.equal(levelOf(0.001), 0, 'a quiet room (-60 dB) is still 0');
+    assert.equal(levelOf(10 ** (-36 / 20)), 0.5, 'a voice at -36 dB: half');
+    assert.equal(levelOf(0.25), 1, 'a near shout: full');
+    assert.equal(levelOf(1), 1, 'never past the top');
+    for (const odd of [NaN, -1, undefined, Infinity, '0.5']) assert.equal(levelOf(odd), 0, `${String(odd)}: 0`);
+    assert.equal(levelOf(loudness(new Float32Array(BLOCK).fill(0.1))), 0.83, '-20 dB, from the same loudness the dictation measures');
+});
+
+test('the level as five bars: newest in the middle, lower at the sides, a dot when quiet', () => {
+    assert.equal(LEVEL_BARS, 5);
+    assert.deepEqual(levelBars(0), Array(5).fill(LEVEL_DOT));
+    assert.deepEqual(levelBars(1), [0.68, 0.84, 1, 0.84, 0.68]);
+    assert.deepEqual(levelBars([1, 0, 0]), [LEVEL_DOT, LEVEL_DOT, 1, LEVEL_DOT, LEVEL_DOT], 'a new sound starts in the middle');
+    assert.deepEqual(levelBars([0, 0, 1]), [0.68, LEVEL_DOT, LEVEL_DOT, LEVEL_DOT, 0.68], 'and moves outwards');
+    assert.deepEqual(levelBars(NaN), levelBars(0));
+});
+
+test('dictated phrases come out in the order they were spoken, whatever order their transcriptions return in', () => {
+    const order = inOrder();
+    const typed = [];
+    const first = order(); const second = order(); const third = order(); const fourth = order();
+    third(() => typed.push('three'));
+    second(() => typed.push('two'));
+    assert.deepEqual(typed, [], 'a later phrase waits for the long one said before it');
+    first(() => typed.push('one'));
+    assert.deepEqual(typed, ['one', 'two', 'three']);
+    fourth(() => typed.push('four'));
+    assert.deepEqual(typed, ['one', 'two', 'three', 'four']);
+    first(() => typed.push('again'));
+    assert.deepEqual(typed, ['one', 'two', 'three', 'four'], 'a place is given once');
+});
+
+test('a phrase that failed or that throws never holds back the ones after it', () => {
+    const order = inOrder();
+    const typed = [];
+    const failed = order(); const throwing = order(); const last = order();
+    last(() => typed.push('last'));
+    throwing(() => { throw new Error('no terminal'); });
+    failed(null);
+    assert.deepEqual(typed, ['last']);
 });

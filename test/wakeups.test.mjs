@@ -17,7 +17,7 @@ function bench(t) {
     const resources = { of: () => world.attached.map((name) => ({ name, access: 'write' })), folder: (name) => join(dir, name), get: (name) => ({ name, type: name === 'site' ? 'git' : name === 'mail' ? 'mailbox' : 'folder' }) };
     const warmed = [];
     const fired = [];
-    const wakeups = new Wakeups({ store: new Store(join(dir, 'wakeups.json')), vms, conversations, resources, warm: async (name) => { warmed.push(name); }, now: () => new Date(world.now), fired: (name, what) => fired.push([name, what.text]) });
+    const wakeups = new Wakeups({ store: new Store(join(dir, 'wakeups.json')), vms, conversations, resources, warm: async (name) => { warmed.push(name); }, now: () => new Date(world.now), fired: (name, what) => fired.push([name, what.text]), arrivalEveryMs: 0 });
     const later = (minutes) => { world.now = new Date(world.now.getTime() + minutes * 60_000); };
     return { dir, typed, world, wakeups, later, warmed, fired };
 }
@@ -287,4 +287,49 @@ test('held a few minutes at most: a line left half typed does not keep the serve
     assert.equal(await wakeups.say('worker', 'hello'), true);
     assert.ok(now >= 5 * 60_000 && now < 6 * 60_000);
     assert.deepEqual(typed, ['hello', 'Enter']);
+});
+
+/* A COPY'S WAKE-UPS (15-11, when asked): its original's, each its own again; a call from outside is not copied. */
+test('a copy takes its wake-ups, new ids and its clock from now; never a call from outside', (t) => {
+    const b = bench(t);
+    const list = () => [{ name: 'worker' }, { name: 'twin' }];
+    const wakeups = new Wakeups({ store: new Store(join(b.dir, 'w2.json')), vms: { exec: async () => ({ code: 0 }) }, conversations: { list, awake: () => [] }, resources: { of: () => [{ name: 'handoff', access: 'write' }], folder: (n) => join(b.dir, n), get: (n) => ({ name: n, type: 'folder' }) }, now: () => new Date(b.world.now) });
+    wakeups.setLimit('worker', 7);
+    wakeups.add('worker', { kind: 'cron', line: '30 7 * * 1-5', message: 'morning round' });
+    wakeups.add('worker', { kind: 'arrival', resource: 'handoff', message: 'look at {files}' });
+    const called = wakeups.add('worker', { kind: 'call', message: 'from the scheduler' });
+    assert.ok(called.address);
+    const got = wakeups.copyTo('worker', 'twin');
+    assert.equal(got.perHour, 7);
+    assert.deepEqual(got.items.map((i) => i.kind).sort(), ['arrival', 'cron']);
+    const ids = new Set(wakeups.of('worker').items.map((i) => i.id));
+    assert.ok(got.items.every((i) => !ids.has(i.id)), 'each its own id');
+    assert.equal(wakeups.of('worker').items.length, 3, 'the original keeps its own');
+});
+
+/* A WHOLE EXPORT'S WAKE-UPS (15-11): what each is, carried in its manifest; given again on its import when asked. */
+test('a whole export carries what its wake-ups are, never a call from outside; its import gives them again, each checked as one written here', (t) => {
+    const b = bench(t);
+    const list = () => [{ name: 'worker' }, { name: 'there' }];
+    const attached = { worker: ['handoff'], there: [] };
+    const wakeups = new Wakeups({ store: new Store(join(b.dir, 'w3.json')), vms: { exec: async () => ({ code: 0 }) }, conversations: { list, awake: () => [] }, resources: { of: (c) => attached[c].map((name) => ({ name, access: 'write' })), folder: (n) => join(b.dir, n), get: (n) => ({ name: n, type: 'folder' }) }, now: () => new Date(b.world.now) });
+    wakeups.setLimit('worker', 7);
+    const cron = wakeups.add('worker', { kind: 'cron', line: '30 7 * * 1-5', message: 'morning round' }).items[0];
+    wakeups.turn('worker', cron.id, false);
+    wakeups.add('worker', { kind: 'every', minutes: 30, message: 'look again' });
+    wakeups.add('worker', { kind: 'arrival', resource: 'handoff', message: 'look at {files}' });
+    wakeups.add('worker', { kind: 'call', message: 'from the scheduler' });
+    const carried = JSON.parse(JSON.stringify(wakeups.exportOf('worker')));
+    assert.equal(carried.perHour, 7);
+    assert.deepEqual(carried.items.map((i) => i.kind), ['cron', 'every', 'arrival'], 'never a call from outside');
+    assert.ok(carried.items.every((i) => i.id === undefined && i.token === undefined && i.fired === undefined), 'what it is, not its id nor its clock');
+    assert.equal(wakeups.importTo('there', { ...carried, items: [...carried.items, { kind: 'call', message: 'x' }, { kind: 'cron', line: 'rm -rf', message: 'bad' }] }), 2, 'its folder is not attached here: that one left out, as the bad ones');
+    const got = wakeups.of('there');
+    assert.equal(got.perHour, 7);
+    assert.deepEqual(got.items.map((i) => [i.kind, i.on]), [['cron', false], ['every', true]]);
+});
+
+test('a folder is looked through at most every ARRIVAL_EVERY_MS per arrival (18-11), not at every tick', async () => {
+    const { ARRIVAL_EVERY_MS, TICK_MS } = await import('../server/wakeups.mjs');
+    assert.ok(ARRIVAL_EVERY_MS >= 6 * TICK_MS);
 });

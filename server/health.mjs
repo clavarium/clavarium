@@ -24,9 +24,27 @@
    should be mounted; they are passed as arguments, never parsed by the
    shell. It prints one fact per line; the server reads only these lines. */
 import { SHARING_STEP } from './vm.mjs';
+import { WHY } from './linkguard.mjs';
+import { SOCKET } from './tmux.mjs';
+import { SESSION } from './conversations.mjs';
+import { SECRETS_DIR } from './secrets.mjs';
+
+/* A FILE OUTSIDE /work where its tool may ask to be restarted when /work itself is dead (16-11): the
+   one in its chat's folder (talk.mjs, RESTART_ASKED) cannot be written then. Read by the probe. */
+export const RESTART_OUTSIDE = '/var/tmp/clavarium-restart-asked';
+/* The host of its tools, as pgrep -f reads it (the bracket: never the shell that asks). */
+export const TOOLS_HOST_PATTERN = '/tools/launch/[t]ools-host.mjs';
+/* What a folder that came loose looks like on a terminal (the kernel's words for ENOTCONN). */
+const LOOSE_WORDS = 'transport endpoint is not connected|socket is not connected|ENOTCONN';
+/* A WORK FOLDER THE VM MANAGER CANNOT TAKE BACK (16-11, tried on a test server): its mount program died, multipass
+   cannot unmount it ("Failed to terminate SSHFS mount process") and then refuses to mount it again ("already
+   mounted"). Only a restart of its machine mounts it again. */
+export const STUCK_MOUNT = /already mounted|terminate SSHFS mount process/i;
 
 /* How long installing the shared-folder helper in a machine may take (it comes from the snap store). */
 export const SHARING_MS = 180_000;
+/* At most this many names of its secrets are listed by the probe (their number always is). */
+export const SECRETS_LISTED = 64;
 export const PROBE = [
     'awk \'/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print "memory", t+0, a+0}\' /proc/meminfo',
     'awk \'$1=="oom_kill"{n=$2} END{print "oom", n+0}\' /proc/vmstat',
@@ -40,10 +58,32 @@ export const PROBE = [
     '  else echo "mount missing $p"; fi',
     'done',
     'if [ -d /work ] && awk \'$2=="/work"{f=1} END{exit !f}\' /proc/mounts; then timeout 5 df -Pm /work 2>/dev/null | awk \'NR==2{print "disk /work", $4, $2}\'; fi',
+    /* ITS TOOL STILL IN A FOLDER THAT WENT (16-11). A folder put back is a NEW mount: a program that was
+       in the old one stays in it, dead ("Transport endpoint is not connected"), until it is started
+       again -- the folder looks well, its tool does not. So each program of its tool's session whose
+       folder is ours to read (readlink) and cannot be entered is said; the first one is enough. */
+    `t=$(tmux -L ${SOCKET} list-panes -t '=${SESSION}:' -F '#{pane_pid}' 2>/dev/null | head -n 1)`,
+    'case "$t" in ""|*[!0-9]*) ;; *) timeout 5 sh -c \'for p in $(ps -o pid= -s "$1" 2>/dev/null); do l=$(readlink "/proc/$p/cwd" 2>/dev/null) || continue; [ -n "$l" ] || continue; [ -d "/proc/$p/cwd/." ] || { echo "stale $p"; exit 0; }; done\' stale "$t";; esac',
+    /* What its terminal shows now: a folder that is not connected, said by its tool (a symptom, not a proof). */
+    /* And the host of its tools (config/launch/tools-host.mjs: Parley, Docket... for its agent), started in its own
+       session from the tool's folder: left in a dead one, every tool it serves fails, the tool restarted or not. */
+    `for p in $(pgrep -f '${TOOLS_HOST_PATTERN}' 2>/dev/null); do [ -d "/proc/$p/cwd/." ] || { echo "stale $p"; break; }; done`,
+    `tmux -L ${SOCKET} capture-pane -p -t '=${SESSION}:' 2>/dev/null | grep -c -i -E '${LOOSE_WORDS}' | awk '{print "screen", $1+0}'`,
+    `if [ -f ${RESTART_OUTSIDE} ]; then echo "restart asked"; fi`,
+    /* THE NAMES IN ITS /run/secrets, for the secrets' guard (main.mjs, secrets.mjs reconcile): read
+       here, in the look made anyway, not by a command of their own. How many, then the first of them. */
+    `echo "secrets $(ls -1 ${SECRETS_DIR} 2>/dev/null | wc -l)"`,
+    `ls -1 ${SECRETS_DIR} 2>/dev/null | head -n ${SECRETS_LISTED} | sed 's/^/secret /'`,
 ].join('\n');
 export const PROBE_NAME = 'clavarium-health';
 
 export const EVERY_MS = 120_000;
+/* WITH A HEARTBEAT (beat.mjs), a look by command still, this often, whatever the beat says: what the agent
+   wrote in its /work is believed only between two looks of our own. */
+export const SPOT_MS = 30 * 60_000;
+/* The looks of one tick start this far apart, one machine after another (at most a tick shared out
+   between them): a burst of probes lines up at the VM manager in front of every other command. */
+export const STAGGER_MS = 5_000;
 const PROBE_MS = 15_000;
 /* What the clock waits for one conversation's look before it goes on. */
 const LOOK_MS = 60_000;
@@ -75,6 +115,13 @@ export function readProbe(text, paths = []) {
         if (parts[0] === 'oomkinds' && parts.length === 3 && a !== undefined && b !== undefined) facts.oomKinds = { machine: a, limit: b };
         if (parts[0] === 'disk' && parts.length === 4 && disks.has(parts[1]) && b !== undefined && c !== undefined) facts.disks[parts[1]] = { availableMb: b, sizeMb: c };
         if (parts[0] === 'mount' && parts.length === 3 && expected.has(parts[2]) && MOUNT_STATES.has(parts[1])) facts.mounts[parts[2]] = parts[1];
+        if (parts[0] === 'stale' && parts.length === 2 && a !== undefined) facts.stale = true;
+        if (parts[0] === 'screen' && parts.length === 2 && a !== undefined) facts.screenLoose = a;
+        if (line.trim() === 'restart asked') facts.restartAsked = true;
+        /* A name that is not a plain one (the agent may put anything there) is kept as '?': it
+           matches nothing that is given, so the guard writes the folder again, as it would have. */
+        if (parts[0] === 'secrets' && parts.length === 2 && a !== undefined) facts.secrets = { count: a, names: [] };
+        if (parts[0] === 'secret' && facts.secrets && facts.secrets.names.length < SECRETS_LISTED) facts.secrets.names.push(parts.length === 2 && /^[A-Za-z0-9_.-]{1,64}$/.test(parts[1]) ? parts[1] : '?');
     }
     return facts;
 }
@@ -113,30 +160,46 @@ export function judge(record) {
         if (!kinds && record.oomKills > 0) add('info', 'memory', 'oom', `${record.oomKills} program${record.oomKills === 1 ? ' was' : 's were'} stopped for lack of memory since it started (whether the machine or a limit of their own, it could not be told). Its files are safe.`);
         if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', 'memory', 'memory-low', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
         for (const [path, d] of Object.entries(record.disks ?? {})) {
-            if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.1)) add('warn', 'disk', `disk:${path}`, `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
+            if (!(d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.1))) continue;
+            /* A work folder kept here is on THIS SERVER's disk: short of room, every conversation that keeps
+               one would say it at once. Noted quietly; the server's own gauge says it, once. */
+            if (path === '/') add('warn', 'disk', 'disk:/', `Its disk is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
+            else add('info', 'server-disk', `disk:${path}`, `Its work folder (${path}) is kept on this server, whose disk is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
         }
         for (const path of record.remounted ?? []) add('info', 'mount', `remounted:${path}`, `${path} had come loose in the machine: it was mounted again.`);
         for (const { path, why } of record.failed ?? []) add('bad', 'mount', `failed:${path}`, `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);
         for (const path of record.missing ?? []) if (!(record.failed ?? []).some((f) => f.path === path)) add('warn', 'mount', `missing:${path}`, `${path} is not reachable in the machine.`);
+        if (record.stuckWork) add('bad', 'mount', 'stuck-work', 'Its work folder cannot be mounted again in its machine: its machine is restarted, its work picks up where it was.');
+        if (record.stale) add('bad', 'mount', 'stale-tool', 'Its tool is still in a folder that came loose: it is restarted, its work picks up where it was.');
+        /* Its terminal says so while its folders look well: said, nothing done (its tool may only be quoting it). */
+        else if (record.screenLoose > 0 && !(record.missing ?? []).length) add('warn', 'mount', 'screen-loose', 'Its terminal says a folder is not connected, though its folders look well.');
     }
+    /* Links its folders hold that the share cannot serve (linkguard.mjs): looked at on this server, whatever its machine does. */
+    for (const l of record.links?.removed ?? []) add('info', 'link', `link-removed:${l.folder}/${l.path}`, `/resources/${l.folder}/${l.path} was a broken link (${WHY[l.kind] ?? l.kind}): it was removed on the server, what it pointed to left as it was.`);
+    for (const l of record.links?.found ?? []) add('warn', 'link', `link:${l.folder}/${l.path}`, `/resources/${l.folder}/${l.path} is a link its machine cannot follow (${WHY[l.kind] ?? l.kind}): make it point inside the folder, or remove it.`);
     const order = ['ok', 'info', 'warn', 'bad'];
     const level = problems.reduce((worst, p) => (order.indexOf(p.level) > order.indexOf(worst) ? p.level : worst), 'ok');
     return { level, problems: problems.slice(0, PROBLEMS_MAX).map((p) => ({ ...p, text: p.text.slice(0, TEXT_MAX) })) };
 }
 
 export class Health {
-    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen;
+    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen; #links; #beat; #now; #execAt = new Map();
     /* Set by the server: told each judgment (the chat of a conversation says what is wrong: talk.mjs). */
     judged = () => {};
     /* Set by the server: told a conversation is forgotten (what else is kept of its machine goes too). */
     forgotten = () => {};
+    /* Set by the server: told what a probe that answered found (`facts`: readProbe's), not waited for.
+       The secrets' guard reads its names of /run/secrets there (main.mjs). */
+    probed = () => {};
 
     /* `settleMs`: how long a missing folder is given before it is mounted
        again (a machine that has just started may still be mounting it).
        `lookMs`: how long the clock waits for one conversation's look. */
     /* `seen`: a store of the problems its owner marked seen ("Seen"), by conversation. */
-    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS, seen = null }) {
-        this.#seen = seen;
+    /* `links`: the guard of links its folders cannot serve (linkguard.mjs), or null. */
+    /* `beat`: the heartbeats read from the work folders (beat.mjs), or null: every look by command. */
+    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS, seen = null, links = null, beat = null, now = () => Date.now() }) {
+        this.#seen = seen; this.#links = links; this.#beat = beat; this.#now = now;
         this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#settleMs = settleMs; this.#probeMs = probeMs; this.#lookMs = lookMs;
     }
 
@@ -150,7 +213,7 @@ export class Health {
         this.#seen?.put({ name, keys, at: new Date().toISOString() });
         return this.of(name);
     }
-    forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#seen?.remove?.(name); try { this.forgotten(name); } catch { /* told */ } }
+    forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#execAt.delete(name); this.#beat?.forget?.(name); this.#seen?.remove?.(name); try { this.forgotten(name); } catch { /* told */ } }
 
     /* The look under way (it may be mounting a folder again), or null. */
     busy(name) { return this.#running.get(name) ?? null; }
@@ -179,13 +242,23 @@ export class Health {
            the VM manager for seconds, and every other machine waits behind it (21-10). */
         const quiet = this.#quiet.get(name);
         if (quiet && !asked && Date.now() < quiet.until) return this.#keep(name, { at, state, answering: false });
-        let facts = await this.#probe(name, paths);
+        /* Its heartbeat, when it says enough (#fromBeat): no command. Else the look by command, as always. */
+        const beating = Boolean(this.#beat?.on) && c.work === 'kept';
+        let facts = beating ? this.#fromBeat(name, paths, asked) : undefined;
+        if (beating) this.#vms.noteBeat?.(Boolean(facts));
         if (!facts) {
-            const times = (quiet?.times ?? 0) + 1;
-            this.#quiet.set(name, { times, until: Date.now() + Math.min(QUIET_MAX_MS, QUIET_MS * 2 ** (times - 1)) });
-            return this.#keep(name, { at, state, answering: false });
+            facts = await this.#probe(name, paths);
+            if (!facts) {
+                const times = (quiet?.times ?? 0) + 1;
+                this.#quiet.set(name, { times, until: Date.now() + Math.min(QUIET_MAX_MS, QUIET_MS * 2 ** (times - 1)) });
+                return this.#keep(name, { at, state, answering: false });
+            }
+            this.#execAt.set(name, this.#now());
+            /* Its beat put in its machine when it is not there or not of this version (bounded: beat.mjs, ensure). */
+            if (beating) void Promise.resolve().then(() => this.#beat.ensure?.(name)).catch(() => {});
         }
         this.#quiet.delete(name);
+        try { void Promise.resolve(this.probed(name, facts)).catch(() => {}); } catch { /* told, nothing more */ }
         const loose = () => paths.filter((p) => facts.mounts[p] !== 'ok');
         const remounted = []; const failed = [];
         if (loose().length > 0 && repair && this.#resources) {
@@ -213,11 +286,63 @@ export class Health {
                 }
             }
         }
+        const links = await this.#lookLinks(name, asked);
         return this.#keep(name, {
             at, state, answering: true, memory: facts.memory, oomKills: facts.oomKills ?? 0, ...(facts.oomKinds ? { oomKinds: facts.oomKinds } : {}), disks: facts.disks,
-            missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}),
+            paths, missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}), ...(links ? { links } : {}),
+            ...(failed.some((f) => f.path === '/work' && STUCK_MOUNT.test(f.why ?? '')) ? { stuckWork: true } : {}),
+            ...(facts.stale ? { stale: true } : {}), ...(facts.screenLoose ? { screenLoose: facts.screenLoose } : {}), ...(facts.restartAsked ? { restartAsked: true } : {}),
             /* What was put back stays said until a later look finds nothing to put back. */
         });
+    }
+
+    /* Its folders' links, bounded (linkguard.mjs); never what holds up a look. */
+    async #lookLinks(name, force) {
+        if (!this.#links) return null;
+        return this.#links.check(name, { force }).catch(() => null);
+    }
+
+    /* "CHECK SHARED FOLDERS", asked by its owner: the same looks, now -- each
+       folder mounted and readable (put back when loose), each link the share
+       cannot serve -- and what was found or done, one item each. A machine
+       that does not run is not woken: only its folders' links are looked at. */
+    async checkFolders(name) {
+        const record = await this.check(name, { asked: true });
+        if (!record) return null;
+        let links = record.links;
+        if (!links && this.#links) links = await this.#links.check(name, { force: true }).catch(() => null);
+        const items = [];
+        if (record.state === 'Running' && record.answering === true) {
+            const failed = new Map((record.failed ?? []).map((f) => [f.path, f.why]));
+            for (const path of record.paths ?? []) {
+                if (failed.has(path)) items.push({ kind: 'mount-failed', path, why: failed.get(path) });
+                else if ((record.remounted ?? []).includes(path)) items.push({ kind: 'mount-remounted', path });
+                else if ((record.missing ?? []).includes(path)) items.push({ kind: 'mount-missing', path });
+                else items.push({ kind: 'mount-ok', path });
+            }
+        } else items.push({ kind: 'machine-off', state: record.state ?? null });
+        for (const l of links?.removed ?? []) items.push({ kind: 'link-removed', folder: l.folder, path: l.path, why: l.kind });
+        for (const l of links?.found ?? []) items.push({ kind: 'link-found', folder: l.folder, path: l.path, why: l.kind });
+        for (const c of links?.cut ?? []) items.push({ kind: 'links-cut', folder: c.folder, why: c.why });
+        return { at: record.at, items, health: this.of(name) };
+    }
+
+    /* ITS HEARTBEAT AS THE PROBE'S ANSWER (beat.mjs), or undefined -- then the look is a command, as before:
+       a look asked (its owner, a start, a wake), the first look of a machine or one just back (not seen
+       running and answering at the last look), a spot check every SPOT_MS, a beat not newer than our own last
+       look, not fresh or not what it should be, or one that does not say each path that should be mounted. */
+    #fromBeat(name, paths, asked) {
+        this.#beat.expect?.(name, paths);
+        if (asked) return undefined;
+        const last = this.#records.get(name);
+        if (last?.state !== 'Running' || last.answering !== true) return undefined;
+        const ours = this.#execAt.get(name);
+        if (ours === undefined || this.#now() - ours >= SPOT_MS) return undefined;
+        const beat = this.#beat.read(name);
+        if (!beat.ok || !(beat.at > ours)) return undefined;
+        const facts = readProbe(beat.text, paths);
+        if (!facts.memory || paths.some((p) => facts.mounts[p] === undefined)) return undefined;
+        return facts;
     }
 
     async #probe(name, paths) {
@@ -240,18 +365,23 @@ export class Health {
 
     /* Every so often, each conversation whose machine should run. A machine
        that does not run is not touched (its state alone is asked). */
-    start(everyMs = EVERY_MS) {
+    /* `quietMs`: no look by the clock that soon after a start of the server (main.mjs, quietStartMs). */
+    start(everyMs = EVERY_MS, { quietMs = 0 } = {}) {
         if (!everyMs) return () => {};
         let going = false;
+        const quietUntil = Date.now() + quietMs;
         const timer = setInterval(async () => {
-            if (going) return;
+            if (going || Date.now() < quietUntil) return;
             going = true;
             /* All at once, each within its own time: one machine slow to
                answer (or a mount that hangs) does not hold up the others.
                A look still going when its time is up goes on; the next tick
                joins it rather than starting another (check). */
             try {
-                await Promise.all(this.#conversations.awake().map((name) => {
+                const names = this.#conversations.awake();
+                const apart = Math.min(STAGGER_MS, Math.floor(everyMs / Math.max(1, names.length)));
+                await Promise.all(names.map(async (name, i) => {
+                    if (i > 0 && apart > 0) await new Promise((resolve) => { setTimeout(resolve, i * apart).unref?.(); });
                     let timer;
                     const bound = new Promise((resolve) => { timer = setTimeout(resolve, this.#lookMs); timer.unref?.(); });
                     return Promise.race([this.check(name).catch(() => {}), bound]).finally(() => clearTimeout(timer));

@@ -56,17 +56,20 @@ const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
    when the server still announces an update about to stop it. */
 const next = ({ kind, startedAt, now, seenDown, answer }) => {
     const up = !!answer && !answer.down && !answer.update && !(answer.status >= 502 && answer.status <= 504);
-    if (up && !(kind === 'restart' && !seenDown && now - startedAt < RESTART_GRACE_MS)) return 'back';
+    /* The whole server (reboot): five seconds before it stops, a minute of grace. */
+    const grace = kind === 'reboot' ? 4 * RESTART_GRACE_MS : kind === 'restart' ? RESTART_GRACE_MS : 0;
+    if (up && !(grace && !seenDown && now - startedAt < grace)) return 'back';
     return now - startedAt > STUCK_MS ? 'stuck' : 'wait';
 };
 
-/* WHAT IT SAYS, from its address (?kind=update|back|restart&to=<version>): the edge serves
+/* WHAT IT SAYS, from its address (?kind=update|back|restart|reboot&to=<version>): the edge serves
    it at any address, with none of these: then it cannot know which. */
 const title = (kind, to) => {
     const v = VERSION.test(to ?? '') ? to : '';
     if (kind === 'update') return v ? `Updating Clavarium to ${v}...` : 'Updating Clavarium...';
     if (kind === 'back') return v ? `Going back to Clavarium ${v}...` : 'Going back to the previous Clavarium...';
     if (kind === 'restart') return 'Restarting Clavarium...';
+    if (kind === 'reboot') return 'Restarting the server: every machine starts again in a few minutes...';
     return 'Clavarium is being updated or restarted...';
 };
 

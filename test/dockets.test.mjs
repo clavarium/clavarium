@@ -137,3 +137,47 @@ test('a wake-up of a conversation whose chat is on goes to its docket; with the 
     assert.equal(posted.length, 1);
     assert.equal(readFileSync(join(dir, 'w.json'), 'utf8').includes('Typed: Look at the inbox.'), true);
 });
+
+/* A COPY'S REMINDERS (15-11, when asked): those still to come, never one taken back or past. */
+test('a copy takes the reminders still to come: repeating or due later; not one taken back, nor one past', async (t) => {
+    const { copyPlans } = await import('../server/dockets.mjs');
+    const { writeFileSync: write } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-plans-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const from = join(dir, 'a'); const to = join(dir, 'b');
+    mkdirSync(join(from, '.docket'), { recursive: true }); mkdirSync(to);
+    const now = Date.parse('2026-11-15T07:00:00Z');
+    const plans = [
+        { id: 'p1', kind: 'plan', cron: '0 8 * * *', text: 'daily' },
+        { id: 'p2', kind: 'plan', due: '2026-11-18T08:00:00Z', text: 'later' },
+        { id: 'p3', kind: 'plan', due: '2026-11-13T08:00:00Z', text: 'past' },
+        { id: 'p4', kind: 'plan', cron: '0 9 * * *', text: 'taken back' },
+    ];
+    write(join(from, '.docket', 'plans.jsonl'), plans.map((p) => JSON.stringify(p)).join('\n') + '\n');
+    write(join(from, '.docket', 'plans-off.jsonl'), JSON.stringify({ id: 'x', plan: 'p4' }) + '\n');
+    write(join(from, '.docket', 'zone'), 'Europe/Paris');
+    assert.equal(copyPlans(from, to, now), 2);
+    const kept = readFileSync(join(to, '.docket', 'plans.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).id);
+    assert.deepEqual(kept, ['p1', 'p2']);
+    assert.equal(readFileSync(join(to, '.docket', 'zone'), 'utf8'), 'Europe/Paris');
+    assert.equal(copyPlans(join(dir, 'none'), to, now), 0, 'none: nothing');
+});
+
+test('a frozen tool: one « not handled » line, the next ones counted; once handled, one line says how many (20-11)', async (t) => {
+    const b = bench(t);
+    const first = b.dockets.post('worker', { kind: 'arrival', text: 'First', data: { wakeup: 'w1' } });
+    for (let i = 0; i <= TOLD_MAX; i++) { await b.dockets.tick(); b.later(AGAIN_MS); }
+    await b.dockets.tick();
+    for (const text of ['Second', 'Third']) {
+        b.dockets.post('worker', { kind: 'arrival', text, data: { wakeup: text } });
+        for (let i = 0; i <= TOLD_MAX; i++) { await b.dockets.tick(); b.later(AGAIN_MS); }
+        await b.dockets.tick();
+    }
+    const unhandled = () => b.lines.filter((l) => l[1] === 'docket-unhandled').map((l) => l[2]);
+    assert.deepEqual(unhandled(), [`Not handled, told ${TOLD_MAX} times: First`], 'the others only counted');
+    b.tool('done', first.id.slice(0, 8));
+    await b.dockets.tick();
+    assert.deepEqual(unhandled().slice(1), ['And 2 more not handled meanwhile.']);
+    await b.dockets.tick();
+    assert.equal(unhandled().length, 2, 'said once');
+});

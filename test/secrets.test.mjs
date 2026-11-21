@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Vault } from '../server/vault.mjs';
-import { Secrets, isSecretName, expiryOf, daysTo, RUNNER_SCRIPT, RUNNER, SECRETS_DIR } from '../server/secrets.mjs';
+import { Secrets, isSecretName, expiryOf, daysTo, RUNNER_SCRIPT, RUNNER, SECRETS_DIR, EPHEMERAL_PREFIX, TTL_MAX_MS } from '../server/secrets.mjs';
 import { Grants } from '../server/grants.mjs';
 import { Readable } from 'node:stream';
 import { handleApi } from '../server/api.mjs';
@@ -63,6 +63,29 @@ test('delivery: the value travels on standard input, never in an argument; only 
     b.calls.length = 0;
     await b.secrets.deliver('alpha');
     assert.equal(b.calls.length, 3);
+});
+
+test('a host-only secret is held by the server: it cannot be attached, never reaches a machine, yet is revealed host-side', async (t) => {
+    const b = bench(t);
+    b.secrets.set({ name: 'MAIL_TOKEN', value: 'refresh-token-value', hostOnly: true });
+    b.secrets.set({ name: 'PLAIN', value: 'ordinary' });
+    /* It cannot be handed to a conversation: the guarantee is structural, not a matter of no one attaching it. */
+    assert.throws(() => b.secrets.attach('alpha', 'MAIL_TOKEN', true), /held by the server/);
+    /* Even so, it never reaches a VM: not in the delivery set, not in a delivered file. */
+    b.secrets.attach('alpha', 'PLAIN', true);
+    await b.secrets.deliver('alpha');
+    assert.ok(!b.calls.some((c) => c.argv.includes('MAIL_TOKEN') || c.input === 'refresh-token-value'), 'never delivered');
+    assert.deepEqual(b.secrets.given('alpha'), ['PLAIN'], 'not in what a machine is given');
+    assert.deepEqual(b.secrets.of('alpha'), ['PLAIN'], 'not among a conversation Assets');
+    /* The server uses it on the agent behalf: revealed by name, host-side, like any secret. */
+    assert.equal(b.secrets.reveal('MAIL_TOKEN'), 'refresh-token-value');
+    /* The ordinary listing leaves it out entirely (never a giveable secret on the page);
+       `held` reveals it for a management view, marked host-only. */
+    assert.equal(b.secrets.list().find((s) => s.name === 'MAIL_TOKEN'), undefined, 'not in the page listing');
+    assert.equal(b.secrets.list().find((s) => s.name === 'PLAIN').hostOnly, undefined);
+    assert.equal(b.secrets.list({ held: true }).find((s) => s.name === 'MAIL_TOKEN').hostOnly, true);
+    /* Detaching (take) is always allowed; it is attaching that is refused. */
+    assert.doesNotThrow(() => b.secrets.attach('alpha', 'MAIL_TOKEN', false));
 });
 
 test('a secret is named like a variable, and cannot take the place of one the tool needs to start', (t) => {
@@ -226,4 +249,186 @@ test('through the API: made with an expiry, replaced in place; no answer ever ca
     assert.deepEqual(JSON.parse(listed.text).map((s) => [s.name, s.expires]), [['API_KEY', null]]);
     assert.equal(b.secrets.reveal('API_KEY'), 'sk-api-two');
     for (const text of answers) assert.ok(!/sk-api|sealed/.test(text), text);
+});
+
+test('an ephemeral secret: random name, sealed, handed to its conversation, listed as short-lived', (t) => {
+    const b = bench(t);
+    const { name, expiresAt } = b.secrets.stash('alice', 'npm_realtokenvalue123');
+    assert.ok(name.startsWith(EPHEMERAL_PREFIX) && isSecretName(name), name);
+    assert.ok(Date.parse(expiresAt) > b.clock.at.getTime());
+    const onDisk = readFileSync(join(b.dir, 'secrets.json'), 'utf8');
+    assert.ok(onDisk.includes(name) && !onDisk.includes('npm_realtokenvalue123'), 'name kept, value sealed');
+    assert.deepEqual(b.secrets.given('alice'), [name], 'handed to the conversation it came from');
+    assert.deepEqual(b.secrets.given('bob'), [], 'not to another conversation');
+    const row = b.secrets.list().find((s) => s.name === name);
+    assert.equal(row.ephemeral, true);
+    assert.ok(row.expiresInMs > 0 && row.expiresInMs <= TTL_MAX_MS);
+});
+
+test('an ephemeral secret is delivered to the running machine like any other', async (t) => {
+    const b = bench(t);
+    const { name } = b.secrets.stash('alice', 'the-secret-value');
+    b.calls.length = 0;
+    await b.secrets.deliver('alice');
+    const wrote = b.calls.find((c) => c.argv.includes(`${SECRETS_DIR}/${name}`));
+    assert.ok(wrote, 'a file is installed for it');
+    assert.equal(wrote.input, 'the-secret-value', 'its value is delivered, never in an argument');
+    assert.ok(!b.calls.some((c) => c.argv.includes('the-secret-value')), 'the value is never in an argument list');
+});
+
+test('an ephemeral secret stops being delivered once its minute passes', (t) => {
+    const b = bench(t);
+    const { name } = b.secrets.stash('alice', 'short-lived', { ttlMs: 5 * 60_000 });
+    assert.deepEqual(b.secrets.given('alice'), [name]);
+    assert.equal(b.secrets.isExpired(name), false);
+    b.clock.at = new Date(b.clock.at.getTime() + 6 * 60_000);
+    assert.equal(b.secrets.isExpired(name), true);
+    assert.deepEqual(b.secrets.given('alice'), [], 'gone from the delivery set');
+    assert.equal(b.secrets.signature('alice'), '', 'a changed signature triggers a re-delivery');
+});
+
+test('dropping an ephemeral secret removes it and rewrites the machine', async (t) => {
+    const b = bench(t);
+    const { name } = b.secrets.stash('alice', 'to-forget');
+    b.calls.length = 0;
+    await b.secrets.drop('alice', name);
+    assert.equal(b.secrets.reveal(name), undefined, 'value gone from the vault');
+    assert.ok(!b.secrets.list().some((s) => s.name === name));
+    assert.ok(b.calls.some((c) => c.argv.includes(RUNNER) || c.argv.includes(SECRETS_DIR)), 'the machine was rewritten');
+    await assert.rejects(b.secrets.drop('alice', name), /No such short-lived secret/);
+});
+
+test('a restart drops ephemeral secrets that ran out, keeps those still alive', (t) => {
+    const b = bench(t);
+    const live = b.secrets.stash('alice', 'still-good', { ttlMs: 30 * 60_000 }).name;
+    const dead = b.secrets.stash('alice', 'too-late', { ttlMs: 5 * 60_000 }).name;
+    b.clock.at = new Date(b.clock.at.getTime() + 10 * 60_000);
+    const reborn = b.make();                                   /* same store + grants, after the clock moved */
+    assert.deepEqual(reborn.given('alice'), [live], 'the live one stays, the dead one is swept');
+    assert.ok(!reborn.list().some((s) => s.name === dead));
+});
+
+test('liveFor lists only live ephemeral secrets, with time left', (t) => {
+    const b = bench(t);
+    b.secrets.set({ name: 'MODEL_KEY', value: 'sk-x' }); b.secrets.attach('alice', 'MODEL_KEY', true);
+    const { name } = b.secrets.stash('alice', 'tok', { ttlMs: 10 * 60_000 });
+    const live = b.secrets.liveFor('alice');
+    assert.deepEqual(live.map((x) => x.name), [name], 'only the ephemeral one, never the ordinary secret');
+    assert.ok(live[0].expiresInMs > 0 && live[0].expiresInMs <= 10 * 60_000);
+    b.clock.at = new Date(b.clock.at.getTime() + 11 * 60_000);
+    assert.deepEqual(b.secrets.liveFor('alice'), [], 'an expired one drops out');
+});
+
+test('through the API: forgetting an ephemeral secret of a conversation drops it', async (t) => {
+    const b = bench(t);
+    const call = async (method, path, body) => {
+        const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(body ?? {}))]), { method, url: path, headers: { 'content-type': 'application/json' } });
+        let status; let text = '';
+        const response = { writeHead: (s) => { status = s; return { end: (x) => { text = x; } }; } };
+        const conversations = { list: () => [{ name: 'alpha', phase: 'ready' }] };
+        await handleApi(request, response, conversations, {}, { of: () => [] }, () => true, undefined, undefined, undefined, b.secrets);
+        return { status, text };
+    };
+    const { name } = b.secrets.stash('alpha', 'npm_token-value');
+    assert.deepEqual(b.secrets.liveFor('alpha').map((x) => x.name), [name]);
+    const gone = await call('POST', `/api/conversations/alpha/secrets/${name}/forget`, {});
+    assert.equal(gone.status, 200);
+    assert.equal(b.secrets.reveal(name), undefined, 'the value is gone from the vault');
+    assert.deepEqual(b.secrets.liveFor('alpha'), []);
+    assert.equal((await call('POST', '/api/conversations/alpha/secrets/SECRET_FFFFFFFFFF/forget', {})).status, 404);
+});
+
+test('through the API: a secret given to a running conversation reaches its machine at once; an asleep one waits for its next opening', async (t) => {
+    const b = bench(t);
+    let asleep = false;
+    const call = async (path, body) => {
+        const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(body ?? {}))]), { method: 'POST', url: path, headers: { 'content-type': 'application/json' } });
+        let status;
+        const response = { writeHead: (s) => { status = s; return { end: () => {} }; } };
+        const conversations = { list: () => [{ name: 'alpha', phase: 'ready', asleep }] };
+        await handleApi(request, response, conversations, {}, { of: () => [] }, () => true, undefined, undefined, undefined, b.secrets);
+        return status;
+    };
+    b.secrets.set({ name: 'OVH_KEY', value: 'ovh-value-123' });
+    b.calls.length = 0;
+    assert.equal(await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: true }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY') && c.input === 'ovh-value-123'), 'written in the machine now');
+    b.calls.length = 0;
+    assert.equal(await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: false }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('find /run/secrets')) && !b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY')), 'and taken away now');
+    asleep = true; b.calls.length = 0;
+    await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: true });
+    assert.equal(b.calls.length, 0, 'an asleep machine is not woken for it');
+    /* A new value: its running machines get it now too. */
+    asleep = false; b.calls.length = 0;
+    assert.equal(await call('/api/secrets/OVH_KEY/replace', { value: 'ovh-value-456' }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY') && c.input === 'ovh-value-456'), 'the new value, at once');
+});
+
+test('the guard: a machine missing a secret, holding one too many, or holding an old value is put right; one in order is left alone', async (t) => {
+    const b = bench(t);
+    let listing = '';
+    const calls = [];
+    const vms = { exec: async (name, argv, options) => { calls.push({ argv: argv.join(' '), input: options?.input }); return argv[0] === 'sh' ? { code: 0, stdout: listing, stderr: '' } : { code: 0, stdout: '', stderr: '' }; } };
+    const s = new Secrets({ store: new Store(join(b.dir, 'g.json')), vault: new Vault(join(b.dir, 'g.key')), vms, grants: new Grants(), now: () => b.clock.at });
+    s.set({ name: 'OVH_KEY', value: 'v1' }); s.attach('alpha', 'OVH_KEY', true);
+    const delivered = () => calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY'));
+    /* Missing in the machine: put there. */
+    let last = await s.reconcile('alpha', undefined);
+    assert.ok(delivered(), 'missing: delivered');
+    /* In order: nothing written. */
+    listing = 'OVH_KEY\n'; calls.length = 0;
+    assert.equal(await s.reconcile('alpha', last), last);
+    assert.equal(calls.length, 1, 'only looked at');
+    /* One too many there (taken away elsewhere): rewritten without it. */
+    listing = 'OVH_KEY\nOLD_ONE\n'; calls.length = 0;
+    await s.reconcile('alpha', last);
+    assert.ok(calls.some((c) => c.argv.includes('find /run/secrets')), 'cleared and written again');
+    /* A new value: delivered. */
+    listing = 'OVH_KEY\n'; s.replace('OVH_KEY', { value: 'v2' }); calls.length = 0;
+    last = await s.reconcile('alpha', last);
+    assert.ok(calls.some((c) => c.input === 'v2'));
+    /* A machine that cannot be looked at: left for the next look. */
+    const down = new Secrets({ store: new Store(join(b.dir, 'g.json')), vault: new Vault(join(b.dir, 'g.key')), vms: { exec: async () => { throw new Error('asleep'); } }, grants: new Grants(), now: () => b.clock.at });
+    assert.equal(await down.reconcile('alpha', last), null);
+});
+
+test('the guard, given the names the health probe read: nothing asked of the machine when in order; put right otherwise, as when it looks itself', async (t) => {
+    const b = bench(t);
+    const calls = [];
+    const vms = { exec: async (name, argv, options) => { calls.push({ argv: argv.join(' '), input: options?.input }); return { code: 0, stdout: '', stderr: '' }; } };
+    const s = new Secrets({ store: new Store(join(b.dir, 'h.json')), vault: new Vault(join(b.dir, 'h.key')), vms, grants: new Grants(), now: () => b.clock.at });
+    s.set({ name: 'OVH_KEY', value: 'v1' }); s.attach('alpha', 'OVH_KEY', true);
+    const last = await s.reconcile('alpha', undefined, { count: 0, names: [] });
+    assert.ok(calls.some((c) => c.input === 'v1'), 'missing: delivered');
+    assert.ok(!calls.some((c) => c.argv.startsWith('sh -c ls')), 'not looked at by a command of its own');
+    calls.length = 0;
+    assert.equal(await s.reconcile('alpha', last, { count: 1, names: ['OVH_KEY'] }), last);
+    assert.equal(calls.length, 0, 'in order: nothing sent at all');
+    await s.reconcile('alpha', last, { count: 2, names: ['OVH_KEY', 'OLD_ONE'] });
+    assert.ok(calls.some((c) => c.argv.includes('find /run/secrets')), 'one too many: written again');
+    calls.length = 0;
+    await s.reconcile('alpha', last, { count: 2, names: ['OVH_KEY'] });
+    assert.ok(calls.some((c) => c.input === 'v1'), 'more there than were listed: never taken as in order');
+    calls.length = 0;
+    await s.reconcile('alpha', last, { count: 1, names: ['?'] });
+    assert.ok(calls.some((c) => c.input === 'v1'), 'a name that is not a plain one: written again');
+});
+
+test('in a shared machine its secrets go to its own folder, for its own user: never the others\' (#221)', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-sec-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const calls = [];
+    const vms = new Vms(async (argv, options) => { calls.push({ argv: argv.slice(1).join(' '), input: options?.input }); return { code: 0, stdout: '', stderr: '' }; }, ['vmm'], { machineOf: (n) => (n === 'mail' ? 'assist' : undefined) });
+    const secrets = new Secrets({ store: new Store(join(dir, 'secrets.json')), vault: new Vault(join(dir, 'vault.key')), vms, grants: new Grants(), now: () => new Date(2026, 9, 24, 12, 0) });
+    secrets.set({ name: 'MODEL_KEY', value: 'sk-very-secret-value' });
+    secrets.attach('mail', 'MODEL_KEY', true);
+    await secrets.deliver('mail');
+    assert.deepEqual(calls.map((c) => c.argv), [
+        `exec clv-assist -- sudo -n install -m 0755 /dev/stdin ${RUNNER}`,
+        'exec clv-assist -- sudo -n install -d -m 0700 -o c-mail -g c-mail /run/clavarium/own/mail/secrets',
+        'exec clv-assist -- sudo -n find /run/clavarium/own/mail/secrets -mindepth 1 -delete',
+        'exec clv-assist -- sudo -n install -m 0600 -o c-mail -g c-mail /dev/stdin /run/clavarium/own/mail/secrets/MODEL_KEY',
+    ]);
+    assert.ok(!calls.some((c) => c.argv.includes(` ${SECRETS_DIR} `) || c.argv.endsWith(` ${SECRETS_DIR}`)), 'the machine-wide folder untouched');
 });

@@ -84,7 +84,8 @@ test('Binders, walked back: a card is one step over its binder (Back, its "‹",
 
         /* Batches, scrolled down, its last card: kept in sight, its way back; "‹": the list, where it was. */
         await choose('batches');
-        const last = lists.locator('.binder-row').filter({ has: p.locator('b', { hasText: /^Batch 24$/ }) });
+        /* Its title follows its number now (« #24 Batch 24 », Binder's .binder-num). */
+        const last = lists.locator('.binder-row').filter({ has: p.locator('b', { hasText: /(^|\s)Batch 24$/ }) });
         await who.until(`${at}: Batches`, async () => (await last.count()) === 1);
         await last.scrollIntoViewIfNeeded();
         const listTop = await lists.evaluate((e) => e.scrollTop);
@@ -150,7 +151,7 @@ test('Binders, walked back: a card is one step over its binder (Back, its "‹",
         await tap(p.locator('#assets-detail [data-act="open-list"]'));
         const here = p.locator('#assets-detail .as-binder');
         await who.until(`${at}: the binder in Assets`, async () => (await here.locator('.binder-row').count()) === 24);
-        await tap(here.locator('.binder-row').filter({ has: p.locator('b', { hasText: /^Batch 2$/ }) }));
+        await tap(here.locator('.binder-row').filter({ has: p.locator('b', { hasText: /(^|\s)Batch 2$/ }) }));
         await who.until(`${at}: its card in Assets`, async () => (await here.locator('.binder-record').count()) === 1);
         assert.equal((await query()).card, (await here.locator('.binder-record').getAttribute('data-record')));
         assert.ok(await inSight(here.locator('.binder-record [data-act="back"]')), 'its way back in sight');
@@ -159,7 +160,7 @@ test('Binders, walked back: a card is one step over its binder (Back, its "‹",
         await p.goBack();
         await who.until(`${at}: Back, the binder in Assets`, async () => (await here.locator('.binder-record').count()) === 0 && (await here.locator('.binder-row').count()) === 24);
         assert.ok(await p.locator('#assets-detail').isVisible());
-        await tap(here.locator('.binder-row').filter({ has: p.locator('b', { hasText: /^Batch 5$/ }) }));
+        await tap(here.locator('.binder-row').filter({ has: p.locator('b', { hasText: /(^|\s)Batch 5$/ }) }));
         await who.until(`${at}: another card in Assets`, async () => (await here.locator('.binder-record').count()) === 1);
         await tap(here.locator('.binder-record [data-act="back"]'));
         await who.until(`${at}: "‹", the binder in Assets`, async () => (await here.locator('.binder-record').count()) === 0 && (await here.locator('.binder-row').count()) === 24);

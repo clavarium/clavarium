@@ -300,6 +300,19 @@ export class Setup {
             nodes.push({ id: `secret:${s.name}`, kind: 'secret', name: s.name, sub: 'secret' });
             for (const c of s.conversations) links.push({ from: `conversation:${c}`, to: `secret:${s.name}`, rights: 'x' });
         }
+        /* Live Tether connexions, shown like any asset: a mailbox among mailboxes, a
+           calendar, an address book -- with the conversations they were given to. */
+        const TCAT = { mail: 'mailbox', calendar: 'agenda', contacts: 'contacts' };
+        for (const t of p.tethers?.store?.().targets() ?? []) {
+            /* The USB device of the owner's browser is not an asset: nothing of it to show or carry. */
+            if (t.kind === 'device' || t.kind === 'voicebox') continue;
+            const kind = TCAT[t.kind] ?? 'mailbox';
+            nodes.push({ id: `connexion:${t.id}`, kind, name: t.title, sub: `${t.kind} (live)`, tether: true, record: t });
+            for (const [agent, grant] of Object.entries(t.grants ?? {})) {
+                if (!agent.startsWith('conversation:')) continue;
+                links.push({ from: agent, to: `connexion:${t.id}`, rights: grant?.level === 'watch' ? 'r' : 'rw' });
+            }
+        }
         const labels = new Set();
         for (const d of devices) {
             nodes.push({ id: `device:${d.id}`, kind: 'device', name: d.label, sub: 'paired' });
@@ -326,6 +339,18 @@ export class Setup {
                 const to = t.kind === 'secret' ? `secret:${t.secret}` : t.asset;
                 if (!links.some((x) => x.from === l.from && x.to === to)) links.push({ from: l.from, to, rights: l.rights, pending: true, ...(l.autoSend ? { autoSend: l.autoSend } : {}) });
             }
+        }
+        /* The owner's asset groups: one node per group, and each grouped asset
+           tagged with its group. The page can then FOLD a group to a single node
+           whose links are the union of its members' -- here we give the parts
+           (the members, their real links, the group nodes); the page does the
+           folding so the map declutters without losing the truth. */
+        const nodeById = new Map(nodes.map((n) => [n.id, n]));
+        for (const g of p.groups?.list?.() ?? []) {
+            const members = (g.members ?? []).filter((m) => nodeById.has(m));
+            if (members.length === 0) continue;
+            for (const m of members) nodeById.get(m).group = `group:${g.id}`;
+            nodes.push({ id: `group:${g.id}`, kind: 'group', name: g.label, sub: `${members.length} asset${members.length === 1 ? '' : 's'}`, members });
         }
         const known = new Set(nodes.map((n) => n.id));
         return { nodes, links: links.filter((l) => known.has(l.from) && known.has(l.to)) };

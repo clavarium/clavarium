@@ -28,6 +28,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync, renameSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { NODE_STEPS } from './tools.mjs';
 import { fileURLToPath } from 'node:url';
 import { APP, ARCHIVES, MACHINE_TOOLS, archiveName, locked, packageDir, packageVersion } from './parley.mjs';
 
@@ -36,6 +37,8 @@ export const NOTES = 'CLAVARIUM.md';
 /* THE LAUNCHERS of the tools (config/launch of this code: config/ is in every release, also one made by an older updater): copied as they are into /tools/launch. */
 export const LAUNCH = 'launch';
 export const LAUNCHERS = fileURLToPath(new URL('../config/launch', import.meta.url));
+/* Beside them: the tools' sign-in screen rules (15-11, #362), the name screen-watch.mjs reads (RULES_FILE there). */
+export const SCREEN_RULES = 'screen-rules.json';
 /* What is put there: { name, archive (a path here), integrity, usage(file) }.
    Parley's archive as the registry served it, next to the code (see
    parley.mjs), with the integrity npm recorded for the version installed:
@@ -56,12 +59,13 @@ export const parleySource = (options = {}) => toolSource(MACHINE_TOOLS.find((t) 
 
 /* "sha512-<base64>", as npm writes an integrity. */
 const NO_NPM = 'there is no npm in this machine';
+const NODE_STEP_MS = 15 * 60_000;
 export const integrityOf = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Toolbox {
-    #host; #vms; #mnt; #uid; #gid; #sources; #notes; #launchers; #launched; #launches; #index = null; #launchHash = '';
+    #host; #vms; #mnt; #uid; #gid; #sources; #notes; #launchers; #launched; #launches; #screens; #index = null; #launchHash = '';
     /* What is known of Parley in each machine, as the index is now:
        conversation -> { sha256, why } (why: '' installed, or why it cannot be,
        such as a machine without npm: not asked again at each opening). */
@@ -73,8 +77,10 @@ export class Toolbox {
        may be in it: every machine reads it. */
     /* `launched`: a Store of what each tool was started with (its launchers' fingerprint): see stale(). */
     /* `launches(name)`: does its tool start through a launcher? (only those read one) */
-    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = toolSources(), notes = null, launchers = LAUNCHERS, launched = null, launches = () => false }) {
-        this.#launched = launched; this.#launches = launches;
+    /* `screens`: the sign-in rules of each tool's screen, { toolId: [rule, ...] } (config/tools.json, "signin.screen";
+       tools.mjs screenRules), written beside the launchers as SCREEN_RULES for screen-watch.mjs (15-11, #362). */
+    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = toolSources(), notes = null, launchers = LAUNCHERS, launched = null, launches = () => false, screens = {} }) {
+        this.#launched = launched; this.#launches = launches; this.#screens = screens;
         this.#host = host; this.#vms = vms; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#sources = sources; this.#notes = notes; this.#launchers = launchers;
     }
 
@@ -114,8 +120,11 @@ export class Toolbox {
             const there = existsSync(`${launch}/${n}`) ? readFileSync(`${launch}/${n}`) : null;
             if (!there || !there.equals(bytes)) { writeFileSync(`${launch}/.${n}.new`, bytes, { mode: 0o755 }); renameSync(`${launch}/.${n}.new`, `${launch}/${n}`); }
         }
-        for (const n of readdirSync(launch)) if (!wanted.includes(n)) rmSync(`${launch}/${n}`, { recursive: true, force: true });
-        this.#launchHash = createHash('sha256').update(wanted.sort().map((n) => `${n}\n${readFileSync(join(this.#launchers, n), 'utf8')}`).join('\n')).digest('hex');
+        /* The sign-in rules of the tools' screens, beside them (screen-watch.mjs --tool): a change of them is a change of the launchers. */
+        const screens = `${JSON.stringify(this.#screens ?? {}, null, 2)}\n`;
+        if (!existsSync(`${launch}/${SCREEN_RULES}`) || readFileSync(`${launch}/${SCREEN_RULES}`, 'utf8') !== screens) { writeFileSync(`${launch}/.${SCREEN_RULES}.new`, screens, { mode: 0o644 }); renameSync(`${launch}/.${SCREEN_RULES}.new`, `${launch}/${SCREEN_RULES}`); }
+        for (const n of readdirSync(launch)) if (!wanted.includes(n) && n !== SCREEN_RULES) rmSync(`${launch}/${n}`, { recursive: true, force: true });
+        this.#launchHash = createHash('sha256').update(wanted.sort().map((n) => `${n}\n${readFileSync(join(this.#launchers, n), 'utf8')}`).join('\n') + (Object.keys(this.#screens ?? {}).length ? `\n${SCREEN_RULES}\n${screens}` : '')).digest('hex');
         const kept = new Set([...tools.map((t) => t.file), 'index.json', LAUNCH, ...(this.#notes ? [NOTES] : [])]);
         for (const name of readdirSync(dir)) if (!kept.has(name)) rmSync(`${dir}/${name}`, { recursive: true, force: true });
         const index = { tools };
@@ -185,8 +194,13 @@ export class Toolbox {
         const exec = (argv, timeoutMs = 30_000) => this.#vms.exec(conversation, argv, { timeoutMs }).catch(() => ({ code: 1, stdout: '', stderr: '' }));
         const there = async () => { const v = await exec([tool.name, '--version']); return v.code === 0 && v.stdout.trim() === tool.version; };
         if (await there()) return '';
-        /* A machine without node (a plain shell): said once, until it is built again or restarted. */
-        if ((await exec(['which', 'npm'])).code !== 0) return NO_NPM;
+        /* A machine without node (a plain shell, a tool whose recipe has none): node first, as a tool's "node"
+           step gives it; still none, said once, until it is built again or restarted. */
+        if ((await exec(['which', 'npm'])).code !== 0) {
+            const why = await this.#node(conversation);
+            if (why) return why;
+            if ((await exec(['which', 'npm'])).code !== 0) return NO_NPM;
+        }
         /* The archive as the machine reads it, against the index; /tools mounted again once if it is not there. */
         const sum = async () => /^([0-9a-f]{64})\s/.exec((await exec(['sha256sum', '--', tool.path], 60_000)).stdout ?? '')?.[1];
         let seen = await sum();
@@ -196,6 +210,15 @@ export class Toolbox {
         const r = await exec(['sudo', '-n', 'npm', 'install', '-g', '--offline', '--no-audit', '--no-fund', tool.path], 180_000);
         if (r.code !== 0) return `npm: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
         if (!(await there())) return `installed, but "${tool.name} --version" does not say the version of the index`;
+        return '';
+    }
+
+    /* NODE IN A MACHINE WITHOUT IT: the steps of tools.mjs (its checksum checked before it is unpacked). '' or why not. */
+    async #node(conversation) {
+        for (const [i, step] of NODE_STEPS.entries()) {
+            const r = await this.#vms.exec(conversation, step.argv, { input: step.input, timeoutMs: NODE_STEP_MS }).catch(() => ({ code: 1, stdout: '', stderr: '' }));
+            if (r.code !== 0) return `node could not be installed (step ${i + 1}): ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
+        }
         return '';
     }
 

@@ -21,15 +21,22 @@
  * should use on the agent's behalf (a push key, a mailbox password) does not
  * belong here, and never enters a VM.
  */
+import { randomBytes } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
 import { Grants, conversationSubject } from './grants.mjs';
 import { isConversationName } from './names.mjs';
-import { VM_USER } from './vm.mjs';
+import { VM_USER, ownSecretsDir, sharedUser } from './vm.mjs';
 
 export const SECRETS_DIR = '/run/secrets';
 export const RUNNER = '/usr/local/bin/clv-run';
 export const VALUE_MAX = 8 * 1024;
 export const WARN_DAYS = 7;
+/* A secret lifted from a message (secret-scan.mjs): a random name, a short
+   life in MINUTES (not days), swept when it runs out. */
+export const EPHEMERAL_PREFIX = 'SECRET_';
+export const TTL_DEFAULT_MS = 10 * 60_000;
+export const TTL_MIN_MS = 60_000;
+export const TTL_MAX_MS = 60 * 60_000;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DAY_MS = 86_400_000;
 const NAME = /^[A-Z][A-Z0-9_]{0,39}$/;
@@ -69,7 +76,7 @@ export function daysTo(day, now = new Date()) {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Secrets {
-    #store; #vault; #vms; #grants; #now;
+    #store; #vault; #vms; #grants; #now; #timers = new Map();
 
     /* `grants`: the one table of rights. "Handed to a conversation" is a
        line of it: the conversation may USE the secret. */
@@ -80,18 +87,31 @@ export class Secrets {
             for (const conversation of Object.keys(s.attachments)) this.#grants.give(conversationSubject(conversation), `secret:${s.name}`, 'x');
             delete s.attachments; store.put(s);
         }
+        /* A restart loses the sweep timers: drop the ephemeral secrets that ran
+           out while down, and set a fresh timer for those still alive. */
+        for (const s of store.all()) {
+            if (s.ephemeral !== true) continue;
+            const who = this.#users(s.name)[0];
+            const left = who ? Date.parse(s.expiresAt) - this.#now().getTime() : 0;
+            if (!who || !(left > 0)) { store.remove(s.name); this.#grants.forgetAsset(`secret:${s.name}`); }
+            else this.#schedule(who, s.name, left);
+        }
     }
     #handed(conversation, name) { return this.#grants.can(conversationSubject(conversation), `secret:${name}`, 'x'); }
-    #expired(s) { return Boolean(s.expires) && daysTo(s.expires, this.#now()) <= 0; }
+    /* Ephemeral: gone at its moment (minutes). Otherwise: gone from its day on. */
+    #expired(s) { return s.expiresAt ? Date.parse(s.expiresAt) <= this.#now().getTime() : (Boolean(s.expires) && daysTo(s.expires, this.#now()) <= 0); }
     #users(name) { return this.#grants.on(`secret:${name}`).map((g) => g.subject.slice('conversation:'.length)); }
     /* What is delivered to this conversation: handed, and not expired. */
     #given(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name) && !this.#expired(s)); }
 
     /* Names, where they are attached, the expiry. Never a value. `days`: whole
-       days left (null without an expiry); `expired`: no longer delivered. */
-    list() {
-        return this.#store.all().map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
-            expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s) }));
+       days left (null without an expiry); `expired`: no longer delivered. A
+       host-only secret (an account token the server holds) is left out -- it is
+       never given to a machine, so the page never lists it; `held` includes it. */
+    list({ held = false } = {}) {
+        return this.#store.all().filter((s) => held || !s.hostOnly).map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
+            expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s), ...(s.hostOnly ? { hostOnly: true } : {}),
+            ...(s.ephemeral ? { ephemeral: true, expiresAt: s.expiresAt, expiresInMs: Math.max(0, Date.parse(s.expiresAt) - this.#now().getTime()) } : {}) }));
     }
     /* Past its expiry day: kept, not used (nor by dictation, voice.mjs). */
     isExpired(name) { const s = this.#store.get(name); return Boolean(s) && this.#expired(s); }
@@ -99,6 +119,9 @@ export class Secrets {
     of(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => s.name); }
     /* Delivered to it at its next start. */
     given(conversation) { return this.#given(conversation).map((s) => s.name); }
+    /* The EPHEMERAL secrets live for it now (a message of it holds their marker), each with how long it has
+       left -- the chat shows the stars with that, and a way to forget it (talk/parley-ui). Never a value. */
+    liveFor(conversation) { return this.#given(conversation).filter((s) => s.ephemeral === true).map((s) => ({ name: s.name, expiresInMs: Math.max(0, Date.parse(s.expiresAt) - this.#now().getTime()) })); }
 
     /* The value, for this server's own use only (the key of the dictation
        engine, put in a request's header): never returned by any route. */
@@ -106,12 +129,15 @@ export class Secrets {
 
     /* Creates, or replaces the value of, a secret. `expires`: a day, '' for
        none, left out to keep the one it had. */
-    set({ name, value, expires }) {
+    set({ name, value, expires, hostOnly }) {
         if (!isSecretName(name)) throw new Refusal(400, 'A secret is named like a variable: capitals, digits and underscores, starting with a letter.');
         const sealed = this.#seal(value);
         const day = expires === undefined ? undefined : expiryOf(expires);
         const before = this.#store.get(name);
-        this.#write({ ...before, name, sealed, createdAt: before?.createdAt ?? new Date().toISOString() }, day);
+        /* hostOnly: a secret the server uses on the agent's behalf (an account token the
+           keeper reveals by name). It is never attached to a conversation, so never
+           delivered to a machine; attach() refuses it, so this cannot be undone by hand. */
+        this.#write({ ...before, name, sealed, createdAt: before?.createdAt ?? new Date().toISOString(), ...(hostOnly ? { hostOnly: true } : {}) }, day);
         return { name };
     }
 
@@ -179,6 +205,7 @@ export class Secrets {
     attach(conversation, name, attached) {
         const secret = this.#store.get(name);
         if (!secret) throw new Refusal(404, 'No such secret.');
+        if (attached && secret.hostOnly) throw new Refusal(403, 'This secret is held by the server (an account token) and is never put in a machine.');
         if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
         if (attached) this.#grants.give(conversationSubject(conversation), `secret:${name}`, 'x'); else this.#grants.take(conversationSubject(conversation), `secret:${name}`);
     }
@@ -187,10 +214,75 @@ export class Secrets {
         for (const s of this.#store.all()) this.#grants.take(conversationSubject(conversation), `secret:${s.name}`);
     }
 
+    /* AN EPHEMERAL SECRET lifted from a message of `conversation` (talk.mjs):
+       a random name, a few minutes to live, handed at once to that
+       conversation, swept when it runs out. Returns { name, expiresAt } -- the
+       name is the reference the message keeps (its value is masked there). As
+       with every secret the value is sealed and never returned by any route;
+       the tool uses it only as /run/secrets/<name>, and never sees it. */
+    stash(conversation, value, { ttlMs } = {}) {
+        if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
+        const sealed = this.#seal(value);
+        const ttl = Math.min(TTL_MAX_MS, Math.max(TTL_MIN_MS, Number.isFinite(ttlMs) ? ttlMs : TTL_DEFAULT_MS));
+        let name; do { name = EPHEMERAL_PREFIX + randomBytes(5).toString('hex').toUpperCase(); } while (this.#store.get(name));
+        const expiresAt = new Date(this.#now().getTime() + ttl).toISOString();
+        this.#store.put({ name, sealed, createdAt: this.#now().toISOString(), expiresAt, ephemeral: true });
+        this.#grants.give(conversationSubject(conversation), `secret:${name}`, 'x');
+        this.#schedule(conversation, name, ttl);
+        return { name, expiresAt };
+    }
+
+    /* Forgotten before it runs out, on the tool's word or the owner's: gone
+       from the vault and, at once, from the running machine. */
+    async drop(conversation, name) {
+        const s = this.#store.get(name);
+        if (!s || s.ephemeral !== true) throw new Refusal(404, 'No such short-lived secret.');
+        const t = this.#timers.get(name); if (t) { clearTimeout(t); this.#timers.delete(name); }
+        await this.#reap(conversation, name);
+        return { name };
+    }
+
+    #schedule(conversation, name, ttl) {
+        const t = setTimeout(() => { this.#timers.delete(name); void this.#reap(conversation, name); }, ttl);
+        t.unref?.();
+        this.#timers.set(name, t);
+    }
+    /* Remove it, then rewrite the machine's /run/secrets without it (a tmpfs
+       already cleared if the machine is gone -- so a failure here is fine). */
+    async #reap(conversation, name) {
+        if (this.#store.get(name)) { this.#store.remove(name); this.#grants.forgetAsset(`secret:${name}`); }
+        try { await this.deliver(conversation); } catch { /* machine asleep or busy: /run/secrets is tmpfs */ }
+        try { this.reaped(conversation, name); } catch { /* told nowhere: never a reason to fail */ }
+    }
+    reaped = () => {};
+
     /* What a delivery to this conversation would contain, as one string that
        changes whenever a delivery would differ: names and sealed values. */
     signature(conversation) {
         return this.#given(conversation).map((s) => `${s.name}=${s.sealed}`).sort().join('|');
+    }
+
+    /* THE GUARD (main.mjs, at each look of its machine's health, for each machine that runs): the
+       names in its /run/secrets against those it should hold, and `last` (the signature of what was
+       last put there) against what it would be now. Delivered again when either differs. Resolves
+       with the signature now there, or null when the machine could not be looked at.
+       `listed`: { count, names } as the health probe read them (health.mjs), so that no command of
+       its own is sent; without it, the machine is asked. */
+    async reconcile(conversation, last, listed) {
+        let names;
+        if (listed && Number.isInteger(listed.count) && Array.isArray(listed.names)) {
+            /* More than were listed: never "in order". */
+            names = listed.count === listed.names.length ? listed.names.map(String) : null;
+        } else {
+            const seen = await this.#vms.exec(conversation, ['sh', '-c', `ls -1 ${SECRETS_DIR} 2>/dev/null; true`], { timeoutMs: 10_000 }).catch(() => null);
+            if (!seen || seen.code !== 0) return null;
+            names = String(seen.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+        }
+        const there = names === null ? null : [...names].sort().join('|');
+        const wanted = this.signature(conversation);
+        if (there === this.given(conversation).sort().join('|') && last === wanted) return wanted;
+        await this.deliver(conversation);
+        return wanted;
     }
 
     /* Puts in the VM exactly the secrets attached NOW and not expired, and the
@@ -203,10 +295,14 @@ export class Secrets {
             if (r.code !== 0) throw new Refusal(502, `The machine could not be prepared: ${firstLine(r.stderr)}`);
         };
         await run(['sudo', '-n', 'install', '-m', '0755', '/dev/stdin', RUNNER], RUNNER_SCRIPT);
-        await run(['sudo', '-n', 'install', '-d', '-m', '0755', SECRETS_DIR]);
-        await run(['sudo', '-n', 'find', SECRETS_DIR, '-mindepth', '1', '-delete']);
+        /* In a shared machine, its own folder (its door shows it as /run/secrets), its own user: never the others'. */
+        const shared = this.#vms.shared?.(conversation) === true;
+        const dir = shared ? ownSecretsDir(conversation) : SECRETS_DIR;
+        const user = shared ? sharedUser(conversation) : VM_USER;
+        await run(['sudo', '-n', 'install', '-d', '-m', shared ? '0700' : '0755', ...(shared ? ['-o', user, '-g', user] : []), dir]);
+        await run(['sudo', '-n', 'find', dir, '-mindepth', '1', '-delete']);
         for (const secret of this.#given(conversation)) {
-            await run(['sudo', '-n', 'install', '-m', '0600', '-o', VM_USER, '-g', VM_USER, '/dev/stdin', `${SECRETS_DIR}/${secret.name}`], this.#vault.open(secret.sealed));
+            await run(['sudo', '-n', 'install', '-m', '0600', '-o', user, '-g', user, '/dev/stdin', `${dir}/${secret.name}`], this.#vault.open(secret.sealed));
         }
     }
 }

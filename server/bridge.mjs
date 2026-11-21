@@ -31,6 +31,9 @@ export const CLOSE_ENDED = 1000;
 export const CLOSE_TAKEN = 4001;
 /* A device whose right on this terminal was taken back (or its session ended): put out at once. */
 export const CLOSE_REVOKED = 4003;
+/* A page that came back by itself (a dropped connection, this server restarted) to a machine put to sleep or
+   stopped: not woken -- only a person opening it wakes it (16-11: a tab left open woke a sleeper at each update). */
+export const CLOSE_ASLEEP = 4004;
 /* A channel that dropped is reopened after a moment, a few times a minute at most. */
 export const REOPEN_AFTER_MS = 1000;
 export const REDRAW_AFTER_MS = 250;
@@ -87,7 +90,7 @@ export const sameOrigin = makeOriginCheck();
 const BY_ITSELF = /\x1b\[[IO]|\x1b\[\??[>=]?[\d;]*c|\x1b\[\d+;\d+R|\x1b\][\d;]*(?:rgb:[0-9a-fA-F/]+)?(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
 export const byHand = (typed) => String(typed ?? '').replace(BY_ITSELF, '').length > 0;
 
-export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {}, onTyped = () => {} }) {
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {}, onTyped = () => {}, asleep = () => false }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
     /* THE DEVICES AT A TERMINAL, each with what lets it stay: asked again when the owner changes
@@ -123,9 +126,11 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         } else return;
         const cols = Number(url.searchParams.get('cols'));
         const rows = Number(url.searchParams.get('rows'));
+        /* `resume=1`: the page comes back by itself, nobody asked to open it. */
+        const resume = url.searchParams.get('resume') === '1';
         sockets.handleUpgrade(request, socket, head, (viewer) => {
             if (still) { deviceSeats.set(viewer, still); viewer.on('close', () => deviceSeats.delete(viewer)); }
-            seat(viewer, name, within(cols, COLS) ? cols : 80, within(rows, ROWS) ? rows : 24);
+            seat(viewer, name, within(cols, COLS) ? cols : 80, within(rows, ROWS) ? rows : 24, resume);
         });
     });
 
@@ -180,7 +185,9 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         return run;
     }
     async function openNow(name, cols, rows, sink, say) {
-        const terminal = await spawn(name, cols, rows, say);
+        /* Who opens it, for What happened when it wakes a sleeper: a screen, or this server (warm). */
+        const who = sink ? (deviceSeats.has(sink) ? 'a paired device' : 'a page') : undefined;
+        const terminal = await spawn(name, cols, rows, say, who);
         /* While it was being opened another one may have been: the newest wins. */
         if (live.has(name)) close(name);
         const kept = { terminal, sink, cols, rows, openedAt: Date.now(), outputAt: Date.now() };
@@ -211,7 +218,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         return kept;
     }
 
-    async function seat(viewer, name, cols, rows) {
+    async function seat(viewer, name, cols, rows, resume = false) {
         const previous = seats.take(name, viewer);
         if (previous) {
             previous.send(JSON.stringify({ type: 'taken' }));
@@ -249,6 +256,8 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             resize(taken, cols, Math.max(2, rows - 1));
             setTimeout(() => { if (live.get(name) === taken && taken.sink === viewer) resize(taken, taken.cols, taken.rows); }, REDRAW_AFTER_MS);
         } else {
+            /* Asleep or stopped, and nobody asked: left so; the page offers to wake it. */
+            if (resume && (() => { try { return asleep(name) === true; } catch { return false; } })()) { viewer.close(CLOSE_ASLEEP, 'asleep'); return; }
             try { kept = await open(name, cols, rows, viewer, say); }
             catch (error) {
                 /* Only a message written for the person is passed on. */

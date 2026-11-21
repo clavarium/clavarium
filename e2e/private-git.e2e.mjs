@@ -77,7 +77,7 @@ test('a private repository is added with a new key: its public half is shown and
     assert.equal(await key.locator('button', { hasText: 'Remove' }).isDisabled(), true);
     assert.match(await key.innerText(), /would cut site off/);
     assert.equal((await me.api('/api/git-keys/deploy-a/remove', {})).status, 409);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
 
     /* The tool reads the repository; it never sees the key. */
     await me.access('site', 'Read');

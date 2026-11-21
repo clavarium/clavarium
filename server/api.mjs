@@ -6,19 +6,42 @@
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
+ *   GET  /api/conversations/<name>/export[?all=1] its tool's state, or everything of it, one archive (#351)   POST .../import[?replaceWork=1&reminders=1]  put back (same tool)
  *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?, cpus?}: stopped, set, started again (202);
  *                                                asleep: checked and kept for its wake, as `sizeAtWake` (200)
+ *   POST /api/conversations/<name>/machine       {action: start|stop|restart|sleep|force|force-now}: done on its machine,
+ *                                                one at a time (force takes the place of any other; force-now: the next
+ *                                                step of the one running) -> its state (202), as below
+ *   POST /api/conversations/<name>/machine       {escalate: true|false}: a stop that hangs goes on to its qemu by itself (default) or asks
+ *   POST /api/conversations/<name>/machine       {watchdog: {on?, delayMin?}}: mute or full that long, its machine is forced off and started, once
+ *   GET  /api/conversations/<name>/machine       {action: {kind, since, until, steps: [{id, state, since, s}]} | null, report, limits, escalate, watchdog}
  *   POST /api/conversations/<name>/machine/cancel    the size kept for its wake, given up
  *   GET  /api/conversations/<name>/health        what was last seen of its machine
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
+ *   POST /api/conversations/<name>/exit-report   why its tool ended: { now (read in its machine, if it runs), last (kept at its end) }
+ *   POST /api/conversations/<name>/machine {machineMb}  in a shared machine: that machine's memory, all in it restarted
  *   POST /api/conversations/<name>/archive
+ *   POST /api/binder/suggest                {id}: at most three quick actions for that card -> {actions: [{key, label, why, on, ask?}]}
+ *   POST /api/mailboxes/<name>/live          {smtp, email?}: that mailbox connected live too (send, move...), its password reused
+ *   POST /api/conversations/<name>/erase         {confirm: <its name>}: deleted for good -- its machine and its work files
+ *   POST /api/conversations/<name>/into-machine  {machine, machineMb?}: moved into a shared machine (#221), its tool's state along (202);
+ *                                                {} (no machine): out of its shared machine, into one of its own (15-11)
+ *   POST /api/conversations/<name>/copy          {title?, machine?, machineMb?, reminders?}: a copy -- its work, its tool's state, its accesses (its reminders and wake-ups when asked); it untouched (202)
+ *   POST /api/conversations/<name>/rebuild       {reset?, confirm?}: built again; reset (confirm: its name) for a working one too
+ *   POST /api/signin-companion                   {companion}: the conversation that signs the others' tools in with its browser ('' none; 15-11); {clicks}: it clicks Authorize itself
+ *   POST /api/conversations/<name>/signin-companion  {companion}: its own (a conversation, "none"), or null for the general one; never itself
+ *   POST /api/conversations/<name>/signin-link   its sign-in handed to a companion: shown to the person instead
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
  *   POST /api/conversations/<name>/talk          {text, answers?, files?, via?}: written in its chat; files from .../talk/file; via 'voice': dictated
  *   POST /api/conversations/<name>/talk/react    {to, reaction}: the owner's reaction to a message of the tool (null: taken back)
+ *   POST /api/conversations/<name>/talk/pin      {to, on}: the owner pins a message of the chat (on: false unpins); 5 at most
+ *   POST /api/conversations/<name>/talk/split    {messages: 500..100000} | {days: 0.5..365} | {off: true}: when its thread is
+ *                                                archived into volumes (nothing deleted) -> {split}; read back as `split` in GET .../talk
  *   POST /api/conversations/<name>/chat-name     {name}: the name the chat gives its tool ('' : the neutral word of the dictionary)
+ *   POST /api/conversations/<name>/tasks-binder  {binder}: the binder shown beside its chat ('' automatic, '-' none, else an id)
  *   POST /api/conversations/<name>/voice-mark    {on}: what is dictated into its terminal starts with a microphone sign (AI tools only)
  *   POST /api/conversations/<name>/talk/file?name=<file name>   the body IS a file the person attaches -> {path, name, size}
  *   GET  /api/conversations/<name>/talk?last=|days=|before=|from=|since=   a part of its chat: the newest messages, those of the
@@ -53,6 +76,8 @@
  *   POST /api/updates/apply                 { version }: update to the version that is out (in the background)
  *   POST /api/updates/back                  { version }: go back to a release that is kept (in the background)
  *   GET  /api/git/<name>/outgoing?target=<branch>&branch=<branch>   what would go from the agent's branch, to that branch of the remote
+ *   GET  /api/git/<name>/known              To send at once: what is known here, no remote asked, no repository read
+ *   GET  /api/git/<name>/outgoing-all       To send: one fetch, one read, the branches that moved last reviewed
  *   GET  /api/git/<name>/graph              the branch diagram: branches and their last commits
  *   GET  /api/git/<name>/commit?id=<sha>    one commit, as a review shows it (&base=<sha>: the commits from base to it)
  *   POST /api/git/<name>/push               {head, target?, sure?}: exactly that reviewed commit, to exactly that branch
@@ -78,6 +103,24 @@
  *   POST /api/secrets/<NAME>/replace        {value?, expires?}: in place, its name and grants kept; '' removes the expiry
  *   POST /api/secrets/<NAME>/remove
  *   POST /api/secrets/<NAME>/rename         {name}: its value and where it is handed go with it
+ *   GET  /api/asset-groups                  the owner's asset groups: [{id, label, members}]
+ *   POST /api/asset-groups                  {label}: a new, empty group
+ *   POST /api/asset-groups/place            {asset, group}: put an asset in a group (group null to take it out)
+ *   POST /api/asset-groups/<id>/rename      {label}
+ *   POST /api/asset-groups/<id>/remove
+ *   GET  /api/rooms                         the rooms (#268): [{id, name, host, members: [{id, kind, name, ref, host?}], unread, last, thinking: [names]}]
+ *   POST /api/rooms                         {name, conversations: [names], boxes: [ids], host?}: a new room
+ *   POST /api/rooms/<id>                    {name?, host?, add?: {conversations, boxes}, remove?: [member ids], perHour?: N (0: no limit) or null (the default, 60): hand-overs between its AIs an hour}
+ *                                           quiet?: true/false (muted in the list: no dot, at the bottom)
+ *   POST /api/rooms/<id>/remove             the room and its thread
+ *   POST /api/rooms/<id>/give               {asset, rights, shared?}: the same right given to each AI of it, its own
+ *                                           conversation's -> {asset, rights, given: [{conversation, ok, kept?, error?}]}
+ *   GET  /api/rooms/<id>/talk?last=         its thread, with the room: {room, messages, ...}
+ *   POST /api/rooms/<id>/talk               {text, to?: [AI member ids], files?}: said in it; to its host, or to the AIs named
+ *   POST /api/rooms/<id>/talk/file?name=    the body IS a file the person attaches there -> {path, name, size}
+ *   GET  /api/rooms/<id>/file?p=<id>/<name> a file attached in it
+ *   GET  /api/rooms/<id>/shown?o=ai:<member>:<r>:<p>[&thumb=1]   a file an AI of it showed or cited there, read from ITS conversation
+ *   GET  /api/rooms/<id>/mail/open|page?ref=mail:...              a mail an AI of it cited there, opened as its conversation's chat opens it
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
@@ -89,18 +132,34 @@
  *   POST /api/wifi/handover: the network handed over to NetworkManager (back as it was if it does not work)
  *   GET  /api/meshcentral: the remote screen (MeshCentral); POST /api/meshcentral/enable (turned on, in the background) /disable
  *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
+ *   GET  /api/jobs   what it is doing: { running, done } (jobs.mjs), its updates of the day among the done
+ *   GET  /api/jobs/log?id=   that job, under way or done today, with its log [{at, text}] (404: unknown)
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
- *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
+ *   GET  /api/history/all?span=1h|24h|7d    Settings, Usage: the server and every machine (asleep too) on one time axis,
+ *                                           in GB and cores: {t, capacity, server, itself, machines: [{name, alloc, asleep, ...}]}
+ *   POST /api/server/pressure               {way: force|sleep|alert}: memory short, the machine that takes the most forced off (default), put to sleep, or only said
+ *   GET  /api/server/machines               {machines: [{name, state, rssMb, sizeMb, since, action}], manager: {ok, downSince, mode, asked, last, reviving}, pressure}
+ *   POST /api/server/machines/<name>/force  its machine forced off, as from its conversation (202)
+ *   POST /api/server/vm-manager             {mode: night|always|ask}: when it hangs, restarted by itself at night (default), always, or never
+ *   POST /api/server/vm-manager/restart     {confirm: true}: restarted now; every machine is suspended and resumed
+ *   GET  /api/server/load                    host commands by 5-minute window, event-loop delay
+ *   POST /api/server/profile                 {seconds}: this server sampled by its own profiler (2-30 s), what holds it
+ *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart   POST /api/server/reboot (the whole server)
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
  *   POST /api/conversations/<name>/secrets  {secret, attached}
  *   GET  /api/shortcuts
  *   POST /api/shortcuts                     {label, text, enter}
  *   POST /api/shortcuts/<id>/remove
+ *   GET  /api/features   POST /api/features/dismiss|goals|sharing|welcome   what this Clavarium can do, and its next step
+ *                                           (features.mjs, answered before this: main.mjs)
  *   GET  /api/voice                         is dictation available?
  *   POST /api/voice?lang=                   the body IS a WAV recording -> {text}; lang: the device's language
  *   GET  /api/dictation                     the engine chosen in Settings (never a key: a secret's name)
- *   POST /api/dictation                     {provider, url, model, secret, language}: chosen, at once
+ *   POST /api/dictation                     {language, main: {provider, url, model, secret}, backup: {...} | {provider: 'none'}}: chosen, at once
+ *                                           (a body of before, {provider, url, model, secret, language}, sets the main one)
+ *   GET  /api/dictation/models?provider=&secret=   that provider's speech-to-text models [{id, label}] (read with the key, kept 24 h)
+ *   GET  /api/dictation/suggestions         {providers: [{id, label, models, keys}], suggestions: [{slot, provider, model, secret}]}
  *   POST /api/dictation/off                 the environment's engine, if any, again
  *   POST /api/dictation/try?provider=&url=&model=&secret=&language=&lang=   a WAV -> {text}, nothing saved
  *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
@@ -114,19 +173,41 @@
  *   POST /api/setup/pair                    {label}: what a device to pair will get (the code is made by /api/shares)
  *   POST /api/setup/drop                    {id}: something an import waits for, not wanted after all
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
+ *   GET  /api/mail/open?ref=mail:...&c=   GET /api/mail/page?ref=...   a mail cited by its reference, read now (mailref.mjs)
+ *   POST /api/tether/agenda                 {target, from?, to?}: a calendar's events of a window, read now (agenda.mjs)
+ *   POST /api/tether/mail-list|mail-read    {target, folder?, text?} | {target, id, folder?}: a mailbox's latest messages, one as text (mailview.mjs)
+ *   POST /api/tether/contacts|contact       {target, text?} | {target, id}: an address book's contacts, one (contactview.mjs)
+ *   POST /api/tether/ssh-add               {title, host, port?, user, key, pin?}: a machine over SSH, opened with a key made
+ *                                           here; its host key read and pinned first (sshmachine.mjs)
+ *   POST /api/tether/console-journal        {target}: a machine's shared console, its short journal (sshconsole.mjs);
+ *                                           the console itself is a WebSocket, /api/tether/console?target=ID
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>[&dir=<subfolders>&exists=keep|replace|skip&batch=<id>]  the body IS the file
  *   GET  /api/files/thumb|text   POST /api/files/save|make|rename|move|remove|taken   ?c=...&r=...&p=...   (see files.mjs)
  *
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
+import { addMachine } from './sshmachine.mjs';
+import { openCodeConfig } from './catalog.mjs';
+import { writeFileSync } from 'node:fs';
+import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
-import { Refusal } from './conversations.mjs';
+import { Refusal, DISK_GB } from './conversations.mjs';
+import { withUpdates } from './jobs.mjs';
+import { readRights, typeOf, nameOf } from './grants.mjs';
 import { VmUnknown } from './vm.mjs';
-import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
+import { mailRoute } from './mailref.mjs';
+import { readAgenda } from './agenda.mjs';
+import { consoleJournal } from './sshconsole.mjs';
+import { readMailList, readMail } from './mailview.mjs';
+import { readContacts, readContact } from './contactview.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
+import { demandeView } from './demandes.mjs';
+import { mcpAdd, mcpImport, mcpRefresh, mcpRights, mcpSeen, mcpNewTools, forgetKey } from './mcpx.mjs';
+import { BACK_PATH, backPage } from './mcpoauth.mjs';
 
 const BODY_MAX = 16 * 1024;
 /* A setup file travels inside the JSON of a request: room for it, escaped. */
@@ -146,7 +227,10 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral) {
+/* This run of the server: a page's count of binder changes is of one run, and starts again with the next. */
+const BOOT = Math.random().toString(36).slice(2, 10);
+
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms, machineList) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -180,6 +264,8 @@ export async function handleApi(request, response, conversations, headers, resou
     try {
         if (request.method === 'GET' && pathname === '/api/voice') return send(200, { available: voice?.current() !== undefined, engine: voice?.model ?? null }), true;
         if (request.method === 'GET' && pathname === '/api/dictation' && voice) return send(200, voice.about()), true;
+        if (request.method === 'GET' && pathname === '/api/dictation/models' && voice) return send(200, await voice.models(query.get('provider') ?? '', query.get('secret') ?? '')), true;
+        if (request.method === 'GET' && pathname === '/api/dictation/suggestions' && voice) return send(200, await voice.suggestions()), true;
         if (request.method === 'POST' && (pathname === '/api/voice' || (pathname === '/api/dictation/try' && voice))) {
             if (!originOk(request.headers) || request.headers['content-type'] !== 'audio/wav') {
                 return send(403, { error: 'This request does not come from this site.' }), true;
@@ -208,6 +294,19 @@ export async function handleApi(request, response, conversations, headers, resou
             file.stream.pipe(response);
             return true;
         }
+        if (request.method === 'GET' && pathname === '/api/files/mail') {
+            /* A mail with its remote pictures (asked for, never on opening): as a page is, not for a conversation that is offline. */
+            if (conversations.list().find((x) => x.name === query.get('c'))?.offline === true) throw new Refusal(403, 'This conversation is offline: remote pictures stay blocked.');
+            const shown = mailPage(await mailFile(attached(), query.get('p') ?? ''));
+            response.writeHead(200, shown.headers);
+            response.end(shown.body);
+            return true;
+        }
+        if (request.method === 'GET' && (pathname === '/api/mail/open' || pathname === '/api/mail/page')) {
+            /* A mail cited by its reference (mailref.mjs), read now through Tether: the owner may read every mailbox. */
+            const c = query.get('c') ?? '';
+            return await mailRoute(pathname.slice('/api'.length), query, response, { tethers, headers, who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' }, may: () => true, offline: conversations.list().find((x) => x.name === c)?.offline === true, of: c });
+        }
         if (request.method === 'GET' && pathname === '/api/files/download') {
             const file = await download(attached(), query.get('p') ?? '');
             response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
@@ -220,6 +319,23 @@ export async function handleApi(request, response, conversations, headers, resou
                 return send(403, { error: 'This request does not come from this site.' }), true;
             }
             return send(201, await importFile(attached('write'), query.get('p') ?? '', query.get('name') ?? '', request, { exists: query.get('exists') ?? 'keep', dir: query.get('dir') ?? '', batch: query.get('batch') ?? undefined })), true;
+        }
+        /* A CONVERSATION CARRIED ELSEWHERE (#351): its tool's state as one archive, streamed from its machine;
+           put back into a conversation of the same tool. Downloaded and sent by the person, from the page. */
+        const carry = /^\/api\/conversations\/([^/]+)\/(export|import)$/.exec(pathname);
+        if (carry && request.method === 'GET' && carry[2] === 'export') {
+            /* ?all=1: everything of it -- its home, its work, what it was given (conversations.exportWhole). */
+            const n = decodeURIComponent(carry[1]);
+            const out = query.get('all') === '1' ? await conversations.exportWhole(n) : await conversations.exportState(n);
+            response.writeHead(200, { ...headers, 'content-type': 'application/gzip', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(out.name)}` });
+            out.stream.pipe(response);
+            response.on('close', () => { try { out.child?.kill(); } catch { /* ended */ } });
+            return true;
+        }
+        if (carry && request.method === 'POST' && carry[2] === 'import') {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
+            /* ?replaceWork=1: a whole export may replace the work folder that holds files (asked first, on the page). */
+            return send(200, await conversations.importState(decodeURIComponent(carry[1]), request, { replaceWork: query.get('replaceWork') === '1', reminders: query.get('reminders') === '1' })), true;
         }
         if (pathname.startsWith('/api/files/')) {
             if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' }), true;
@@ -235,24 +351,101 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {
                 const lists = binders?.given() ?? {};
-                return send(200, conversations.list().map((c) => ({ ...c, lists: lists[c.name] ?? null, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null, talk: talk?.brief(c.name) ?? null }))), true;
+                return send(200, conversations.list().map((c) => ({ ...c, lists: lists[c.name] ?? null, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], ephemeralSecrets: secrets?.liveFor(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null, talk: talk?.brief(c.name) ?? null }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
+            /* The providers and models OpenCode knows (models.dev), for a conversation made with it (03-11). */
+            if (pathname === '/api/catalog/models' && catalogue) return send(200, { providers: await catalogue.providers() }), true;
+            /* The owner's asset groups (groups.mjs): a label and the asset ids each
+               holds. Distinct from /api/groups/* above, which are the conversation
+               list's folders. */
+            if (pathname === '/api/asset-groups' && groups) return send(200, groups.list()), true;
+            /* Rooms (#268, rooms.mjs): a thread shared by several AIs, the person and boxes. */
+            if (pathname === '/api/rooms' && rooms) return send(200, rooms.list()), true;
+            const roomTalk = /^\/api\/rooms\/([0-9a-f-]{36})\/talk$/.exec(pathname);
+            /* A file attached in a room, opened from its thread. */
+            const roomFile = /^\/api\/rooms\/([0-9a-f-]{36})\/file$/.exec(pathname);
+            if (roomFile && rooms) {
+                const file = await download(rooms.filesOf(roomFile[1]), query.get('p') ?? '');
+                response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
+                    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
+                file.stream.pipe(response);
+                return true;
+            }
+            /* WHAT AN AI SHOWED IN A ROOM (06-11): read from its own conversation, with that conversation's rights --
+               its work folder, a folder attached to it -- only when it showed or cited it in this room (rooms.shownFile). */
+            const roomShown = /^\/api\/rooms\/([0-9a-f-]{36})\/shown$/.exec(pathname);
+            if (roomShown && rooms) {
+                const { conversation, tab, inner } = rooms.shownFile(roomShown[1], query.get('o') ?? '');
+                const folder = (need) => {
+                    if (need === 'write') throw new Refusal(403, 'Read only, from a room.');
+                    if (tab === WORK_TAB) {
+                        if (conversations.list().find((x) => x.name === conversation)?.work !== 'kept' || !resources) throw new Refusal(404, 'This conversation works on the disk of its machine: its files are not kept here.');
+                        return resources.workFolder(conversation);
+                    }
+                    if (!resources?.of(conversation).some((r) => r.name === tab)) throw new Refusal(404, 'No such folder.');
+                    return resources.folder(tab);
+                };
+                if (query.get('thumb') === '1') {
+                    const answer = await changeRoute('GET', '/files/thumb', new URLSearchParams({ p: inner }), request, folder);
+                    response.writeHead(200, { ...headers, ...IMAGE_HEADERS, 'content-type': answer.picture.type, 'content-length': answer.picture.bytes.length, etag: `"${answer.picture.version}"` });
+                    response.end(answer.picture.bytes);
+                    return true;
+                }
+                const file = await download(folder(), inner);
+                response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
+                    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`, 'x-shown-by': encodeURIComponent(conversation) });
+                file.stream.pipe(response);
+                return true;
+            }
+            /* A mail an AI of a room cited there: opened as in its conversation's chat (Reply goes to that chat, x-mail-of). */
+            const roomMail = /^\/api\/rooms\/([0-9a-f-]{36})(\/mail\/open|\/mail\/page)$/.exec(pathname);
+            if (roomMail && rooms) {
+                const c = rooms.mailFrom(roomMail[1], query.get('ref') ?? '');
+                return await mailRoute(roomMail[2], query, response, { tethers, headers: { ...headers, 'x-mail-of': encodeURIComponent(c) }, who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' }, may: () => true, offline: conversations.list().find((x) => x.name === c)?.offline === true, of: c });
+            }
+            if (roomTalk && rooms) { const last = Number(query.get('last')); return send(200, rooms.read(roomTalk[1], Number.isInteger(last) && last > 0 ? { last } : undefined)), true; }
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
+            /* Which providers and kinds an account can be connected for here. */
+            if (pathname === '/api/accounts' && accounts) return send(200, { supported: accounts.supported() }), true;
+            /* Assets > Access: the targets, who was given each at which level, the
+               calls waiting, and the recent journal -- all the page needs to read. */
+            /* Each call waiting carries `view`: the card Parley draws for it (demandes.mjs), the same as in the thread. */
+            if (pathname === '/api/tether' && tethers) {
+                const r = await tethers.act('state', { agent: query.get('agent') ?? undefined }, '');
+                const data = r.data ?? {};
+                const approvals = Array.isArray(data.approvals) ? data.approvals.map((q) => { try { return { ...q, view: demandeView(q) }; } catch { return q; } }) : data.approvals;
+                /* Each paired browser: connected or not, and the tabs its person granted (browsers.mjs). Never a token. */
+                const browsersNow = tethers.browsers ? { browsers: tethers.browsers.all(), browsersWaiting: tethers.browsers.waiting() } : {};
+                /* Each MCP server's kept sign-in client, as the page shows it: its id, a secret kept or not -- never the secret. */
+                const targets = Array.isArray(data.targets) && tethers.oauth?.shown ? data.targets.map((x) => { if (x.kind !== 'mcp') return x; const client = tethers.oauth.shown(x.id); return client ? { ...x, client } : x; }) : data.targets;
+                return send(200, { given: tethers.given(), changes: tethers.changes(), ...data, ...(targets ? { targets } : {}), ...(approvals ? { approvals } : {}), ...browsersNow }), true;
+            }
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
             if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;
             if (pathname === '/api/git-hosts' && gitAccess) return send(200, gitAccess.hosts()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/instance' && instance) return send(200, instance.about()), true;
+            /* The sign-in companions (signinhelp.mjs, 15-11): the general one, each conversation's own, their browsers. */
+            if (pathname === '/api/signin-companion' && conversations.signinHelp) return send(200, conversations.signinHelp.view()), true;
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
             /* Settings, Updates (updates.mjs): what runs, what is out, the mode, what happened. */
             if (pathname === '/api/updates' && updates) return send(200, updates.about()), true;
             /* Who may sign in (operators.mjs): none in local mode. */
             const reactOf = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
             if (reactOf && reacting) return send(200, reacting.settings(decodeURIComponent(reactOf[1]))), true;
+            if (pathname === '/api/jobs' && conversations.jobs) {
+                return send(200, withUpdates(conversations.jobs, conversations.list?.() ?? [], updates?.about().history ?? [])), true;
+            }
+            /* A job's log (jobs.mjs): read when its line is opened, never with the list, which stays light. */
+            if (pathname === '/api/jobs/log' && conversations.jobs) {
+                const job = conversations.jobs.log(query.get('id') ?? '');
+                if (!job) throw new Refusal(404, 'No such job.');
+                return send(200, job), true;
+            }
             if (pathname === '/api/events' && events) {
                 const ask = { kind: query.get('kind') ?? '', conversation: query.get('conversation') ?? '', q: query.get('q') ?? '', before: query.get('before') ?? '', limit: Math.min(1000, Number(query.get('limit')) || 200) };
                 const said = events.list(ask);
@@ -277,7 +470,21 @@ export async function handleApi(request, response, conversations, headers, resou
                 }
                 return send(200, curves), true;
             }
-            if (pathname === '/api/server/logs' && serverLogs) return send(200, await serverLogs.read(query.get('source') ?? 'clavarium', query.get('span') ?? '1')), true;
+            if (pathname === '/api/history/all' && history) {
+                const a = capacity ? await capacity.about().catch(() => null) : null;
+                const room = capacity ? await capacity.room().catch(() => null) : null;
+                /* What each machine's disk takes on this server, measured now and then (known asleep too). */
+                const held = new Map((a?.usage?.machines?.each ?? []).map((x) => [x.name, x.mb]));
+                const machines = conversations.list().filter((c) => ['ready', 'restarting', 'moving'].includes(c.phase)).map((c) => ({
+                    name: c.name, memoryMb: c.memoryMb, cores: c.cpus ?? 1, asleep: c.asleep === true,
+                    /* Its disk as its machine sees it when known, else the size it was given. */
+                    diskMb: health?.of(c.name)?.disks?.['/']?.sizeMb ?? (c.diskGb ?? DISK_GB) * 1024, hostDiskMb: held.get(c.name),
+                }));
+                return send(200, history.together(query.get('span') ?? '1h', machines, { memoryMb: a?.memory?.totalMb, cores: room?.cpu?.cores, diskMb: a?.disk?.sizeMb })), true;
+            }
+            /* What this server asked of the host, by 5-minute window, and its own event loop (vm.mjs HostTally). */
+            if (pathname === '/api/server/load' && serverLogs) return send(200, serverLogs.load()), true;
+            if (pathname === '/api/server/logs' && serverLogs) { const r = await serverLogs.start(query.get('source') ?? 'clavarium', query.get('span') ?? '10m'); return send(r.pending ? 202 : 200, r), true; }
             if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;
             if (pathname === '/api/machines/places' && machinesMove) return send(200, await machinesMove.places()), true;
             if (pathname === '/api/machines/moving' && machinesMove) return send(200, await machinesMove.moving()), true;
@@ -285,10 +492,12 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/wifi/scan' && wifi) return send(200, await wifi.scan()), true;
             if (pathname === '/api/meshcentral' && meshcentral) return send(200, await meshcentral.status()), true;
             if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
-            if (pathname === '/api/binder/people' && binders) return send(200, { people: binders.people(identity), changes: binders.changes() }), true;
+            if (pathname === '/api/binder/people' && binders) return send(200, { people: binders.people(identity), changes: `${BOOT}:${binders.changes()}` }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
             if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
+            /* Settings, Machines: each machine, the VM manager, this server's two choices (machinelist.mjs). */
+            if (pathname === '/api/server/machines' && machineList) return send(200, await machineList.list()), true;
             if (pathname === '/api/server/brief' && capacity) return send(200, { ...(await capacity.brief()), machines: platform?.machines ?? true }), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             if (pathname === '/api/flows' && setup) return send(200, setup.graph()), true;
@@ -322,10 +531,12 @@ export async function handleApi(request, response, conversations, headers, resou
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
             if (answered && answerer) return send(200, answerer.log(decodeURIComponent(answered[1]))), true;
             /* A repository: where its commits go, and what would go now. */
-            const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing|\/keep)?$/.exec(pathname);
+            const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing|\/outgoing-all|\/known|\/keep)?$/.exec(pathname);
             const drawn = /^\/api\/git\/([a-z0-9-]{1,32})\/(graph|commit)$/.exec(pathname);
             if (drawn && gitReview) return send(200, drawn[2] === 'graph' ? await gitReview.graph(drawn[1]) : await gitReview.commit(drawn[1], query.get('id'), query.get('base'))), true;
             if (repo && repo[2] === '/keep' && gitKeeper) return send(200, gitKeeper.about(repo[1])), true;
+            if (repo && repo[2] === '/known' && gitReview) return send(200, await gitReview.known(repo[1])), true;
+            if (repo && repo[2] === '/outgoing-all' && gitReview) return send(200, await gitReview.outgoingAll(repo[1])), true;
             if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1], { target: query.get('target') ?? undefined, branch: query.get('branch') ?? undefined }) : gitReview.settings(repo[1])), true;
             const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
             if (watched && signin) {
@@ -335,10 +546,24 @@ export async function handleApi(request, response, conversations, headers, resou
                 const items = settings.configured ? await signin.recent(conversation).catch((e) => ({ failure: e.message })) : [];
                 return send(200, { ...settings, items: Array.isArray(items) ? items : [], failure: items.failure ?? null }), true;
             }
+            /* Its machine: the action running, step by step, and the last report (conversations.mjs, machineState). */
+            const machineOf = /^\/api\/conversations\/([^/]+)\/machine$/.exec(pathname);
+            if (machineOf) return send(200, conversations.machineState(decodeURIComponent(machineOf[1]))), true;
             const paired = /^\/api\/conversations\/([^/]+)\/devices$/.exec(pathname);
             if (paired && sharing) return send(200, sharing.devices.of(decodeURIComponent(paired[1]))), true;
             const sending = /^\/api\/conversations\/([^/]+)\/git\/([a-z0-9-]{1,32})\/auto$/.exec(pathname);
             if (sending && gitKeeper) return send(200, gitKeeper.auto(sending[2], decodeURIComponent(sending[1]))), true;
+            /* Back from signing in to an external MCP server (mcpoauth.mjs): the owner's browser, sent here by the
+               provider. A page, not JSON; its state is the proof it was started from this page. */
+            if (pathname === BACK_PATH && tethers?.oauth) {
+                let page;
+                /* Said in the language of the page that started it; one never started here, in the browser's. */
+                const lang = String(request.headers['accept-language'] ?? '').slice(0, 2);
+                try { const done = await tethers.oauth.finish({ tethers }, { code: query.get('code'), state: query.get('state'), error: query.get('error') }); page = backPage({ ok: true, title: done.title, lang: done.lang, back: done.back, sameTab: done.sameTab }); }
+                catch (error) { page = backPage({ ok: false, message: error instanceof Refusal ? error.message : '', why: error?.why ?? 'failed', lang: error?.lang ?? lang, back: error?.back }); }
+                response.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }).end(page);
+                return true;
+            }
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
@@ -347,6 +572,12 @@ export async function handleApi(request, response, conversations, headers, resou
         if (attaching && talk) {
             if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
             return send(201, await talk.attach(decodeURIComponent(attaching[1]), query.get('name') ?? '', request)), true;
+        }
+        /* A file the person attaches in a room (06-11): the same as in a chat, kept in the room. */
+        const roomAttaching = /^\/api\/rooms\/([0-9a-f-]{36})\/talk\/file$/.exec(pathname);
+        if (roomAttaching && rooms) {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
+            return send(201, await rooms.attach(roomAttaching[1], query.get('name') ?? '', request)), true;
         }
         /* A flow with its files, sent from the page: the body is the .tar.gz. */
         if (pathname === '/api/setup/bundle' && setup && bundles) {
@@ -360,9 +591,53 @@ export async function handleApi(request, response, conversations, headers, resou
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
         /* What was done, once it was done: said in What happened (events.mjs), for those worth saying. */
         if (events) { const answer = send; send = (status, out) => { if (status < 300) { try { events.fromRequest(pathname, body, identity, out); } catch { /* never in the way */ } } answer(status, out); }; }
-        if (pathname === '/api/conversations') { await conversations.admit?.(body); return send(201, conversations.create(body)), true; }
+        if (rooms && pathname.startsWith('/api/rooms')) {
+            if (pathname === '/api/rooms') return send(201, rooms.create(body ?? {})), true;
+            const r = /^\/api\/rooms\/([0-9a-f-]{36})(\/remove|\/talk)?$/.exec(pathname);
+            if (r && !r[2]) return send(200, rooms.change(r[1], body ?? {})), true;
+            if (r && r[2] === '/remove') { rooms.remove(r[1]); return send(200, { removed: r[1] }), true; }
+            if (r && r[2] === '/talk') return send(201, await rooms.say(r[1], body?.text, { to: body?.to, files: body?.files })), true;
+        }
+        if (pathname === '/api/conversations') {
+            await conversations.admit?.(body);
+            const made = conversations.create(body);
+            /* Its chat on from the start (02-11), unless asked otherwise ("More": Chat off); a work folder on the
+               machine's disk has no place for it. */
+            /* Made with OpenCode and its settings (03-11): its key given to it, and its model written where OpenCode
+               reads it (its work folder's opencode.json), once its machine is built. */
+            const oc = made.tool === 'opencode' && body?.opencode ? openCodeConfig(body.opencode) : null;
+            if (oc) {
+                const name = made.name; const until = Date.now() + 30 * 60_000;
+                const setUp = async () => {
+                    const c = conversations.list().find((x) => x.name === name);
+                    if (!c || Date.now() > until) return;
+                    if (c.phase !== 'ready') { setTimeout(() => { void setUp(); }, 2000).unref?.(); return; }
+                    try { secrets?.attach(name, String(body.opencode.secret), true); await secrets?.deliver(name).catch(() => {}); } catch { /* given from its settings */ }
+                    try { const dir = resources.workFolder(name); writeFileSync(`${dir}/opencode.json`, `${JSON.stringify(oc, null, 2)}\n`, { flag: 'wx', mode: 0o644 }); } catch { /* one there already is kept */ }
+                };
+                void setUp();
+            }
+            if (body?.chat !== false && talk) {
+                /* Its work folder exists once it is built: the chat is put in then (a few minutes at most). */
+                const name = made.name; const until = Date.now() + 30 * 60_000;
+                const tryOn = async () => {
+                    const c = conversations.list().find((x) => x.name === name);
+                    if (!c || Date.now() > until) return;
+                    if (c.phase === 'ready') { try { await talk.set(name, true); void guide?.changed(name).catch(() => {}); } catch { /* left off: its settings turn it on */ } return; }
+                    setTimeout(() => { void tryOn(); }, 2000).unref?.();
+                };
+                void tryOn();
+            }
+            return send(201, made), true;
+        }
         /* The lists: every answer is 200, a refusal said in it ({ ok: false, text }), as the keeper says it to a tool. */
         if (pathname === '/api/binder' && binders) return send(200, binders.act(body.op, body.args, identity)), true;
+        /* Quick actions on a card: suggested from its content (suggest.mjs), done by the page. */
+        if (pathname === '/api/binder/suggest' && binders) {
+            const got = binders.act('get', { id: String(body?.id ?? '') }, identity);
+            if (!got?.ok || !got.data?.record) return send(404, { error: 'No such card.' }), true;
+            return send(200, { actions: await suggest(got.data.record, got.data.list, { chat: voice?.chat?.() ?? null }) }), true;
+        }
         /* Who gets what, and a whole setup in one file: see setup.mjs. */
         if (pathname.startsWith('/api/setup/') || pathname === '/api/flows/name') {
             if (!setup) return send(404, { error: 'Not found.' }), true;
@@ -395,6 +670,16 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/updates/settings' && updates) return send(200, await updates.settings({ mode: body.mode, channel: body.channel, window: body.window })), true;
         if (pathname === '/api/updates/apply' && updates) return send(202, await updates.apply(body.version)), true;
         if (pathname === '/api/updates/back' && updates) return send(202, await updates.back(body.version)), true;
+        /* Memory short: the machine that takes the most forced off (default), put to sleep, or only said. */
+        if (pathname === '/api/server/pressure' && capacity) { capacity.setPressureWay(body.way); return send(200, await capacity.about()), true; }
+        /* Settings, Machines: Force stop from the list; the VM manager restarted (confirmed: every machine is resumed); what is done when it hangs. */
+        const forcedOf = /^\/api\/server\/machines\/([^/]+)\/force$/.exec(pathname);
+        if (forcedOf && machineList) return send(202, await machineList.force(decodeURIComponent(forcedOf[1]))), true;
+        if (pathname === '/api/server/vm-manager/restart' && machineList) {
+            if (body?.confirm !== true) throw new Refusal(400, 'Restarting the machine manager resumes every machine: confirm it.');
+            return send(200, await machineList.revive()), true;
+        }
+        if (pathname === '/api/server/vm-manager' && machineList) return send(200, await machineList.setManagerMode(body?.mode)), true;
         if (pathname === '/api/server/reserve' && capacity) { capacity.setReserve({ diskMb: body.diskMb, diskPercent: body.diskPercent, memoryMb: body.memoryMb, memoryPercent: body.memoryPercent }); return send(200, await capacity.about()), true; }
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
@@ -408,14 +693,89 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(200, { ok: true }), true;
         }
         if (pathname === '/api/mailboxes' && mailboxes) { const made = await mailboxes.add(body); void setup?.assetAdded(made.name).catch(() => {}); return send(201, made), true; }
+        if (pathname === '/api/mailboxes/consent' && mailboxes) return send(200, mailboxes.consent(body)), true;
+        if (pathname === '/api/mailboxes/connect' && mailboxes) { const made = await mailboxes.connect(body); void setup?.assetAdded(made.name).catch(() => {}); return send(201, made), true; }
         const fetched = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/sync$/.exec(pathname);
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
+        /* Connecting an account by token (consent in the owner's browser, the token
+           kept host-only, a Tether target made): see accounts.mjs. */
+        if (pathname === '/api/accounts/consent' && accounts) return send(200, accounts.consent(body)), true;
+        if (pathname === '/api/accounts/connect' && accounts) { const made = await accounts.connect(body); return send(201, made), true; }
+        if (pathname === '/api/accounts/lookup' && accounts) return send(200, await accounts.lookup(body)), true;
+        if (pathname === '/api/accounts/classic' && accounts) { const made = await accounts.classic(body); return send(201, made), true; }
+        /* A mailbox of Assets, connected live too (send, move...): its address and password reused, server side. */
+        const live = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/live$/.exec(pathname);
+        if (live && accounts && mailboxes) {
+            const c = mailboxes.credentials(live[1]);
+            const user = String(body?.email ?? c.user).trim();
+            const made = await accounts.classic({ user, password: c.password, imap: `${c.host}:${c.port}`, smtp: String(body?.smtp ?? ''), kinds: ['mail'] });
+            return send(201, made), true;
+        }
+        if (pathname === '/api/accounts/verify' && accounts) { const r = await accounts.verify(body); return send(200, r), true; }
+        /* Assets > Access: the owner sets a conversation's level and rules on a
+           target, decides a call that waited, or removes a target. Each is an op the
+           keeper runs as the owner (person), never as an agent. */
+        /* External MCP servers (mcpx.mjs): added with their key (kept host-only in the vault, Tether given its name),
+           imported from a pasted mcpServers block, listed again, a conversation's rights on their tools, new tools seen. */
+        /* Signing in to one with OAuth: the link the owner opens ({ url }), or { need: 'client' } for a client id to paste. */
+        if (pathname === '/api/tether/ssh-add' && tethers && gitAccess) return send(201, await addMachine({ tethers, keys: gitAccess, ...(tethers.sshProbe ? { probe: tethers.sshProbe } : {}) }, body ?? {})), true;
+        if (pathname === '/api/tether/mcp-oauth' && tethers?.oauth) return send(200, await tethers.oauth.start({ tethers }, body ?? {}, sharing?.origin?.(request.headers) ?? `http://${request.headers.host}`)), true;
+        const mcpOp = /^\/api\/tether\/mcp-(add|import|refresh|rights|seen|new-tools)$/.exec(pathname);
+        if (mcpOp && tethers) {
+            const ctx = { tethers, secrets };
+            const done = await { add: mcpAdd, import: mcpImport, refresh: mcpRefresh, rights: mcpRights, seen: mcpSeen, 'new-tools': mcpNewTools }[mcpOp[1]](ctx, body ?? {});
+            return send(mcpOp[1] === 'add' || mcpOp[1] === 'import' ? 201 : 200, done), true;
+        }
+        /* A browser paired through the Tether extension (browsers.mjs): the code its popup shows, and its name; or paired
+           again ({ code, target }). The token it is handed is never in the answer. */
+        /* The sites a conversation acts on without asking, at frame: { target, agent, sites: [host | *.host] }. */
+        if (pathname === '/api/tether/browser-sites' && tethers?.browsers) return send(200, await tethers.browsers.setSites(tethers, body ?? {})), true;
+        /* A configuration to paste in the extension ({ name?, target? } -> { offer, key, expires }: the key said this once,
+           kept only as its hash), and where it is ({ offer } -> waiting | claimed (its target) | expired). */
+        if (pathname === '/api/tether/browser-offer' && tethers?.browsers) return send(201, tethers.browsers.offer({ name: body?.name, target: body?.target })), true;
+        if (pathname === '/api/tether/browser-offer-state' && tethers?.browsers) return send(200, tethers.browsers.offerState(body?.offer)), true;
+        if (pathname === '/api/tether/browser-pair' && tethers?.browsers) return send(201, tethers.browsers.pair({ code: body?.code, name: body?.name, target: body?.target })), true;
+        /* A server taken away: the key kept for it goes too. */
+        const mcpGone = pathname === '/api/tether/remove-target' && tethers ? tethers.store().target(String(body?.target ?? '')) : null;
+        const tetherOp = /^\/api\/tether\/(level|allow|unallow|decide|remove-target|stop|resume|job-done|job-file)$/.exec(pathname);
+        if (tetherOp && tethers && mcpGone?.kind === 'mcp') { const r = await tethers.act('remove-target', body, ''); if (!r.ok) throw new Refusal(400, r.text); forgetKey(secrets, mcpGone); return send(200, r.data ?? { ok: true }), true; }
+        /* A browser taken away: its tokens and its socket go too. */
+        if (tetherOp && tethers && mcpGone?.kind === 'browser') { const r = await tethers.act('remove-target', body, ''); if (!r.ok) throw new Refusal(400, r.text); tethers.browsers?.forget(mcpGone.id); return send(200, r.data ?? { ok: true }), true; }
+        if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
+        /* A calendar's agenda, read now through Tether as the owner's own read (agenda.mjs, 16-11): seen in its asset
+           panel, so the calendar need not stay open elsewhere. A POST, for this site's own pages only (checked above). */
+        if (pathname === '/api/tether/agenda' && tethers) return send(200, await readAgenda(tethers, body ?? {}, { who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' } })), true;
+        /* A mailbox's latest messages and one as text, an address book's contacts and one, read the same way (16-11:
+           mailview.mjs, contactview.mjs): never marked read, nothing changed. */
+        const peek = { '/api/tether/mail-list': readMailList, '/api/tether/mail-read': readMail, '/api/tether/contacts': readContacts, '/api/tether/contact': readContact }[pathname];
+        if (pathname === '/api/tether/console-journal' && tethers) return send(200, await consoleJournal(tethers, body ?? {})), true;
+        if (peek && tethers) return send(200, await peek(tethers, body ?? {}, { who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' } })), true;
+        /* A mailbox's signature (Markdown), added under what the agent sends from it. */
+        if (pathname === '/api/tether/signature' && tethers) {
+            const t = tethers.store().target(String(body.target ?? ''));
+            if (!t || t.kind !== 'mail') throw new Refusal(404, 'No such mailbox.');
+            const signature = String(body.signature ?? '').replace(/\r\n?/g, '\n').trim();
+            if (signature.length > 2000) throw new Refusal(400, 'A signature is 2000 characters at most.');
+            const { signature: _old, ...config } = t.config ?? {};
+            tethers.store().putTarget({ ...t, config: signature ? { ...config, signature } : config });
+            return send(200, { ok: true, signature }), true;
+        }
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
+        /* Asset groups (groups.mjs): a folder-style tidy-up, not a right. */
+        if (pathname === '/api/asset-groups' && groups) return send(201, groups.create(body.label)), true;
+        if (pathname === '/api/asset-groups/place' && groups) return send(200, groups.place(body.asset, body.group ?? null)), true;
+        const groupOp = /^\/api\/asset-groups\/([0-9a-f]{12})\/(rename|remove)$/.exec(pathname);
+        if (groupOp && groups) {
+            if (groupOp[2] === 'rename') return send(200, groups.rename(groupOp[1], body.label)), true;
+            return groups.remove(groupOp[1]), send(200, { ok: true }), true;
+        }
         const reactSet = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
         if (reactSet && reacting) { const n = decodeURIComponent(reactSet[1]); if (!conversations.list().some((c) => c.name === n)) throw new Refusal(404, 'No such conversation.'); return send(200, reacting.set(n, body)), true; }
         if (pathname === '/api/machines/move' && machinesMove) return send(202, await machinesMove.move(String(body.to ?? ''))), true;
+        if (pathname === '/api/server/profile' && serverLogs) return send(200, await serverLogs.profile(body?.seconds ?? 10)), true;
         if (pathname === '/api/server/restart' && serverLogs) return send(202, await serverLogs.restart()), true;
+        if (pathname === '/api/server/reboot' && serverLogs) return send(202, await serverLogs.reboot()), true;
         if (pathname === '/api/machines/grow' && machinesMove) return send(200, await machinesMove.grow(String(body.mount ?? ''))), true;
         if (pathname === '/api/machines/mount' && machinesMove) return send(200, await machinesMove.mount(String(body.path ?? ''))), true;
         if (pathname === '/api/machines/prepare' && machinesMove) return send(200, await machinesMove.prepare(String(body.path ?? ''), body.typed)), true;
@@ -435,10 +795,18 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(200, op[2] === 'password' ? await team.password(email) : { operators: await team[op[2]](email) }), true;
         }
         const renaming = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/rename$/.exec(pathname);
-        if (renaming && secrets) return send(200, secrets.rename(renaming[1], String(body.name ?? '').trim())), true;
+        /* Its machines that run get the new name or value now, as a secret given to them does. */
+        const redeliver = async (name) => { for (const c of conversations.list()) if (c.phase === 'ready' && !c.asleep && secrets.of(c.name).includes(name)) await secrets.deliver(c.name).catch(() => {}); };
+        if (renaming && secrets) { const done = secrets.rename(renaming[1], String(body.name ?? '').trim()); await redeliver(String(body.name ?? '').trim()); return send(200, done), true; }
         /* A new value (never sent back) and/or a new expiry, in place. */
         const replacing = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/replace$/.exec(pathname);
-        if (replacing && secrets) return send(200, secrets.replace(replacing[1], { value: body.value, expires: body.expires })), true;
+        if (replacing && secrets) {
+            const done = secrets.replace(replacing[1], { value: body.value, expires: body.expires });
+            await redeliver(replacing[1]);
+            /* Its new value is in each machine's /run/secrets now; their tools are told again what that means (guide.mjs). */
+            for (const c of conversations.list()) if (secrets.of(c.name).includes(replacing[1])) void guide?.changed(c.name).catch(() => {});
+            return send(200, done), true;
+        }
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;
@@ -455,15 +823,70 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         /* A setting its tool is told about changed: its guide follows (never waking a machine). */
         const retell = (conversation) => { void guide?.changed(conversation).catch(() => {}); };
-        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind|\/react)?$/.exec(pathname);
+        /* THE ONE GIVE TO A CONVERSATION, as its own settings do it: a folder, a repository, a mailbox attached at
+           an access; a secret handed or taken back. A room's « give to all its AIs » calls the same, once for each. */
+        const attachResource = async (conversation, name, access, shared) => {
+            if (!conversations.list().some((c) => c.name === conversation && c.phase === 'ready')) throw new Refusal(404, 'No such conversation, or it is not ready.');
+            /* A second writer next to one that sends by itself: confirmed first. */
+            if (access === 'write') gitKeeper?.beforeWriter(name, conversation, shared === true);
+            /* Its automatic sending goes with the write attachment -- forgotten
+               BEFORE the change, so that a change that fails half-way (unmounted,
+               not mounted again) never leaves settings to come back later. */
+            if (access !== 'write') gitKeeper?.forgetAttachment(name, conversation);
+            await resources.attach(conversation, name, access);
+            retell(conversation);
+            /* Newly attached: its links looked at (and its mounts), not waited for. */
+            if (access !== 'none') void health?.check?.(conversation, { asked: true })?.catch?.(() => {});
+        };
+        const handSecret = async (conversation, name, attached) => {
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            secrets.attach(conversation, name, attached);
+            /* A machine that runs gets it (or loses it) now, in /run/secrets -- not only at the next
+               opening of a terminal; its tool's variables still wait for the tool's next start. */
+            const c = conversations.list().find((x) => x.name === conversation);
+            if (c?.phase === 'ready' && !c.asleep) await secrets.deliver(conversation).catch(() => {});
+            retell(conversation);
+        };
+        /* GIVE ONE ASSET TO EVERY AI OF A ROOM (06-11): there is no room asset -- each AI of the room gets the same
+           ordinary right of its own conversation, taken back one by one. A box or the person gets nothing; a secret
+           goes to conversations only. Checked once before any is given (the asset, its rights as for one
+           conversation); then each gets it whole or not at all, and the answer says which: {asset, rights, given:
+           [{conversation, ok, kept?, error?}]}. A right already wider is kept, never lowered. */
+        const roomGive = /^\/api\/rooms\/([0-9a-f-]{36})\/give$/.exec(pathname);
+        if (roomGive && rooms) {
+            const asset = String(body.asset ?? ''); const rights = readRights(asset, body.rights);
+            const type = typeOf(asset); const name = nameOf(asset);
+            if (type === 'secret') { if (!secrets?.list({ held: true }).some((x) => x.name === name)) throw new Refusal(404, 'No such secret.'); }
+            else if (['folder', 'git', 'mailbox'].includes(type)) { if (!resources?.list().some((r) => resources.assetOf(r) === asset)) throw new Refusal(404, 'No such asset.'); }
+            else throw new Refusal(400, 'A folder, a repository, a mailbox or a secret is given to the AIs of a room.');
+            const ais = rooms.ais(roomGive[1]);
+            if (!ais.length) throw new Refusal(409, 'This room has no AI.');
+            const given = [];
+            for (const conversation of ais) {
+                try {
+                    if (type === 'secret') await handSecret(conversation, name, true);
+                    else {
+                        const access = rights.includes('w') ? 'write' : 'read';
+                        const had = resources.of(conversation).find((r) => r.name === name)?.access;
+                        if (had === 'write' && access === 'read') { given.push({ conversation, ok: true, kept: 'write' }); continue; }
+                        await attachResource(conversation, name, access, body.shared === true);
+                    }
+                    given.push({ conversation, ok: true });
+                } catch (error) { given.push({ conversation, ok: false, error: error.message, ...(error.kind ? { kind: error.kind } : {}) }); }
+            }
+            return send(200, { asset, rights, given }), true;
+        }
+        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind|\/react|\/pin|\/split)?$/.exec(pathname);
         if (talking && talk) {
             const conversation = decodeURIComponent(talking[1]);
             if (talking[2] === '/invite') return send(200, await talk.invite(conversation, typeof body.lang === 'string' ? body.lang : 'en')), true;
-            if (talking[2] === '/remind') return send(200, await talk.remind(conversation)), true;
+            if (talking[2] === '/remind') return send(200, await talk.remind(conversation, { urgent: body?.urgent === true })), true;
             if (talking[2] === '/react') return send(200, await talk.react(conversation, body.to, body.reaction ?? null)), true;
+            if (talking[2] === '/pin') return send(200, await talk.pin(conversation, body.to, body.on !== false)), true;
+            if (talking[2] === '/split') return send(200, talk.setSplit(conversation, { messages: body.messages, days: body.days, off: body.off })), true;
             if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
             /* What the chat may add to an answer: the choices ticked, the answers of a group, the zone of a picture it is about (Parley checks each). */
-            return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via, { picked: body.picked, replies: body.replies, about: body.about })), true;
+            return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via, { picked: body.picked, replies: body.replies, about: body.about, quick: body.quick === true })), true;
         }
         const docketed = /^\/api\/conversations\/([^/]+)\/docket(\/cancel)?$/.exec(pathname);
         if (docketed && wakeups) {
@@ -500,10 +923,16 @@ export async function handleApi(request, response, conversations, headers, resou
         const handed = /^\/api\/conversations\/([^/]+)\/secrets$/.exec(pathname);
         if (handed && secrets) {
             const conversation = decodeURIComponent(handed[1]);
-            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
-            secrets.attach(conversation, String(body.secret ?? ''), body.attached === true);
-            retell(conversation);
+            await handSecret(conversation, String(body.secret ?? ''), body.attached === true);
             return send(200, { ok: true, secrets: secrets.of(conversation) }), true;
+        }
+        /* Forget an ephemeral secret now (its stars in the chat have a button): gone from the vault and the machine. */
+        const forgetSecret = /^\/api\/conversations\/([^/]+)\/secrets\/([^/]+)\/forget$/.exec(pathname);
+        if (forgetSecret && secrets) {
+            const conversation = decodeURIComponent(forgetSecret[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            await secrets.drop(conversation, decodeURIComponent(forgetSecret[2]));
+            return send(200, { ok: true }), true;
         }
         const share = /^\/api\/conversations\/([^/]+)\/share$/.exec(pathname);
         if (share && sharing) {
@@ -557,26 +986,33 @@ export async function handleApi(request, response, conversations, headers, resou
         const attach = /^\/api\/conversations\/([^/]+)\/resources$/.exec(pathname);
         if (attach && resources) {
             const conversation = decodeURIComponent(attach[1]);
-            if (!conversations.list().some((c) => c.name === conversation && c.phase === 'ready')) throw new Refusal(404, 'No such conversation, or it is not ready.');
-            const name = String(body.resource ?? ''); const access = String(body.access ?? '');
-            /* A second writer next to one that sends by itself: confirmed first. */
-            if (access === 'write') gitKeeper?.beforeWriter(name, conversation, body.shared === true);
-            /* Its automatic sending goes with the write attachment -- forgotten
-               BEFORE the change, so that a change that fails half-way (unmounted,
-               not mounted again) never leaves settings to come back later. */
-            if (access !== 'write') gitKeeper?.forgetAttachment(name, conversation);
-            await resources.attach(conversation, name, access);
-            retell(conversation);
+            await attachResource(conversation, String(body.resource ?? ''), String(body.access ?? ''), body.shared === true);
             return send(200, { ok: true, resources: resources.of(conversation) }), true;
         }
         const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);
         if (moved) return send(202, await conversations.moveWork(decodeURIComponent(moved[1]), body.to)), true;
+        /* Why its tool ended: read now in its machine when it runs, else the last kept at its end. */
+        const exitOf = /^\/api\/conversations\/([^/]+)\/exit-report$/.exec(pathname);
+        if (exitOf) {
+            const conversation = decodeURIComponent(exitOf[1]);
+            const c = conversations.list().find((x) => x.name === conversation);
+            if (!c) throw new Refusal(404, 'No such conversation.');
+            const now = await conversations.exitReport(conversation).catch(() => null);
+            return send(200, { now, last: c.lastExit ?? null }), true;
+        }
         /* "Seen": what its machine says now no longer calls its owner (health.mjs). */
         const seenOf = /^\/api\/conversations\/([^/]+)\/health\/seen$/.exec(pathname);
         if (seenOf && health) {
             const conversation = decodeURIComponent(seenOf[1]);
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
             return send(200, health.markSeen(conversation)), true;
+        }
+        /* "Check shared folders": each mounted and readable (put back when loose), each link the share cannot serve (health.mjs). */
+        const foldersOf = /^\/api\/conversations\/([^/]+)\/folders\/check$/.exec(pathname);
+        if (foldersOf && health) {
+            const conversation = decodeURIComponent(foldersOf[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            return send(200, await health.checkFolders(conversation)), true;
         }
         const machine = /^\/api\/conversations\/([^/]+)\/(restart|machine|health)$/.exec(pathname);
         if (machine) {
@@ -586,16 +1022,31 @@ export async function handleApi(request, response, conversations, headers, resou
                 await health.check(conversation, { asked: true }); return send(200, health.of(conversation)), true;
             }
             if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
+            /* One action on its machine, or the owner's choice for its way down (conversations.mjs, machineAction). */
+            if (typeof body?.action === 'string') return send(202, await conversations.machineAction(conversation, body.action)), true;
+            if (typeof body?.escalate === 'boolean') return send(200, conversations.setStopEscalate(conversation, body.escalate)), true;
+            /* Its watchdog (watchdog.mjs): on or off, and how long it waits. */
+            if (body?.watchdog && typeof body.watchdog === 'object') return send(200, conversations.setWatchdog(conversation, { on: typeof body.watchdog.on === 'boolean' ? body.watchdog.on : undefined, delayMin: body.watchdog.delayMin })), true;
+            /* Its shared machine's own memory (#221): the whole machine restarted, every conversation in it. */
+            if (body?.machineMb !== undefined) return send(200, await conversations.resizeShared(conversation, { machineMb: body.machineMb })), true;
             const resized = await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus });
             /* Asleep, nothing was started: the choice is only kept, for its wake. */
             return send(resized.phase === 'restarting' ? 202 : 200, resized), true;
         }
         const later = /^\/api\/conversations\/([^/]+)\/machine\/cancel$/.exec(pathname);
         if (later) return send(200, conversations.cancelResize(decodeURIComponent(later[1]))), true;
+        /* DELEGATED SIGN-IN (signinhelp.mjs, 15-11): the companion of all, of one conversation, and the link shown to the person instead. */
+        if (pathname === '/api/signin-companion' && conversations.signinHelp) return send(200, body.clicks !== undefined ? conversations.signinHelp.setClicks(body.clicks) : conversations.signinHelp.setGeneral(body.companion)), true;
+        const companionOf = /^\/api\/conversations\/([^/]+)\/signin-companion$/.exec(pathname);
+        if (companionOf && conversations.signinHelp) return send(200, conversations.signinHelp.setFor(decodeURIComponent(companionOf[1]), body.companion ?? null)), true;
+        const linkOf = /^\/api\/conversations\/([^/]+)\/signin-link$/.exec(pathname);
+        if (linkOf && conversations.signinHelp) return send(200, conversations.signinHelp.showLink(decodeURIComponent(linkOf[1]))), true;
         const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);
         if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
+        const beside = /^\/api\/conversations\/([^/]+)\/tasks-binder$/.exec(pathname);
+        if (beside) return send(200, conversations.setTasksBinder(decodeURIComponent(beside[1]), body.binder)), true;
         /* The list: folders and order, the same on every device (conversations.mjs). */
         if (pathname === '/api/instance' && instance) return send(200, instance.setName(body.name)), true;
         if (pathname === '/api/dictation' && voice) return send(200, voice.set(body)), true;
@@ -619,11 +1070,31 @@ export async function handleApi(request, response, conversations, headers, resou
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
             return send(200, await repair(conversation)), true;
         }
+        /* Moved into a shared machine (#221): one there already, or a new one of the size given. */
+        const moving = /^\/api\/conversations\/([^/]+)\/into-machine$/.exec(pathname);
+        if (moving) {
+            if (body?.machine === undefined) return send(202, await conversations.moveToOwn(decodeURIComponent(moving[1]))), true;
+            const machineMb = body?.machineMb === undefined ? undefined : Number(body.machineMb);
+            return send(202, await conversations.moveToShared(decodeURIComponent(moving[1]), { machine: body?.machine, machineMb })), true;
+        }
+        /* A copy of it (#221): a new conversation with its work, its tool's memory and its accesses; it untouched. */
+        const copying = /^\/api\/conversations\/([^/]+)\/copy$/.exec(pathname);
+        if (copying) {
+            const machineMb = body?.machineMb === undefined ? undefined : Number(body.machineMb);
+            const machine = typeof body?.machine === 'string' && body.machine ? body.machine : undefined;
+            return send(202, await conversations.copy(decodeURIComponent(copying[1]), { title: body?.title, machine, machineMb, reminders: body?.reminders === true })), true;
+        }
         const again = /^\/api\/conversations\/([^/]+)\/rebuild$/.exec(pathname);
-        if (again) return send(202, await conversations.rebuild(decodeURIComponent(again[1]))), true;
-        const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive)$/.exec(pathname);
+        if (again) {
+            const reset = body?.reset === true;
+            if (reset && String(body?.confirm ?? '') !== decodeURIComponent(again[1])) throw new Refusal(400, 'Type the name of the conversation to reset it.');
+            return send(202, await conversations.rebuild(decodeURIComponent(again[1]), { reset })), true;
+        }
+        const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive|erase)$/.exec(pathname);
+        if (action?.[2] === 'erase' && String(body?.confirm ?? '') !== decodeURIComponent(action[1])) throw new Refusal(400, 'Type the name of the conversation to delete it for good.');
         if (!action) return send(404, { error: 'Not found.' }), true;
         await conversations[action[2]](decodeURIComponent(action[1]));
+        if (action[2] === 'erase') action[2] = 'archive';   /* what it leaves behind is forgotten as for an archive */
         if (action[2] === 'archive') resources?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') gitKeeper?.forgetConversation(decodeURIComponent(action[1]));
         if (action[2] === 'archive') sharing?.devices.forget(decodeURIComponent(action[1]));

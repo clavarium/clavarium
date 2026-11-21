@@ -36,6 +36,7 @@ import { Refusal } from './conversations.mjs';
 import { isConversationName } from './names.mjs';
 import { originFolder } from './resources.mjs';
 import { TOOLS_PATH, NOTES } from './toolbox.mjs';
+import { ownGuideFile, sharedUser } from './vm.mjs';
 
 export const COMMON_PATH = `${TOOLS_PATH}/${NOTES}`;
 export const OWN_PATH = '/etc/clavarium/conversation.md';
@@ -79,7 +80,7 @@ export function commonText() {
     return [
         '# Where you are (Clavarium)',
         '',
-        '- A throw-away machine, yours alone: you are root (sudo works). Install what you need.',
+        '- A throw-away machine, yours alone: you are root (sudo works). Install what you need. (In a shared machine, not so: ' + OWN_PATH + ' says it.)',
         '- /work: where you work. /resources/<name>: folders and repositories you were given, read-only or read-write. /tools: tools offered, read-only (/tools/index.json says what each is).',
         `- What this conversation has, and what its owner asks of you: ${OWN_PATH} (read-only; written again by the server when your setup changes).`,
         '- Git: commit your work. The person reviews it and sends it from their screen, or the server sends it by itself where they allowed it. You have no push key: never push.',
@@ -89,6 +90,8 @@ export function commonText() {
         '- To talk to the person, when their chat is on: parley guide says how (parley --help, every command).',
         /* Dictation into the terminal is marked once per message (app.js); in the chat, parley read says it. */
         '- A message in your terminal that starts with a microphone sign (U+1F3A4), or that parley read says was dictated, came by voice: a word may be misheard; when a key word seems wrong, ask rather than guess.',
+        /* The commands, the one path every assistant has, MCP or not (#352): MCP tools, where given, are the same. */
+        '- Commands installed (each with --help): parley (the chat), docket (what woke you, your reminders), binder (lists, "classeur": yours too), tether (your accesses, alone: what you were given; a server of tools: tether mcp TARGET, then tether mcp TARGET TOOL \'{json}\'). The same may also be among your tools (MCP).',
         '- The rest is yours to explore (ls, --help).',
         '',
     ].join('\n');
@@ -99,9 +102,11 @@ const list = (items) => items.join(', ');
 /* THE PART OF ONE CONVERSATION, from its facts:
    { name, tool, workKept, resources: [{ name, access, type, origin }], chat, online, secrets: [names], lines, reread }
    `reread`: the command that reads the end of its chat after a restart (the owner's choice, talk.mjs). */
-export function ownText({ name, tool, workKept, resources = [], chat, online, secrets = [], lines = [], reread }) {
+export function ownText({ name, tool, shared, workKept, resources = [], chat, online, secrets = [], lines = [], reread }) {
     const out = [`# This conversation: ${plain(name, 40)}`, ''];
     if (tool) out.push(`- Tool running here: ${plain(tool, 40)}.`);
+    /* #221: in a shared machine, its own user without sudo -- not what /tools/CLAVARIUM.md says of a machine of its own. */
+    if (shared) out.push(`- A machine shared with other conversations: you are its user c-${plain(name, 40)}, NOT root (no sudo). Install in your home (npm --prefix ~/.local, pip install --user); what needs root, ask the person.`);
     out.push(workKept ? '- /work is kept by the server: the person sees it in Files, and it outlives the machine.' : '- /work is on this machine\'s own disk: it goes with the machine.');
     const where = (r) => `/resources/${plain(r.name, 40)}${r.type === 'mailbox' ? ' (mail)' : r.type === 'git' ? ' (git)' : ''}`;
     const write = resources.filter((r) => r.access === 'write');
@@ -119,16 +124,22 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
         : '- Chat with the person: on. Parley is installed: run parley guide. When you were given Parley as your own tools (MCP: tell, ask, doing, status...), use them to talk to the person, and say with doing what you do at each new step; the parley command does the same.');
     /* How Parley is used is Parley's to say (parley guide); what is here is this chat's: it renders Markdown. */
     if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
+    /* A mail cited by its reference (06-11): a chip the person opens in the mail viewer (Parley's schemes, app.js openMailRef). */
+    if (chat) out.push('- To cite a mail, write [its subject](mail:REF) with the ref Tether gives (ref: mail:...), copied whole: the person opens it with a tap.');
     /* The thread is kept whole: after a restart, its end is read, and further back on demand. */
     if (chat && reread) out.push(`- After a restart: ${plain(reread, 60)}, the end of the chat; it says how to read further back.`);
+    /* 02-11: the one command a tool may ask of the server. */
+    if (chat) out.push('- To be restarted (new tools to take up, or anything stuck): finish what runs, then `touch /work/.parley/restart-asked`; the server restarts you once your turn ends, and your work picks up where it was. /work itself fails ("not connected"): `cd / && touch /var/tmp/clavarium-restart-asked` instead.');
     /* Its docket (dockets.mjs): what wakes it waits there until it says done or failed. */
     if (chat) out.push('- What wakes you (a file arrived, the clock, a call) waits in your docket: when told "run docket", run it, do each, then docket done ID or docket failed ID "why". To be reminded later: docket remind --at "2026-10-23 09:00" (or --in 2h, --cron "0 9 * * 1") "what for". docket --help says all.');
     /* Its lists (binders.mjs): kept on the server, asked for through .binder; a person approves. */
-    out.push('- Lists kept with the person (batches, tasks, customers...): binder shows those you were given; add, note, attach, move them; a gate waits for the person\'s tick. binder --help says all.');
+    out.push('- Lists kept with the person (batches, tasks, customers, people...; "classeur", "fiches" in French): the binder command, in your terminal, not an MCP tool. binder shows those you were given; binder new TEMPLATE "name" makes one (templates: simple, people, customers, development, batches, priorities, roadmap); add, note, attach, move cards; a gate waits for the person\'s tick. binder --help says all.');
     /* Its binder of batches is shown beside the chat (web/app.js): the person ticks there. */
     if (chat) out.push('- When you work in batches: keep them in a binder of batches, shown beside the chat. None yet: make it once (binder new batches; MCP: new-list, template batches). Then one card each (binder add Batches "title"), kept up to date; start only those the person ticked.');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
-    if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}.`);
+    if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}. Each value is the file /run/secrets/NAME, always the current one (updated within a minute when the person changes it); the variable $NAME holds the value your tool started with -- read the file when you use a key, so a key the person replaced works at once.`);
+    /* A secret pasted in the chat is lifted out (talk.mjs, secret-scan.mjs): the message shows a marker, the value waits in /run/secrets. */
+    if (chat) out.push('- A secret the person pastes in the chat is kept OUT of it: the message shows ⟨secret:NAME⟩ and the value waits at /run/secrets/NAME for a few minutes. Use it only from there, inside a command (clv-run, or $(cat /run/secrets/NAME)); never write its value back into the chat. It clears itself when its time runs out, or at once with `parley forget NAME` when you are done.');
     const own = lines.map((l) => plain(l)).filter(Boolean).slice(0, LINES_MAX);
     if (own.length) out.push('', '## From the owner', '', ...own.map((l) => `- ${l}`));
     out.push('');
@@ -216,7 +227,7 @@ export class Guide {
             const type = this.#resources.get(r.name)?.type ?? 'folder';
             return { name: r.name, access: r.access, type, origin: type === 'git' && this.#resources.hasOrigin?.(r.name) ? originFolder(r.name) : undefined };
         });
-        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: (this.#secrets?.given ?? this.#secrets?.of)?.call(this.#secrets, name) ?? [], lines: this.lines(name), reread: this.#reread() });
+        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, shared: this.#vms.shared?.(name) === true, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: (this.#secrets?.given ?? this.#secrets?.of)?.call(this.#secrets, name) ?? [], lines: this.lines(name), reread: this.#reread() });
     }
 
     /* What the page shows: the exact texts, where each is, and the line in the tool's own file. */
@@ -229,18 +240,30 @@ export class Guide {
     async setLines(name, input) {
         this.#known(name);
         const lines = readLines(input);
-        if (lines.length) this.#store.put({ name, lines }); else this.#store.remove(name);
+        { const { lines: _old, ...kept } = this.#store.get(name) ?? { name }; this.#store.put(lines.length ? { ...kept, name, lines } : { ...kept, name }); }
         await this.changed(name);
         return this.about(name);
     }
 
     /* ---- into the machine ---- */
-    async #writeOwn(name) {
+    async #writeOwn(name, fresh = false) {
         const text = this.own(name);
-        const r = await this.#vms.exec(name, ['sudo', '-n', 'install', '-D', '-m', '0444', '-o', 'root', '-g', 'root', '/dev/stdin', OWN_PATH], { input: text, timeoutMs: 30_000 });
+        /* In a shared machine, its own file, readable by its own user only: its door shows it at OWN_PATH (#221). */
+        const shared = this.#vms.shared?.(name) === true;
+        const r = await this.#vms.exec(name, ['sudo', '-n', 'install', '-D', '-m', shared ? '0440' : '0444', '-o', 'root', '-g', shared ? sharedUser(name) : 'root', '/dev/stdin', shared ? ownGuideFile(name) : OWN_PATH], { input: text, timeoutMs: 30_000 });
         if (r.code !== 0) throw new Error(`its guide could not be written: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         this.#written.set(name, text);
+        /* WHAT IT READ (15-11, its owner's ask: a tool kept on with its old setup did not know it changed): its
+           guide as written, the common part with it; changed since it last read it, its docket tells it -- not at
+           its start (`fresh`), when it reads it anyway. */
+        const seen = sha(`${commonText()}\n${text}`);
+        const was = this.#store.get(name)?.read;
+        if (was === seen) return;
+        if (was && !fresh && typeof this.told === 'function') { try { this.told(name, TELL_AGAIN); } catch { /* its docket may be off */ } }
+        this.#store.put({ ...(this.#store.get(name) ?? { name }), read: seen });
     }
+    /* Set by the server (15-11): its docket told that its guide changed. (name, line) */
+    told = null;
 
     /* The marked block in the tool's own instruction file. Resolves with
        'written', 'same', or throws with why it was left alone. */
@@ -262,7 +285,7 @@ export class Guide {
        in the way of an opening: what fails is said in the server's log. */
     async prepared(name, woke) {
         try {
-            if (woke || this.#written.get(name) !== this.own(name)) await this.#writeOwn(name);
+            if (woke || this.#written.get(name) !== this.own(name)) await this.#writeOwn(name, woke);
             /* Once per machine start, and once after this server started. */
             if (woke || !this.#pointed.has(name)) { await this.pointer(name); this.#pointed.add(name); }
         } catch (error) { this.#written.delete(name); console.error(`${name}: ${error.message}`); }
@@ -281,7 +304,7 @@ export class Guide {
     async tellAgain(name) {
         this.#known(name);
         if (!this.#conversations.awake?.().includes(name)) throw new Refusal(409, 'It is asleep: open it first.');
-        try { await this.#writeOwn(name); await this.pointer(name); this.#pointed.add(name); }
+        try { await this.#writeOwn(name, true); await this.pointer(name); this.#pointed.add(name); }
         catch (error) { throw new Refusal(502, `Its machine could not be given its guide: ${error.message}`); }
         if (!(await this.#say(name, TELL_AGAIN))) throw new Refusal(502, 'The line could not be typed: is its tool running?');
         return { ...this.about(name), told: TELL_AGAIN };

@@ -1,6 +1,6 @@
 /* A START TOLD STEP BY STEP, from the page: a build, a restart (its tool
    taking up its last session, or starting a new one), a wake from a stop and
-   a wake from sleep. The same panel for each: what it is, "Step N of M" with
+   a wake from sleep. The same panel for each: what it is, "N / M" with
    its clock, the step under way, those passed and those to come. Its steps go
    in order, all the way to the tool, and nothing said names the VM manager
    or an address. The stand-in VM manager says "Stopping" and "Starting" while
@@ -25,9 +25,10 @@ const record = (page) => page.evaluate(() => {
             steps: items.map((li) => li.dataset.step), now: now?.dataset.step, words: now?.textContent, done: items.filter((li) => li.dataset.state === 'done').map((li) => li.dataset.step) };
         if (JSON.stringify(window.clavariumSeen.at(-1)) !== JSON.stringify(seen)) window.clavariumSeen.push(seen);
         /* The line of the list says the step the panel says. */
-        const line = document.querySelector('#items .item[aria-current="true"] small')?.textContent ?? '';
+        /* The row is the kit's ConvCard (its time is a <small> too): the step is one of its lines. */
+        const lines = [...(document.querySelector('#list .item[aria-current="true"]')?.querySelectorAll('small') ?? [])].map((x) => x.textContent);
         const label = now?.querySelector('span:not(.spin)')?.textContent ?? '';
-        if (label && line === label) window.clavariumSame = (window.clavariumSame ?? 0) + 1;
+        if (label && lines.includes(label)) window.clavariumSame = (window.clavariumSame ?? 0) + 1;
         window.clavariumWords.add(notice.innerText); window.clavariumWords.add(document.getElementById('state').innerText);
     }, 40);
 });
@@ -43,7 +44,7 @@ function inOrder(seen, steps, title) {
         assert.equal(s.title, title);
         const at = steps.indexOf(s.now);
         assert.ok(at >= last, `${s.now} after ${steps[last]}`);
-        assert.equal(s.count, `Step ${at + 1} of ${steps.length}`);
+        assert.equal(s.count, `${at + 1} / ${steps.length}`);
         assert.deepEqual(s.done, steps.slice(0, at), 'those before it are passed');
         last = at;
     }
@@ -63,11 +64,14 @@ test('a build, a restart, a wake: the same steps panel, in order, all the way to
     t.after(() => { delete process.env.FAKE_VM_STOP_SECONDS; delete process.env.FAKE_VM_START_SECONDS; });
     await me.page.locator('#folders').click();
     await me.page.locator('#restart').click();
-    await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
+    /* Asked in the page, in one line (09-11). */
+    assert.match(await me.page.locator('#m-confirm-text').innerText(), /^Restart it\?/);
+    await me.page.locator('#m-confirm-yes').click();
     await me.until('the machine stops, step 1 of 6', async () => (await me.page.locator('#notice-steps li[data-state="now"]').innerText().catch(() => '')) === 'Stopping the machine');
-    assert.match(await me.page.locator('#notice-count').innerText(), /^Step 1 of 6 · 0:0\d$/);
+    assert.match(await me.page.locator('#notice-count').innerText(), /^1 \/ 6 · 0:0\d$/);
     assert.deepEqual(await me.page.locator('#notice-steps li[data-state="later"]').allInnerTexts(), ['Starting the machine', 'Reaching the machine', 'Folders', 'Starting Shell', 'Resuming its last session']);
-    assert.match(await me.page.locator('#notice-text').innerText(), /A restart usually takes one to two minutes/);
+    /* The step under way in one line; what is usual, only once it is passed (03-11, less is more). */
+    assert.equal(await me.page.locator('#notice-text').innerText(), 'Stopping the machine');
     await me.until('the machine starts, its stop passed', async () => (await me.page.locator('#notice-steps li[data-state="now"]').innerText().catch(() => '')) === 'Starting the machine', 10_000);
     assert.deepEqual(await me.page.locator('#notice-steps li[data-state="done"]').allInnerTexts(), ['Machine stopped']);
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
@@ -80,7 +84,7 @@ test('a build, a restart, a wake: the same steps panel, in order, all the way to
     await me.api('/api/conversations/stepper/resume', { on: false });
     await me.page.locator('#folders').click();
     await me.page.locator('#restart').click();
-    await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
+    await me.page.locator('#m-confirm-yes').click();
     await me.until('its last step is a new session', async () => /^(Starting a new session|New session started)$/.test(await me.page.locator('#notice-steps li').last().innerText().catch(() => '')));
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     inOrder(await taken(me.page), [...RESTART, 'fresh'], 'Restarting its machine');
@@ -92,9 +96,9 @@ test('a build, a restart, a wake: the same steps panel, in order, all the way to
     await me.until('its tool exited', async () => (await me.state()) === 'ended');
     await me.until('its machine stopped', async () => (await me.api('/api/conversations/stepper/health', {})).body?.state === 'Stopped', 10_000);
     await me.page.locator('#notice-action', { hasText: 'Start it again' }).click();
-    await me.until('it wakes, step 1 of 5', async () => /^Step 1 of 5/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
+    await me.until('it wakes, step 1 of 5', async () => /^1 \/ 5/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
     assert.match(await me.page.locator('#notice-title').innerText(), /waking it up/i);
-    assert.match(await me.page.locator('#notice-text').innerText(), /A start usually takes a minute or two/);
+    assert.doesNotMatch(await me.page.locator('#notice-text').innerText(), /usually/, 'what is usual is said only once it is passed');
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     assert.equal(inOrder(await taken(me.page), [...WAKE, 'resume'], 'Waking it up')[0], 'starting');
     /* WOKEN FROM SLEEP: its memory was kept, and its tool is there as it was. */
@@ -103,6 +107,8 @@ test('a build, a restart, a wake: the same steps panel, in order, all the way to
     await me.page.locator('#folders').click();
     await me.page.locator('#sleep').click();
     await me.until('asleep', async () => (await me.state()) === 'asleep');
+    /* What was seen since the last wake (its panel fading out after « live ») is not of this one. */
+    await taken(me.page);
     await me.page.locator('#notice-action', { hasText: 'Wake it' }).click();
     await me.until('it wakes', async () => (await me.page.locator('#notice-steps li[data-state="now"]').innerText().catch(() => '')) === 'Waking the machine');
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);

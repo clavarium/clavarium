@@ -19,10 +19,33 @@
  *   mailbox           read the messages       (send, file: not built)  -
  *   git               see the files           change them              -
  *   secret            never                   -                        be handed to a conversation
+ *   server            read its state          make rooms (API keys)    -
+ *   room              read its thread         post in it               -
+ *   box               read its state          make it say a text aloud -
  *
- * Two kinds of subject: a CONVERSATION (what is attached to it reaches its
- * machine) and a PAIRING (what a device was given by a code). The owner is
- * not in the table: the owner may do everything, always.
+ * And a fourth letter, for an API key only (07-11): "m", to act on or manage
+ * what it was given -- a conversation woken, put to sleep, its turn stopped;
+ * a room renamed, its members and its host changed, removed. "m" brings "rw"
+ * with it (it is Talk and more), and is never given to a device or a
+ * conversation.
+ *
+ * Three kinds of subject: a CONVERSATION (what is attached to it reaches its
+ * machine), a PAIRING (what a device was given by a code) and an API KEY
+ * (what a program elsewhere may ask with it: apikeys.mjs). The owner is not
+ * in the table: the owner may do everything, always.
+ *
+ * An API key is not a device and not a conversation: it is given only what
+ * its scopes name -- "server:status" (read), "server:jobs" (read its jobs and their logs), "server:diagnostics"
+ * (read the server's load, measure what holds it, read its logs, masked), "server:rooms"
+ * (make rooms), and conversations one by one,
+ * their chat to read ("r") or to talk in ("rw"), never their terminal ("x")
+ * -- rooms one by one, their thread to read ("r") or to post in ("rw"), and
+ * voice boxes one by one, their state ("r") or a short text said aloud
+ * ("rw": never to listen, record, set or update it) -- never a secret nor a
+ * folder in this version; nothing else is ever given "server:", "room:" or
+ * "box:".
+ * Its binder lists (07-11) are not lines here: Binder keeps who was given a
+ * list on the list itself, for a key as for a conversation (apikeys.mjs).
  *
  * No groups, no inheritance. One rule sits on top, in the door: whoever was
  * given a conversation, its terminal or its chat, sees the files of that
@@ -41,14 +64,17 @@
  */
 import { Refusal } from './conversations.mjs';
 
-export const RIGHTS = Object.freeze({ conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x' });
-const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|pairing:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
-const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$/;
+export const RIGHTS = Object.freeze({ conversation: 'rwxm', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'rw', room: 'rwm', box: 'rw' });
+/* What each of the server's own assets takes: its state and its jobs are read, rooms are made. */
+const SERVER_RIGHTS = Object.freeze({ 'server:status': 'r', 'server:jobs': 'r', 'server:rooms': 'w', 'server:diagnostics': 'r' });
+const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|(pairing|apikey):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$|^server:(status|jobs|rooms|diagnostics)$|^(room|box):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export const typeOf = (asset) => String(asset).split(':')[0];
 export const nameOf = (asset) => String(asset).slice(String(asset).indexOf(':') + 1);
 export const conversationSubject = (name) => `conversation:${name}`;
 export const pairingSubject = (id) => `pairing:${id}`;
+export const apiKeySubject = (id) => `apikey:${id}`;
 
 /* The rights asked for, in the one order they are written, or a refusal:
    only letters this type of asset takes, at least one, none twice. */
@@ -56,12 +82,15 @@ export function readRights(asset, rights) {
     if (typeof asset !== 'string' || !ASSET.test(asset)) throw new Refusal(400, 'Not an asset: a type and a name, such as "folder:reports".');
     const allowed = RIGHTS[typeOf(asset)];
     const asked = [...new Set(String(rights ?? ''))];
-    if (asked.length === 0 || asked.some((r) => !allowed.includes(r))) {
-        throw new Refusal(400, `A ${typeOf(asset)} takes these rights: ${[...allowed].join(', ')}.`);
+    const takes = SERVER_RIGHTS[asset] ?? allowed;
+    if (asked.length === 0 || asked.some((r) => !takes.includes(r))) {
+        throw new Refusal(400, `A ${typeOf(asset)} takes these rights: ${[...takes].join(', ')}.`);
     }
+    /* Acting, managing is talking and more: "m" brings "w" with it. */
+    if (asked.includes('m') && !asked.includes('w')) asked.push('w');
     /* Writing without reading is not a thing here: "w" brings "r" with it. */
-    if (asked.includes('w') && allowed.includes('r') && !asked.includes('r')) asked.push('r');
-    return [...'rwx'].filter((r) => asked.includes(r)).join('');
+    if (asked.includes('w') && takes.includes('r') && !asked.includes('r')) asked.push('r');
+    return [...'rwxm'].filter((r) => asked.includes(r)).join('');
 }
 
 /* A table kept in memory only: for tests, and for a part built without one. */
@@ -85,7 +114,14 @@ export class Grants {
         /* A secret is handed to a conversation, never to a device: a device
            would be a way to read it. */
         if (typeOf(asset) === 'secret' && !subject.startsWith('conversation:')) throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
-        if (typeOf(asset) === 'conversation' && !subject.startsWith('pairing:')) throw new Refusal(400, 'A conversation is shared with a device, not with another conversation.');
+        if (typeOf(asset) === 'conversation' && !subject.startsWith('pairing:') && !subject.startsWith('apikey:')) throw new Refusal(400, 'A conversation is shared with a device or an API key, not with another conversation.');
+        /* The state of the server is given to an API key only; an API key is given only that, and
+           conversations one by one -- their chat, to read or to write in, never their terminal. */
+        if (typeOf(asset) === 'server' && !subject.startsWith('apikey:')) throw new Refusal(400, 'The state of the server is given to an API key only.');
+        if (['room', 'box'].includes(typeOf(asset)) && !subject.startsWith('apikey:')) throw new Refusal(400, 'A room or a voice box is given to an API key only.');
+        if (subject.startsWith('apikey:') && !['server', 'conversation', 'room', 'box'].includes(typeOf(asset))) throw new Refusal(400, 'An API key is given the state of the server, conversations, rooms and voice boxes, nothing else.');
+        if (clean.includes('m') && !subject.startsWith('apikey:')) throw new Refusal(400, 'Acting on a conversation, managing a room: given to an API key only.');
+        if (subject.startsWith('apikey:') && clean.includes('x')) throw new Refusal(400, 'An API key reads a conversation or talks in it, never uses its terminal.');
         this.#store.put({ name: this.#key(subject, asset), subject, asset, rights: clean });
         return clean;
     }

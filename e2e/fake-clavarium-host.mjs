@@ -82,7 +82,7 @@ if (area === 'server' && verb === 'room') {
     /* The CPU time of the server and of each machine, growing with the clock: the curves have something to draw. */
     const ticks = Math.floor(Date.now() / 10) * 4;
     const cpu = [`cpu ${ticks} ${Math.floor(ticks * 0.6)} 4`, ...running.map((vm) => `machinecpu ${vm} ${Math.floor(ticks / 20)}`)];
-    console.log(process.env.FAKE_SERVER_ROOM ?? ['place machines 2049 102400 61440', 'place data 2049 102400 61440', 'place folders 2049 102400 61440', 'memory 16384 12288', ...running.map((vm) => `machine ${vm} 900`), ...cpu].join('\n'));
+    console.log(process.env.FAKE_SERVER_ROOM ?? ['place machines 2049 102400 61440', 'place data 2049 102400 61440', 'place folders 2049 102400 61440', 'memory 16384 12288', ...running.map((vm) => `machine ${vm} 900`), ...running.map((vm) => `machineage ${vm} 3600`), ...cpu].join('\n'));
     process.exit(0);
 }
 if (area === 'server' && verb === 'usage') {
@@ -263,13 +263,15 @@ if (area === 'shelf') {
 /* THE GIT READER: the real reader script, run in the folder, with the host's
    exit codes (see fake-git-read.mjs). A reference is refused, as for real. */
 if (area === 'git') {
-    const [name] = argv;
-    if (!/^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/.test(name ?? '') || argv.length !== 1) { console.error('REFUSED: not a folder name'); process.exit(78); }
+    const [name, ...how] = argv;
+    /* As the host program takes them: nothing, --tips, or --have and full object ids (read only). */
+    const ways = how.length === 0 || (verb === 'read' && ((how.length === 1 && how[0] === '--tips') || (how[0] === '--have' && how.length >= 2 && how.length <= 257 && how.slice(1).every((id) => /^[0-9a-f]{40}$/.test(id)))));
+    if (!/^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/.test(name ?? '') || !ways) { console.error('REFUSED: not a folder name'); process.exit(78); }
     if (verb === 'stop') process.exit(0);
     if (verb !== 'read') { console.error(`REFUSED: unknown verb: git ${verb}`); process.exit(78); }
     if (name.endsWith('-origin')) { console.error('REFUSED: the reference of a repository is never read this way'); process.exit(78); }
     if (!existsSync(folderOf(name)) || lstatSync(folderOf(name)).isSymbolicLink()) { console.error(`REFUSED: no such folder: ${name}`); process.exit(78); }
-    const child = spawn(process.execPath, [join(dirname(new URL(import.meta.url).pathname), 'fake-git-read.mjs'), folderOf(name), name], { stdio: ['ignore', 'inherit', 'inherit'] });
+    const child = spawn(process.execPath, [join(dirname(new URL(import.meta.url).pathname), 'fake-git-read.mjs'), folderOf(name), name, ...how], { stdio: ['ignore', 'inherit', 'inherit'] });
     child.on('close', (code) => process.exit(code ?? 82));
 /* The views never break here: nothing to take off. */
 } else if (area === 'mounts' && verb === 'repair') { process.exit(0);
@@ -344,6 +346,32 @@ if (area === 'vm') {
         setSize(vm, { [key]: Number(value) });
         process.exit(0);
     }
+    /* THE WAY DOWN (vm halt [from [until]], vm hardstop), its steps said as the host program says them.
+       "stuck": the polite stop times out, the forced one works (as vm kill). "hang-stop": the polite
+       stop hangs until this program is ended (the server moving on: "Force now"). */
+    if (verb === 'halt' || verb === 'hardstop') {
+        const vm = argv[0];
+        if (!stateOf(vm)) fail(`instance "${vm}" does not exist`);
+        const order = ['polite', 'force', 'term', 'kill'];
+        const from = verb === 'hardstop' ? 'term' : argv[1] ?? 'polite';
+        const until = verb === 'hardstop' ? 'kill' : argv[2] ?? 'kill';
+        const say = (line) => process.stdout.write(`${line}\n`);
+        const down = () => { killTmux(vm); setState(vm, 'Stopped'); rmSync(join(home(vm), 'stuck'), { force: true }); };
+        const steps = order.slice(order.indexOf(from), order.indexOf(until) + 1);
+        const check = () => { say('step check start'); say(`step check ${stateOf(vm) === 'Stopped' ? 'ok' : 'fail'} 0s freed 1.0G`); process.exit(stateOf(vm) === 'Stopped' ? 0 : 1); };
+        (async () => {
+            for (const step of steps) {
+                if (stateOf(vm) === 'Stopped') { say(`step ${step} skip 0s gone`); break; }
+                say(`step ${step} start`);
+                if (step === 'polite' && existsSync(join(home(vm), 'hang-stop'))) { await new Promise(() => { setInterval(() => {}, 60_000); }); }
+                if (step === 'polite') { setState(vm, 'Stopping'); await new Promise((r) => { setTimeout(r, Number(process.env.FAKE_VM_STOP_SECONDS ?? '0') * 1000); }); }
+                if (step === 'polite' && existsSync(join(home(vm), 'stuck'))) { await new Promise((r) => { setTimeout(r, 1000); }); say('step polite timeout 1s'); continue; }
+                if (step === 'force' || step === 'kill' || step === 'term') appendFileSync(join(home(vm), 'killed'), 'x');
+                down(); say(`step ${step} ok 0s`);
+            }
+            check();
+        })();
+    } else
     /* A clean stop that hangs, when a test says so: the force is then needed. */
     if (verb === 'stop' && existsSync(join(home(argv[0]), 'stuck'))) { spawnSync('sleep', ['2']); fail('stop failed: timed out'); }
     if (verb === 'kill') {
@@ -421,6 +449,21 @@ if (area === 'vm') {
             console.log(lines.join('\n'));
             process.exit(0);
         }
+        /* Its heartbeat put in the machine (server/beat.mjs): written down, never run here (it is root's, for a
+           real machine's systemd). */
+        if (program === 'sh' && rest[0] === '-c' && rest[2] === 'clavarium-beat-install') {
+            appendFileSync(join(home(vm), 'beat-installs'), `${rest.slice(3).join(' ')}\n`);
+            process.exit(0);
+        }
+        /* A conversation carried elsewhere (#351): the server's own script, run in the machine's home here. */
+        if (program === 'sh' && rest[0] === '-c' && (rest[2] === 'export' || rest[2] === 'import')) {
+            const homeDir = inVm(vm, '/home/ubuntu'); mkdirSync(homeDir, { recursive: true });
+            /* Its archive through its work folder (a copy, 14-11): the machine's /work is its work folder as the server
+               sees it -- never this computer's /work. */
+            const script = rest[1].replaceAll('/work/.clavarium-carry', `${join(DATA, 'work', vm.replace(/^clv-/, ''))}/.clavarium-carry`);
+            const r = spawnSync('sh', ['-c', script, ...rest.slice(2)], { env: { ...process.env, HOME: homeDir }, stdio: 'inherit' });
+            process.exit(r.status ?? 1);
+        }
         /* A copy's first start, and the look that its tool is there: each given
            a moment, so that a test sees every step of the build go by. */
         if (program === 'cloud-init' || program === 'which') {
@@ -481,7 +524,7 @@ if (area === 'vm') {
             child.on('error', () => process.exit(127));
             child.on('exit', (code) => process.exit(code ?? 1));
         }
-    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork', 'untools', 'size', 'set', 'kill'].includes(verb)) {
+    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork', 'untools', 'size', 'set', 'kill', 'halt', 'hardstop'].includes(verb)) {
         fail(`unknown verb: ${verb}`, 64);
     }
 }

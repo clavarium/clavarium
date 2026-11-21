@@ -20,7 +20,9 @@
  * after them -- never in the folder the tool works in, which may be on
  * another branch or hold changes not committed. What was checked is always
  * what would be sent. A copy has no installed dependencies: a check that
- * needs them installs them ("npm ci && npm test").
+ * needs them installs them ("npm ci && npm test"). They are told so: CLAVARIUM_CHECK_COPY (the
+ * copy), CLAVARIUM_CHECK_HEAD (the commit sent), CLAVARIUM_CHECK_REPOSITORY (the main folder,
+ * never to be required on a branch or at that commit).
  *
  * Bounded: a time limit (killed after it), and only the end of the output
  * comes back.
@@ -65,6 +67,9 @@ git cat-file -e "$head^{commit}" 2>/dev/null || { echo "The commit to send ($hea
 git worktree add --detach --quiet "$tmp/at" "$head" >/dev/null 2>&1 || { echo "A copy at the commit to send ($head) could not be made. Look again."; exit ${MOVED}; }
 made="$tmp/at"; cd "$made" || exit ${MOVED}
 where="Checked in a copy made at this commit, then taken away."
+# Said to the checks: they run in a copy, at exactly this commit -- never in the main
+# folder, whatever branch it is on. A check needs nothing else to know what is sent.
+export CLAVARIUM_CHECK_COPY="$made" CLAVARIUM_CHECK_HEAD="$head" CLAVARIUM_CHECK_REPOSITORY="$repo"
 [ "$(git rev-parse --verify --quiet HEAD)" = "$head" ] || { echo "What would be checked is not the commit to send ($head). Look again."; exit ${MOVED}; }
 status=0; ran=0
 {
@@ -92,11 +97,24 @@ exit "$status"`;
 // eslint-disable-next-line no-control-regex
 const printable = (text) => String(text ?? '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\u0000-\u0008\u000B-\u001F\u007F]/gu, '').slice(-OUTPUT_MAX);
 
-export class GitChecks {
-    #vms; #conversations; #resources; #now;
+/* The agents' copies brought up to date at most so many at a time, across every repository: each is a
+   sudo and a `vm exec` on the host, and the keeper's tick reads its repositories side by side -- after a
+   start, every reference is due at once, and one fetch per repository and machine (48 seen in a few
+   seconds, 17-11) held up the host while the new server was watched for its answer. */
+export const FETCHES_AT_ONCE = 2;
 
-    constructor({ vms, conversations, resources, now = () => new Date() }) {
+export class GitChecks {
+    #vms; #conversations; #resources; #now; #free; #waiting = [];
+
+    constructor({ vms, conversations, resources, now = () => new Date(), fetchesAtOnce = FETCHES_AT_ONCE }) {
         this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#now = now;
+        this.#free = Math.max(1, fetchesAtOnce);
+    }
+    /* A place among the fetches running, waited for in turn; given back by the function it resolves to. */
+    async #slot() {
+        if (this.#free > 0) this.#free -= 1; else await new Promise((go) => this.#waiting.push(go));
+        let given = false;
+        return () => { if (given) return; given = true; const next = this.#waiting.shift(); if (next) next(); else this.#free += 1; };
     }
 
     /* A machine that runs and has the repository attached: one it may write
@@ -114,8 +132,9 @@ export class GitChecks {
        origin/* only: its branches, its files and what it left uncommitted are not touched.
        -> { ok, moved: [{ branch, upstream, from, to }] }: the branches it follows whose upstream moved. */
     async fetchIn(conversation, repository) {
+        const done = await this.#slot();
         const r = await this.#vms.exec(conversation, ['timeout', '-k', '10', '120', 'sh', '-c', FETCH_SCRIPT, 'clavarium-fetch', `/resources/${repository}`, `/resources/${originFolder(repository)}`], { timeoutMs: 180_000 })
-            .catch(() => ({ code: -1, stdout: '' }));
+            .catch(() => ({ code: -1, stdout: '' })).finally(done);
         if (r.code !== 0) return { ok: false, moved: [] };
         const moved = String(r.stdout ?? '').split('\n').map((l) => l.trim().split(' ')).filter((x) => x.length === 4 && /^[0-9a-f]{40,64}$/.test(x[2]) && /^[0-9a-f]{40,64}$/.test(x[3]))
             .map(([branch, upstream, from, to]) => ({ branch: printable(branch), upstream: printable(upstream), from, to }));

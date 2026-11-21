@@ -10,7 +10,9 @@ import { fileURLToPath } from 'node:url';
    its port are read from the unit there, written as before or as now. Restarted only when it changed. */
 export const TUNNEL_UNIT = '/etc/systemd/system/clavarium-tunnel.service';
 export const TUNNEL_PROGRAM = '/usr/local/sbin/clavarium-tunnel';
-export function tunnelUnit(relay, port, program = TUNNEL_PROGRAM) {
+/* `ports`: { tls, http } for a home the relay's principal added (its own ports on the relay); none for
+   the principal itself (8443 and 8080, as ever). */
+export function tunnelUnit(relay, port, program = TUNNEL_PROGRAM, ports = null) {
     return `[Unit]
 Description=Clavarium - the outgoing tunnel to the relay
 After=network-online.target caddy.service
@@ -21,7 +23,7 @@ StartLimitIntervalSec=0
 User=clavarium-tunnel
 Group=clavarium-tunnel
 # Only TLS (443) and the certificate challenge (80) are carried: see ${program}.
-ExecStart=${program} ${relay} ${port}
+ExecStart=${program} ${relay} ${port}${ports ? ` ${ports.tls} ${ports.http}` : ''}
 Restart=always
 RestartSec=5
 # What it counts of the relay's refusals, kept across its restarts.
@@ -37,8 +39,8 @@ WantedBy=multi-user.target
 `;
 }
 export function relayOfUnit(text) {
-    const now = new RegExp(`^ExecStart=\\S+clavarium-tunnel ([A-Za-z0-9.-]{1,253}) (\\d{1,5})$`, 'm').exec(text);
-    if (now) return { relay: now[1], port: now[2] };
+    const now = new RegExp(`^ExecStart=\\S+clavarium-tunnel ([A-Za-z0-9.-]{1,253}) (\\d{1,5})(?: (\\d{4,5}) (\\d{4,5}))?$`, 'm').exec(text);
+    if (now) return { relay: now[1], port: now[2], ...(now[3] ? { ports: { tls: now[3], http: now[4] } } : {}) };
     const before = /-p (\d{1,5}) clavarium-tunnel@([A-Za-z0-9.-]{1,253})\s*$/m.exec(text);
     return before ? { relay: before[2], port: before[1] } : null;
 }
@@ -56,7 +58,7 @@ export async function ensureTunnel({ file = TUNNEL_UNIT, program = TUNNEL_PROGRA
     if (!existsSync(program)) return false;
     const at = relayOfUnit(text);
     if (!at) return false;
-    const wanted = tunnelUnit(at.relay, at.port, program);
+    const wanted = tunnelUnit(at.relay, at.port, program, at.ports ?? null);
     if (text === wanted) {
         /* The same unit, a new program: what runs now is the old one until it is started again. */
         if (installed && process.getuid?.() === 0) await run(['systemctl', 'try-restart', 'clavarium-tunnel.service'], { timeoutMs: 60_000 });

@@ -27,7 +27,7 @@
  * password, which only ever goes back to the https origin it was given for.
  */
 import { Refusal } from './conversations.mjs';
-import { GitAccess, readAddress, explain } from './gitaccess.mjs';
+import { GitAccess, readAddress, explain, remoteSaid, remoteAll } from './gitaccess.mjs';
 import { GitRunner, GitFailure, EMPTY_TREE, branchProblem, protocolOf, isId } from './gitrunner.mjs';
 
 export { branchProblem };
@@ -40,6 +40,8 @@ export const UNCHANGED_MAX = 50;
 /* A commit message is shown up to this many characters, and the cut is said. */
 export const MESSAGE_MAX = 4000;
 export const REVIEWS_KEPT = 20;
+/* To send: besides the branch that moved last, how many others of a repository are looked at. */
+export const BRANCHES_MORE = 7;
 /* The branch diagram: so many commits, so many of the remote's branches. */
 export const GRAPH_COMMITS = 40;
 export const GRAPH_BRANCHES = 20;
@@ -69,8 +71,15 @@ export function escaped(text) {
         (c) => (c === '\n' || c === '\t' ? c : `\\u{${c.codePointAt(0).toString(16)}}`));
 }
 
+/* A review's fields when there is nothing to show. */
+const nothingOut = (remote) => ({ branches: [], agentBranches: [], dropped: [], targetExists: false, remoteTip: null, head: null, commits: [], count: 0, stat: '', diff: '', cut: false, guards: null, remote });
+
 export class GitReview {
     #store; #vault; #resources; #local; #access; #runner; #now; #listeners = []; #waivers = () => ({});
+    /* The refresh of each repository on its way: { run, waitMs }, by name. */
+    #refreshing = new Map();
+    /* The last review of each branch, by repository: see #verdict. */
+    #verdicts = new Map();
 
     /* `localRemotes`: lets a remote be a directory of this machine. For tests only.
        `runner`: the git runner (gitrunner.mjs); its reads go through the host program. */
@@ -133,7 +142,7 @@ export class GitReview {
     }
 
     /* The repository is gone: its key goes with it. */
-    forget(name) { this.#store.remove(name); this.#access.forget(name); }
+    forget(name) { this.#store.remove(name); this.#access.forget(name); this.#verdicts.delete(name); this.#runner.forget?.(name); }
 
     /* ---------- the tips of the agent's branches, as the server last saw them ---------- */
 
@@ -198,14 +207,28 @@ export class GitReview {
 
     /* Fetches the remote's branches into the reference, making it the first
        time. Under the reference's lock. Resolves { ok, message, rewritten,
-       made, brought }; `rewritten`: branches whose tip before is not an
+       made, brought, mark }; `rewritten`: branches whose tip before is not an
        ancestor of their tip now, or that are gone; `brought`: branches that
        came with commits the reference did not have, { branch, commits }.
        The only writer of the reference. */
     async refresh(name, { waitMs = SEND_WAIT_MS } = {}) {
         const r = this.#repository(name);
-        const release = await this.#runner.lock(this.#reference(r.name), waitMs);
-        try { return await this.#refreshLocked(r); } finally { release(); }
+        /* One on its way already, that waits at least as long as this one
+           would: its fetch is shared, not made again behind it. A page that
+           reviews several branches of a repository at once (To send) would
+           otherwise line up one fetch per branch behind the reference's lock,
+           and the last ones be refused as busy -- and drop out of the list. */
+        const going = this.#refreshing.get(r.name);
+        if (going && going.waitMs >= waitMs) return going.run;
+        const run = (async () => {
+            const release = await this.#runner.lock(this.#reference(r.name), waitMs);
+            try { return await this.#refreshLocked(r); } finally { release(); }
+        })();
+        const entry = { run, waitMs };
+        this.#refreshing.set(r.name, entry);
+        const done = () => { if (this.#refreshing.get(r.name) === entry) this.#refreshing.delete(r.name); };
+        run.then(done, done);
+        return run;
     }
     /* `ours`: { branch, head } just pushed from here: what it brings back is not news from the remote. */
     async #refreshLocked(r, ours = null) {
@@ -264,7 +287,12 @@ export class GitReview {
         }
         if (made) await this.#resources.shareOrigin(r.name).catch(() => {});
         await this.#learnDefault(r, remote).catch(() => {});
-        return said({ ok: true, message: 'Up to date with the remote.', rewritten, made, brought });
+        /* When the reference was last brought up to date: the list shown at once says "as of" it. */
+        this.#store.put({ ...this.#record(r.name), name: r.name, fetchedAt: this.#now().toISOString() });
+        /* `mark`: the reference's branches as they are now, so that a caller can tell a
+           refresh that changed nothing (gitkeeper.mjs: no fetch into the machines then). */
+        const mark = [...after].map(([b, id]) => `${b} ${id}`).sort().join('\n');
+        return said({ ok: true, message: 'Up to date with the remote.', rewritten, made, brought, mark });
     }
 
     /* Is `tip` of the agent's branch `b` something the remote lacks? Not
@@ -345,70 +373,240 @@ export class GitReview {
         const asked = target === undefined || target === null || target === '' ? undefined : asBranch(target);
         const pick = branch === undefined || branch === null || branch === '' ? undefined : asBranch(branch);
         const remote = this.#remoteOf(r) ?? null;
-        const nothing = { branches: [], agentBranches: [], dropped: [], targetExists: false, remoteTip: null, head: null, commits: [], count: 0, stat: '', diff: '', cut: false, guards: null, remote };
-        if (remote) {
-            const fresh = await this.refresh(r.name, { waitMs: REVIEW_WAIT_MS });
-            if (!fresh.ok) return { ...nothing, state: 'unreachable', branch: pick ?? null, target: asked ?? null, message: `The remote did not answer as expected: ${fresh.message}` };
-        }
-        let got;
-        try { got = await this.#read(r); } catch (error) {
+        const nothing = nothingOut(remote);
+        const { fresh, got, error } = await this.#refreshAndRead(r, remote);
+        if (fresh && !fresh.ok) return { ...nothing, state: 'unreachable', branch: pick ?? null, target: asked ?? null, message: `The remote did not answer as expected: ${fresh.message}` };
+        if (error) {
             if (error instanceof GitFailure && error.kind === 'empty') return { ...nothing, state: 'empty', branch: null, target: asked ?? null, message: 'Nothing has been committed on a branch in this repository yet.' };
             throw error;
         }
         try {
-            const tips = this.tips(r.name);
-            const agentBranches = got.branches.map((b) => ({ name: b.name, id: b.id, movedAt: tips[b.name]?.movedAt ?? null }))
-                .sort((a, b) => String(b.movedAt).localeCompare(String(a.movedAt)) || a.name.localeCompare(b.name));
-            const dropped = got.dropped.map((d) => ({ name: escaped(d.name), why: d.why }));
-            if (agentBranches.length === 0) return { ...nothing, dropped, state: 'empty', branch: null, target: asked ?? null, message: 'No branch of this repository can be sent: see the names that were not taken.' };
-            const chosen = pick ? agentBranches.find((b) => b.name === pick) : agentBranches[0];
+            const listed = this.#listed(r, got);
+            if (listed.agentBranches.length === 0) return { ...nothing, dropped: listed.dropped, state: 'empty', branch: null, target: asked ?? null, message: 'No branch of this repository can be sent: see the names that were not taken.' };
+            const chosen = pick ? listed.agentBranches.find((b) => b.name === pick) : listed.agentBranches[0];
             if (!chosen) throw new Refusal(404, `The agent's repository has no branch ${pick}.`);
-            const ws = got.path;
-            const head = chosen.id;
-            const to = asked ?? chosen.name;
-            const asOf = this.#now().toISOString();
-            const base0 = { agentBranches, dropped, branch: chosen.name, target: to, head, remote, asOf };
-            if (!remote) {
-                const shown = await this.#compare(ws, { head, base: EMPTY_TREE, range: [head], negatives: [] });
-                return { ...nothing, ...base0, ...shown, state: 'no-remote', message: 'No address is set to send these commits to.' };
-            }
-            const reference = this.#reference(r.name);
-            const release = await this.#runner.lock(reference, REVIEW_WAIT_MS);
-            try {
-                this.#runner.borrow(ws, reference);
-                const remoteTips = await this.#tipsIn(reference);
-                const branches = [...remoteTips.keys()].sort().slice(0, BRANCHES_MAX);
-                const remoteTip = remoteTips.get(to) ?? null;
-                let shown; let behind = null; let inRemote = false; let containsRemote = true;
-                if (remoteTip) {
-                    shown = await this.#compare(ws, { head, base: remoteTip, range: [head], negatives: [remoteTip] });
-                    /* The state rests on ancestry, asked directly, never on a
-                       count: a count that failed must not read as 0, "already
-                       there", nor as "nothing behind". */
-                    inRemote = await this.#ancestry(ws, head, remoteTip);
-                    containsRemote = await this.#ancestry(ws, remoteTip, head);
-                    const b = await this.#runner.in(ws, ['rev-list', '--count', '--end-of-options', remoteTip, `^${head}`], { deadlineMs: 120_000 });
-                    const text = b.stdout.toString('latin1').trim();
-                    behind = b.code === 0 && !b.killed && /^\d+$/.test(text) ? Number(text) : null;
-                } else {
-                    /* A new branch: what would travel is what the remote has on
-                       no branch at all; the changes are shown from where the
-                       agent's branch left the remote's branch of its own name. */
-                    const same = remoteTips.get(chosen.name);
-                    const fork = same ? (await this.#runner.in(ws, ['merge-base', '--end-of-options', head, same])).stdout.toString('latin1').trim() : '';
-                    shown = await this.#compare(ws, { head, base: isId(fork) ? fork : EMPTY_TREE, range: [head], negatives: [...remoteTips.values()] });
-                }
-                const state = !remoteTip ? 'ahead' : inRemote ? 'up-to-date' : !containsRemote ? 'diverged' : 'ahead';
-                const n = shown.count;
-                const commitsText = n === null ? 'Commits (their number could not be counted)' : `${n} commit(s)`;
-                const message = state === 'up-to-date' ? `Everything committed here is already there, in ${to}.`
-                    : state === 'diverged' ? `The remote's ${to} has ${behind ?? 'some'} commit(s) that this repository does not have: the tool must bring them in first (pull), then this can be sent.`
-                        : !remoteTip ? (n !== 0 ? `${commitsText} would be sent to ${to}, a new branch on the remote.` : `${to} would be made on the remote, at a commit it already has: no new commit.`)
-                            : `${commitsText} would be sent to ${to}.`;
-                if (state === 'ahead') this.#keep(r.name, { branch: chosen.name, head, target: to, remoteTip, count: n ?? undefined, confirm: shown.guards.confirm, at: asOf });
-                return { ...nothing, ...base0, ...shown, branches, targetExists: Boolean(remoteTip), remoteTip, state, message };
-            } finally { release(); }
+            return await this.#look(r, got, listed, chosen, asked);
         } finally { got.remove(); }
+    }
+
+    /* A review's two slow steps AT THE SAME TIME: the fetch from the remote
+       (a trip over the network) and the read of the agent's repository (the
+       host program's sandbox). Neither needs the other: the read never
+       touches the reference, which is lent to its workspace only after,
+       under the reference's lock. One after the other, a page of ten
+       repositories waited for the sum of both, ten times over.
+       { fresh, got, error }: `fresh` the refresh's outcome (none without a
+       remote); `got` the read, or `error` why it failed. A read made for a
+       remote that did not answer is deleted here. */
+    async #refreshAndRead(r, remote) {
+        const reading = this.#read(r).then((got) => ({ got }), (error) => ({ error }));
+        const fresh = remote ? await this.refresh(r.name, { waitMs: REVIEW_WAIT_MS }).catch((error) => { void reading.then(({ got }) => got?.remove()); throw error; }) : null;
+        const read = await reading;
+        if (fresh && !fresh.ok) { read.got?.remove(); return { fresh }; }
+        return { fresh, ...read };
+    }
+
+    /* TO SEND, A WHOLE REPOSITORY, LIGHTLY: NOTHING ASKED OF THE REMOTE
+       (the keeper's clock keeps the reference up to date; `fetch: true`, or
+       a reference never made, fetches first) and the agent's branches first
+       LISTED ONLY (`git read --tips`: no pack). A branch whose tip and whose
+       remote tip are both those of its last review here gets that review
+       again at once. Only when one moved (or was never looked at) is the
+       repository read -- partially: only what is new travels (gitrunner.mjs)
+       -- and those branches compared again. Up to 1 + `more` branches, the
+       one that moved last first. { state: 'read' | 'empty' | 'unreachable',
+       message, remote, fetchedAt, agentBranches, dropped, rows: [as
+       outgoing()], more, asOf, checked }; `more`: how many branches were
+       not looked at; `checked`: how many were compared again; `fetchedAt`:
+       when the reference was last brought up to date (the page says "as
+       of"). A branch whose comparison failed is a row { state: 'error',
+       branch, message }. */
+    async outgoingAll(name, { more = BRANCHES_MORE, fetch = false } = {}) {
+        const r = this.#repository(name);
+        const remote = this.#remoteOf(r) ?? null;
+        const base = { remote, agentBranches: [], dropped: [], rows: [], more: 0, checked: 0, asOf: this.#now().toISOString() };
+        if (remote && (fetch || !this.#resources.hasOrigin(r.name))) {
+            const fresh = await this.refresh(r.name, { waitMs: REVIEW_WAIT_MS });
+            if (!fresh.ok) return { ...base, fetchedAt: this.#record(r.name).fetchedAt ?? null, state: 'unreachable', message: `The remote did not answer as expected: ${fresh.message}` };
+        }
+        base.fetchedAt = this.#record(r.name).fetchedAt ?? null;
+        const empty = { ...base, state: 'empty', message: 'Nothing has been committed on a branch in this repository yet.' };
+        let listed;
+        try { listed = this.#listed(r, await this.#tipsRead(r)); } catch (error) {
+            if (error instanceof GitFailure && error.kind === 'empty') return empty;
+            throw error;
+        }
+        const count = 1 + Math.max(0, Math.floor(Number(more) || 0));
+        const remoteTips = remote && this.#resources.hasOrigin(r.name) ? await this.#tipsIn(this.#reference(r.name)) : new Map();
+        const kept = this.#verdicts.get(r.name);
+        /* Its last review still holds: the same agent tip, the same remote, the same remote tip. */
+        const still = (b) => {
+            const v = kept?.get(b.name);
+            return v && v.head === b.id && v.remote === remote && (v.remoteTip ?? null) === (remoteTips.get(v.target) ?? null) ? v : null;
+        };
+        let chosen = listed.agentBranches.slice(0, count);
+        let got = null;
+        try {
+            if (chosen.some((b) => !still(b))) {
+                try { got = await this.#read(r); } catch (error) {
+                    if (error instanceof GitFailure && error.kind === 'empty') return empty;
+                    throw error;
+                }
+                /* What the read found is what counts: a branch may have moved again since the list. */
+                listed = this.#listed(r, got);
+                chosen = listed.agentBranches.slice(0, count);
+            }
+            if (listed.agentBranches.length === 0) return { ...base, ...listed, state: 'empty', message: 'No branch of this repository can be sent: see the names that were not taken.' };
+            const rows = []; let checked = 0;
+            for (const b of chosen) {
+                const v = still(b);
+                if (v) { rows.push(this.#again(r.name, v, listed, remoteTips)); continue; }
+                checked += 1;
+                try { rows.push(await this.#look(r, got, listed, b, undefined)); } catch (error) {
+                    rows.push({ ...nothingOut(remote), state: 'error', branch: b.name, target: b.name, kind: error?.kind ?? null, message: error instanceof Refusal ? error.message : 'It could not be read.' });
+                }
+            }
+            return { ...base, ...listed, state: 'read', message: '', rows, checked, more: listed.agentBranches.length - chosen.length, asOf: this.#now().toISOString() };
+        } finally { got?.remove(); }
+    }
+
+    /* The agent's branches LISTED ONLY, through the host program's sandbox
+       (gitrunner.mjs tips()): told and recorded like any read. */
+    async #tipsRead(r) {
+        try {
+            const got = await this.#runner.tips(r.name);
+            this.#saw(r.name, got.branches);
+            this.#tell('read', r.name, null, got);
+            return got;
+        } catch (error) {
+            this.#tell('read', r.name, error);
+            if (error instanceof GitFailure && error.kind === 'empty') this.#saw(r.name, []);
+            throw error;
+        }
+    }
+
+    /* A review given again (its tips unchanged): the lists around it as they
+       are now, and its review kept again for Send, as when it was made. */
+    #again(name, v, { agentBranches, dropped }, remoteTips) {
+        if (v.state === 'ahead') this.#keep(name, { branch: v.branch, head: v.head, target: v.target, remoteTip: v.remoteTip, count: v.count ?? undefined, confirm: v.guards?.confirm, at: v.asOf });
+        return { ...v, agentBranches, dropped, branches: v.remote ? [...remoteTips.keys()].sort().slice(0, BRANCHES_MAX) : v.branches };
+    }
+
+    /* WHAT IS KNOWN HERE, AT ONCE: no remote asked, no repository read. The
+       agent's branches as the last read saw them, the remote's as the last
+       fetch left them in the reference, and for each branch the outcome of
+       its last review -- kept only while neither tip moved since. A branch
+       that moved is 'unknown' until the next review (its commits are in the
+       agent's machine: only a read brings them). { remote, readAt,
+       fetchedAt, branches, rows: [{ branch, head, movedAt, target,
+       remoteTip, targetExists, state, count, lookedAt }], more }. Nothing
+       here may be sent: Send reads and fetches again (send()). */
+    async known(name, { more = BRANCHES_MORE } = {}) {
+        const r = this.#repository(name);
+        const remote = this.#remoteOf(r) ?? null;
+        const record = this.#record(r.name);
+        const reference = this.#reference(r.name);
+        const remoteTips = remote && this.#resources.hasOrigin(r.name) ? await this.#tipsIn(reference).catch(() => new Map()) : new Map();
+        const all = Object.entries(record.tips ?? {}).map(([b, tip]) => ({ name: b, id: tip.id, movedAt: tip.movedAt ?? null }))
+            .sort((a, b) => String(b.movedAt).localeCompare(String(a.movedAt)) || a.name.localeCompare(b.name));
+        const chosen = all.slice(0, 1 + Math.max(0, Math.floor(Number(more) || 0)));
+        const rows = [];
+        for (const b of chosen) {
+            const last = record.looked?.[b.name];
+            const target = last?.target ?? b.name;
+            const remoteTip = remoteTips.get(target) ?? null;
+            const same = last && last.head === b.id && (last.remoteTip ?? null) === remoteTip;
+            let state = 'unknown';
+            if (!remote) state = 'no-remote';
+            else if (same) state = last.state;
+            /* Already on the remote's branch: seen in the reference alone. */
+            else if (remoteTip && (remoteTip === b.id || (await this.#has(reference, b.id) && await this.#isAncestor(reference, b.id, remoteTip)))) state = 'up-to-date';
+            rows.push({ branch: b.name, head: b.id, movedAt: b.movedAt, target, remoteTip, targetExists: Boolean(remoteTip), state, count: same ? last.count ?? null : state === 'up-to-date' ? 0 : null, lookedAt: last?.at ?? null });
+        }
+        return { remote, readAt: record.readAt ?? null, fetchedAt: record.fetchedAt ?? null, branches: [...remoteTips.keys()].sort().slice(0, BRANCHES_MAX), rows, more: all.length - chosen.length };
+    }
+
+    /* The agent's branches of one read, the one that moved last first. */
+    #listed(r, got) {
+        const tips = this.tips(r.name);
+        const agentBranches = got.branches.map((b) => ({ name: b.name, id: b.id, movedAt: tips[b.name]?.movedAt ?? null }))
+            .sort((a, b) => String(b.movedAt).localeCompare(String(a.movedAt)) || a.name.localeCompare(b.name));
+        return { agentBranches, dropped: got.dropped.map((d) => ({ name: escaped(d.name), why: d.why })) };
+    }
+
+    /* EVERY REVIEW MADE, by repository and branch, in memory: what To send
+       gives again while neither tip moved (outgoingAll). Only the last one
+       of a branch (one per branch, a few branches per repository). */
+    #verdict(name, out) {
+        if (!this.#verdicts.has(name)) this.#verdicts.set(name, new Map());
+        this.#verdicts.get(name).set(out.branch, out);
+        return out;
+    }
+
+    /* The outcome of a review, kept by branch for the list shown at once (known()). */
+    #remember(name, out, agentBranches) {
+        const record = this.#record(name);
+        const looked = {};
+        for (const b of agentBranches) if (record.looked?.[b.name]) looked[b.name] = record.looked[b.name];
+        looked[out.branch] = { head: out.head, target: out.target, remoteTip: out.remoteTip ?? null, state: out.state, count: out.count ?? null, at: out.asOf };
+        this.#store.put({ ...record, looked });
+    }
+
+    /* One branch of a read, compared with the remote's: see outgoing(). */
+    async #look(r, got, { agentBranches, dropped }, chosen, asked) {
+        const remote = this.#remoteOf(r) ?? null;
+        const nothing = nothingOut(remote);
+        const ws = got.path;
+        const head = chosen.id;
+        const to = asked ?? chosen.name;
+        const asOf = this.#now().toISOString();
+        const base0 = { agentBranches, dropped, branch: chosen.name, target: to, head, remote, asOf };
+        if (!remote) {
+            const shown = await this.#compare(ws, { head, base: EMPTY_TREE, range: [head], negatives: [] });
+            return this.#verdict(r.name, { ...nothing, ...base0, ...shown, state: 'no-remote', message: 'No address is set to send these commits to.' });
+        }
+        const reference = this.#reference(r.name);
+        const release = await this.#runner.lock(reference, REVIEW_WAIT_MS);
+        try {
+            this.#runner.borrow(ws, reference);
+            const remoteTips = await this.#tipsIn(reference);
+            const branches = [...remoteTips.keys()].sort().slice(0, BRANCHES_MAX);
+            const remoteTip = remoteTips.get(to) ?? null;
+            let shown; let behind = null; let inRemote = false; let containsRemote = true;
+            if (remoteTip) {
+                /* The state rests on ancestry, asked directly, never on a
+                   count: a count that failed must not read as 0, "already
+                   there", nor as "nothing behind". Asked at the same time as
+                   the comparison: none needs another's answer. */
+                const asked = [this.#compare(ws, { head, base: remoteTip, range: [head], negatives: [remoteTip] }), this.#ancestry(ws, head, remoteTip), this.#ancestry(ws, remoteTip, head),
+                    this.#runner.in(ws, ['rev-list', '--count', '--end-of-options', remoteTip, `^${head}`], { deadlineMs: 120_000 })];
+                await Promise.allSettled(asked);
+                shown = await asked[0];
+                inRemote = await asked[1];
+                containsRemote = await asked[2];
+                const b = await asked[3];
+                const text = b.stdout.toString('latin1').trim();
+                behind = b.code === 0 && !b.killed && /^\d+$/.test(text) ? Number(text) : null;
+            } else {
+                /* A new branch: what would travel is what the remote has on
+                   no branch at all; the changes are shown from where the
+                   agent's branch left the remote's branch of its own name. */
+                const same = remoteTips.get(chosen.name);
+                const fork = same ? (await this.#runner.in(ws, ['merge-base', '--end-of-options', head, same])).stdout.toString('latin1').trim() : '';
+                shown = await this.#compare(ws, { head, base: isId(fork) ? fork : EMPTY_TREE, range: [head], negatives: [...remoteTips.values()] });
+            }
+            const state = !remoteTip ? 'ahead' : inRemote ? 'up-to-date' : !containsRemote ? 'diverged' : 'ahead';
+            const n = shown.count;
+            const commitsText = n === null ? 'Commits (their number could not be counted)' : `${n} commit(s)`;
+            const message = state === 'up-to-date' ? `Everything committed here is already there, in ${to}.`
+                : state === 'diverged' ? `The remote's ${to} has ${behind ?? 'some'} commit(s) that this repository does not have: the tool must bring them in first (pull), then this can be sent.`
+                    : !remoteTip ? (n !== 0 ? `${commitsText} would be sent to ${to}, a new branch on the remote.` : `${to} would be made on the remote, at a commit it already has: no new commit.`)
+                        : `${commitsText} would be sent to ${to}.`;
+            if (state === 'ahead') this.#keep(r.name, { branch: chosen.name, head, target: to, remoteTip, count: n ?? undefined, confirm: shown.guards.confirm, at: asOf });
+            const out = { ...nothing, ...base0, ...shown, branches, targetExists: Boolean(remoteTip), remoteTip, state, message };
+            this.#remember(r.name, out, agentBranches);
+            return this.#verdict(r.name, out);
+        } finally { release(); }
     }
 
     /* The workspace of one read, with the remote's history lent to it when
@@ -429,7 +627,9 @@ export class GitReview {
     /* THE BRANCH DIAGRAM: the agent's branches, the remote's, and their
        last commits, newest first in topological order: { branches: [{name,
        id, side: 'agent'|'remote'}], commits: [{id, parents, subject, date,
-       refs: [{name, side}]}] }. What the agent wrote is escaped as everywhere. */
+       author, refs: [{name, side}]}] }. `author` is who committed it, so a
+       person can see whose work a commit is. What the agent wrote is escaped
+       as everywhere. */
     async graph(name) {
         const r = this.#repository(name);
         try {
@@ -438,13 +638,13 @@ export class GitReview {
                 for (const [b, id] of [...remoteTips].sort(([a], [c]) => a.localeCompare(c)).slice(0, GRAPH_BRANCHES)) branches.push({ name: escaped(b), id, side: 'remote' });
                 const tips = [...new Set(branches.map((b) => b.id))];
                 if (tips.length === 0) return { branches, commits: [] };
-                const log = await this.#runner.in(got.path, ['log', '--topo-order', `--max-count=${GRAPH_COMMITS}`, '-z', '--format=%H%x00%P%x00%aI%x00%s', '--stdin', '--end-of-options'], { input: `${tips.join('\n')}\n`, deadlineMs: 60_000, maxBytes: 4 * 1024 * 1024 });
+                const log = await this.#runner.in(got.path, ['log', '--topo-order', `--max-count=${GRAPH_COMMITS}`, '-z', '--format=%H%x00%P%x00%an%x00%aI%x00%s', '--stdin', '--end-of-options'], { input: `${tips.join('\n')}\n`, deadlineMs: 60_000, maxBytes: 4 * 1024 * 1024 });
                 const fields = log.stdout.toString('utf8').split('\0');
                 const commits = [];
-                for (let i = 0; i + 3 < fields.length; i += 4) {
+                for (let i = 0; i + 4 < fields.length; i += 5) {
                     const id = fields[i].replace(/^\n/, '');
                     if (!isId(id)) break;
-                    commits.push({ id, parents: fields[i + 1].split(' ').filter(isId), date: fields[i + 2], subject: escaped(fields[i + 3]).slice(0, 300),
+                    commits.push({ id, parents: fields[i + 1].split(' ').filter(isId), author: escaped(fields[i + 2]).slice(0, 200), date: fields[i + 3], subject: escaped(fields[i + 4]).slice(0, 300),
                         refs: branches.filter((b) => b.id === id).map((b) => ({ name: b.name, side: b.side })) });
                 }
                 return { branches, commits };
@@ -500,11 +700,29 @@ export class GitReview {
         const incomplete = [];
         const failed = (r) => r.code !== 0 || Boolean(r.killed) || Boolean(r.signal);
         const stopped = (r) => (r.killed === 'size' ? 'too long to read whole' : r.killed === 'deadline' ? 'stopped by its time limit' : 'git failed');
-        const counted = await inWs(['rev-list', '--count', '--stdin', '--end-of-options'], { input: revs });
+        const compare = ['--text', '--no-ext-diff', '--no-textconv', '--no-color', '--end-of-options', base, head];
+        /* Every git below reads the same workspace and none needs another's
+           answer (but the weighing, which needs the list of objects): they
+           run at once, and what each says is taken in the same order as
+           before. One after the other, a branch waited for ten git processes
+           in a row, and To send for that, branch after branch. */
+        const running = {
+            counted: inWs(['rev-list', '--count', '--stdin', '--end-of-options'], { input: revs }),
+            log: inWs(['log', `--max-count=${COMMITS_MAX}`, '-z', '--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%B', '--stdin', '--end-of-options'], { input: revs, maxBytes: 8 * 1024 * 1024 }),
+            statRun: inWs(['diff', '--stat=100', ...compare], { maxBytes: 1024 * 1024 }),
+            whole: inWs(['diff', ...compare], { maxBytes: DIFF_MAX + 1 }),
+            sizeRun: inWs(['rev-list', '--objects', '--disk-usage', '--stdin', '--end-of-options'], { input: revs }),
+            objects: inWs(['rev-list', '--objects', '--stdin', '--end-of-options'], { input: revs, maxBytes: 32 * 1024 * 1024 }),
+            touchedRun: inWs(['log', '--name-only', '-z', '--format=', '--stdin', '--end-of-options'], { input: revs, maxBytes: 16 * 1024 * 1024 }),
+            netRun: inWs(['diff', '--name-only', '-z', '--no-renames', ...compare], { maxBytes: 16 * 1024 * 1024 }),
+        };
+        /* All of them settled before any answer is used: none is left running behind a failure. */
+        await Promise.allSettled(Object.values(running));
+        const counted = await running.counted;
         const countText = counted.stdout.toString('latin1').trim();
         const count = !failed(counted) && /^\d+$/.test(countText) ? Number(countText) : null;
         if (count === null) incomplete.push(`The commits could not be counted (${stopped(counted)}).`);
-        const log = await inWs(['log', `--max-count=${COMMITS_MAX}`, '-z', '--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%B', '--stdin', '--end-of-options'], { input: revs, maxBytes: 8 * 1024 * 1024 });
+        const log = await running.log;
         const fields = log.stdout.toString('utf8').split('\0');
         /* Cut short: the last record may be a part of a commit. Not listed as if whole. */
         const records = failed(log) ? Math.floor((fields.length - 1) / 6) * 6 : fields.length;
@@ -519,22 +737,21 @@ export class GitReview {
         if (cutMessages > 0) incomplete.push(`${cutMessages} commit message(s) are longer than ${MESSAGE_MAX} characters: only their start is shown.`);
         if (failed(log)) incomplete.push(`The list of commits is not whole (${stopped(log)}): ${commits.length} listed.`);
         else if (count !== null && commits.length < Math.min(count, COMMITS_MAX)) incomplete.push(`Only ${commits.length} of ${count} commits could be listed.`);
-        const compare = ['--text', '--no-ext-diff', '--no-textconv', '--no-color', '--end-of-options', base, head];
-        const statRun = await inWs(['diff', '--stat=100', ...compare], { maxBytes: 1024 * 1024 });
+        const statRun = await running.statRun;
         if (failed(statRun)) incomplete.push(`The list of changed files is not whole (${stopped(statRun)}).`);
         const stat = escaped(statRun.stdout.toString('utf8'));
-        const whole = await inWs(['diff', ...compare], { maxBytes: DIFF_MAX + 1 });
+        const whole = await running.whole;
         /* Cut by its size, or stopped for any other reason: either way not all of it is shown. */
         const cut = failed(whole) || whole.stdout.length > DIFF_MAX;
         if (failed(whole) && whole.killed !== 'size') incomplete.push(`The changes could not be shown whole (${stopped(whole)}).`);
         const diff = escaped(whole.stdout.subarray(0, DIFF_MAX).toString('utf8'));
         /* AGAINST HISTORY THE DIFF CANNOT SHOW: a file added then removed,
            a huge blob, more commits than a page lists. */
-        const sizeRun = await inWs(['rev-list', '--objects', '--disk-usage', '--stdin', '--end-of-options'], { input: revs });
+        const sizeRun = await running.sizeRun;
         const sizeText = sizeRun.stdout.toString('latin1').trim();
         const newBytes = !failed(sizeRun) && /^\d+$/.test(sizeText) ? Number(sizeText) : null;
         if (newBytes === null) incomplete.push(`The size of the new data could not be measured (${stopped(sizeRun)}).`);
-        const objects = await inWs(['rev-list', '--objects', '--stdin', '--end-of-options'], { input: revs, maxBytes: 32 * 1024 * 1024 });
+        const objects = await running.objects;
         if (failed(objects)) incomplete.push(`Not every new file could be weighed (${stopped(objects)}).`);
         const pathOf = new Map();
         for (const line of objects.stdout.toString('utf8').split('\n')) { const sp = line.indexOf(' '); if (sp === 40) pathOf.set(line.slice(0, 40), line.slice(41)); }
@@ -546,8 +763,8 @@ export class GitReview {
                 .map(([id, , size]) => ({ id, size: Number(size), path: escaped(pathOf.get(id) ?? '').slice(0, 300) }))
                 .sort((a, b) => b.size - a.size).slice(0, LARGEST);
         }
-        const touchedRun = await inWs(['log', '--name-only', '-z', '--format=', '--stdin', '--end-of-options'], { input: revs, maxBytes: 16 * 1024 * 1024 });
-        const netRun = await inWs(['diff', '--name-only', '-z', '--no-renames', ...compare], { maxBytes: 16 * 1024 * 1024 });
+        const touchedRun = await running.touchedRun;
+        const netRun = await running.netRun;
         if (failed(touchedRun) || failed(netRun)) incomplete.push(`The files changed and changed back could not all be found (${stopped(failed(touchedRun) ? touchedRun : netRun)}).`);
         const touched = new Set(touchedRun.stdout.toString('utf8').split('\0').map((p) => p.replace(/^\n+/, '')).filter(Boolean));
         const net = new Set(netRun.stdout.toString('utf8').split('\0').filter(Boolean));
@@ -651,7 +868,20 @@ export class GitReview {
                 if (line && ours && (flag === '+' || /forced update/.test(summary))) throw new GitFailure(502, 'forced', 'The push was not as reviewed (a forced update): look at the remote.', { alert: true });
                 if (line && !ours && (flag === ' ' || flag === '*' || flag === '+')) throw new GitFailure(502, 'forced', 'The push was not as reviewed (another source): look at the remote.', { alert: true });
                 if (flag === '!' && /stale info|fetch first|non-fast-forward/.test(summary)) throw new GitFailure(409, 'remote-moved', `Not sent: the remote's ${target} moved (the lease was refused). Look again.`, { ai: `origin/${target} moved: pull origin/${target} first` });
-                if (pushed.code !== 0 || !(flag === ' ' || flag === '*')) throw new GitFailure(502, 'refused', `The remote refused: ${explain(pushed.stderr) || firstLine(summary)}`);
+                if (pushed.code !== 0 || !(flag === ' ' || flag === '*')) {
+                    /* Why, as the remote put it: its verdict on our ref ("[remote rejected] (pre-receive hook
+                       declined)") rather than git's closing "failed to push some refs", and what its hooks
+                       said -- to the owner, and to the agent that can fix the commit. */
+                    const verdict = flag === '!' && summary ? firstLine(summary) : '';
+                    const hooks = remoteSaid(pushed.stderr);
+                    const why = verdict || explain(pushed.stderr) || firstLine(summary);
+                    const said = hooks ? `; it said: "${hooks.split('\n').join(' / ').replace(/"/g, "'")}"` : '';
+                    const failure = new GitFailure(502, 'refused', `The remote refused: ${why}${said}`, { detail: hooks, ai: `the remote refused the sending to ${target}: ${why}${said}` });
+                    /* All it said, when the summary left some out: put where the agent can read it (main.mjs). */
+                    const all = remoteAll(pushed.stderr);
+                    if (all && all !== hooks) failure.full = all;
+                    throw failure;
+                }
                 /* (5) The pushed commits enter the reference only as the remote's history. */
                 const after = await this.#refreshLocked(r, { branch: target, head });
                 return sent(after.ok ? {} : { refreshed: false, note: 'Sent; the reference was not refreshed.' });

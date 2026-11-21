@@ -41,17 +41,22 @@ test('a conversation built from the ready-made machine goes through its three st
     process.env.FAKE_VM_STEP_SECONDS = '0.8';
     const seen = [];
     let watching = true;
+    /* When the server said it ready: the build itself is timed, not this page catching up after it (the terminal
+       found, its size settled -- seconds of their own on a small, busy test machine). */
+    let readyAt = 0;
     const watch = (async () => {
         while (watching) {
             const c = (await me.api('/api/conversations').catch(() => ({ body: [] }))).body?.find?.((x) => x.name === 'quick');
             if (c?.step && seen.at(-1) !== c.step) seen.push(c.step);
+            if (c?.phase === 'ready' && !readyAt) readyAt = Date.now();
             await wait(80);
         }
     })();
     const started = Date.now();
-    await me.create('quick');
-    const took = (Date.now() - started) / 1000;
-    watching = false; await watch;
+    /* The watch is stopped whatever happens: left looping after a failed create, it kept the test
+       process alive for ever (seen: the file hung 52 minutes instead of failing). */
+    try { await me.create('quick'); } finally { watching = false; await watch; }
+    const took = ((readyAt || Date.now()) - started) / 1000;
     assert.deepEqual(seen, ['Starting the machine', 'Preparing the machine', 'Installing Shell (already on the machine)']);
     assert.ok(took < LONG_LAUNCH, `built in ${took.toFixed(1)} s, under the ${LONG_LAUNCH} s a launch alone takes here`);
     const log = readFileSync(process.env.FAKE_VM_LOG, 'utf8');

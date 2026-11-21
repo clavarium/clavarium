@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import WebSocket from 'ws';
-import { attachBridge, sameOrigin, CLOSE_ENDED, CLOSE_TAKEN, CLOSE_REVOKED } from '../server/bridge.mjs';
+import { attachBridge, sameOrigin, CLOSE_ENDED, CLOSE_TAKEN, CLOSE_REVOKED, CLOSE_ASLEEP } from '../server/bridge.mjs';
 
 /* The next piece of terminal output a screen receives (the bridge's own
    words, such as "ready", are text frames and are skipped). */
@@ -261,4 +261,25 @@ test('a device at a terminal is put out as soon as its right is taken back: noth
     ws2.send(Buffer.from('rm -rf /\r'));
     assert.equal((await closed2)[0], CLOSE_REVOKED);
     assert.ok(!term.written.includes('rm -rf /\r'));
+});
+
+test('a page that comes back by itself to a machine put to sleep does not wake it; a person opening it does (16-11)', async (t) => {
+    const asleep = new Set(['dozy']);
+    const { terminals, open } = await bench(t, { asleep: (name) => asleep.has(name) });
+    const back = open('c=dozy&cols=80&rows=24&resume=1');
+    const [code] = await once(back, 'close');
+    assert.equal(code, CLOSE_ASLEEP);
+    assert.equal(terminals.made.length, 0, 'nothing was opened');
+    /* A machine that runs: a page coming back takes its terminal as usual. */
+    const awake = open('c=busy&cols=80&rows=24&resume=1');
+    await once(awake, 'open');
+    for (let i = 0; i < 100 && terminals.made.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(terminals.made.length, 1);
+    awake.close();
+    /* The person asks (no resume): it is opened, which wakes it. */
+    const asked = open('c=dozy&cols=80&rows=24');
+    await once(asked, 'open');
+    for (let i = 0; i < 100 && terminals.made.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(terminals.made.length, 2);
+    asked.close();
 });

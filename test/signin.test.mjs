@@ -109,7 +109,7 @@ test('a mailbox is saved only once it has been read; its password is sealed and 
     const boxes = new SignInMailboxes({ store: new Store(join(dir, 'signin.json')), vault: new Vault(join(dir, 'vault.key')), rules: (name) => (name === 'chat' ? RULES : undefined), reader });
     await assert.rejects(boxes.set('chat', { host: 'imap.example.com', user: 'u', password: 'wrong' }));
     assert.equal(boxes.settings('chat').configured, false);
-    assert.deepEqual(await boxes.set('chat', { host: 'imap.example.com', user: 'u', password: 'right' }), { available: true, configured: true, host: 'imap.example.com', port: 993, user: 'u' });
+    assert.deepEqual(await boxes.set('chat', { host: 'imap.example.com', user: 'u', password: 'right' }), { available: true, configured: true, mailbox: null, host: 'imap.example.com', port: 993, user: 'u', mailboxes: [] });
     assert.ok(!readFileSync(join(dir, 'signin.json'), 'utf8').includes('right'));
     /* Polled by a page: the mailbox is not asked each time. */
     reads = 0;
@@ -118,4 +118,23 @@ test('a mailbox is saved only once it has been read; its password is sealed and 
     await assert.rejects(boxes.set('plain', { host: 'imap.example.com', user: 'u', password: 'right' }), /no sign-in by mail/);
     assert.equal((await boxes.set('chat', { host: '' })).configured, false, 'an empty host removes the mailbox');
     assert.deepEqual(await boxes.recent('chat'), []);
+});
+
+test("a sign-in mailbox chosen among the mailboxes of Assets: read once to check, read with its settings, never its password to the page (20-11, #395)", async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-signin-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const read = [];
+    const reader = async (settings) => { read.push(settings); if (settings.password !== 'token') throw new Error('refused'); return [{ link: 'https://login.example.com/x' }]; };
+    const assets = [{ name: 'work-mail', host: 'imap.gmail.com', port: 993, user: at('me', 'example.com'), provider: 'google' }];
+    const mailboxes = { list: () => assets, readSettings: (name) => { const m = assets.find((x) => x.name === name); if (!m) throw new Error('No such mailbox.'); return { ...m, password: 'token' }; } };
+    const boxes = new SignInMailboxes({ store: new Store(join(dir, 'signin.json')), vault: new Vault(join(dir, 'vault.key')), rules: () => RULES, reader, mailboxes: () => mailboxes });
+    assert.deepEqual(boxes.settings('chat').mailboxes, [{ name: 'work-mail', user: at('me', 'example.com') }], 'offered by name and address only');
+    await assert.rejects(boxes.set('chat', { mailbox: 'nope' }), /No such mailbox/);
+    const s = await boxes.set('chat', { mailbox: 'work-mail' });
+    assert.equal(s.configured, true); assert.equal(s.mailbox, 'work-mail'); assert.equal(s.host, 'imap.gmail.com');
+    assert.equal(read.at(-1).provider, 'google', 'read as the asset is read (a Google one too)');
+    assert.ok(!readFileSync(join(dir, 'signin.json'), 'utf8').includes('token'), 'nothing of its secret kept here');
+    assert.ok(!JSON.stringify(s).includes('token'));
+    assert.deepEqual(await boxes.recent('chat'), [{ link: 'https://login.example.com/x' }]);
+    assert.equal((await boxes.set('chat', { host: '' })).configured, false, 'removed as before');
 });

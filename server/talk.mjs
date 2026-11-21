@@ -17,7 +17,8 @@
  *                            until the tool has read, never while somebody
  *                            types there, never into a machine that does not
  *                            run (the message waits, and the line is typed
- *                            when it runs again).
+ *                            when it runs again); still unread a while
+ *                            after, typed again by itself (RENUDGE_MS).
  *   agent-asked, waiting     the owner's devices are alerted.
  *   agent-showed             a file under /work or in an attached folder is
  *                            opened from the page; any other is said to be
@@ -60,8 +61,10 @@
  */
 import { posix, join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, lstatSync, rmSync } from 'node:fs';
-import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
+import { mkdirSync, lstatSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { install, Parley, WAKE, URGENT, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
+import { featureWords } from './features.mjs';
+import { settingsWords } from './settingswords.mjs';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
 import { Refusal, SESSION } from './conversations.mjs';
@@ -69,7 +72,13 @@ import { SOCKET } from './tmux.mjs';
 import { isConversationName } from './names.mjs';
 
 export const FOLDER = '.parley';
+/* What the owner may choose for archiving a thread (setSplit): messages from 500 to 100,000, days from half a day to a year. */
+export const SPLIT_MESSAGES = Object.freeze([500, 100_000]);
+export const SPLIT_DAYS = Object.freeze([0.5, 365]);
 const IN_MACHINE = `/work/${FOLDER}`;
+/* Texts this server gives the tool to read (keepText): kept this many days, this many at most of one name. */
+export const KEPT_TEXT_DAYS = 7;
+export const KEPT_TEXTS = 10;
 /* A part of the thread as the page asks for it (?last=200, ?days=3, ?before=ID, ?from=ID, ?since=CURSOR): Parley's options, or null. */
 export function partOf(query) {
     if (!query || typeof query !== 'object') return null;
@@ -106,15 +115,29 @@ export const HEALTH_KNOWN_MS = 150_000;
    end of a command: such a last ";" is written "\;", which tmux gives back
    as ";" (tried). */
 export const enterCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Enter'];
+/* Escape, alone: what the Esc key of the page's key row sends -- a tool's current turn stopped (an API key that may act, apikeys.mjs). */
+export const escapeCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Escape'];
+/* A PANE SCROLLED BACK IS IN COPY MODE (`mouse on`: the wheel of any screen puts it there, and it stays
+   there when that screen goes away): the keys of a line typed then are copy-mode commands, the line never
+   reaches the tool and its Enter only leaves the mode (tried with tmux 3.4). The mode is left first, in
+   the same command -- nothing is done to a pane that is not in a mode (no shell: -F reads a format). */
+const LEAVE_MODE = ['if-shell', '-F', '-t', PANE, '#{pane_in_mode}', `send-keys -t ${PANE} -X cancel`, ';'];
 export function typeCommand(line) {
     const text = line.endsWith(';') ? `${line.slice(0, -1)}\\;` : line;
-    return ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];
+    return ['tmux', '-L', SOCKET, ...LEAVE_MODE, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];
 }
+/* Where the line is in typeCommand's argument vector. */
+export const TYPED_AT = 3 + LEAVE_MODE.length + 5;
 /* Added to Parley's invitation, this server's own sentence: a branch can be
    checked out in one folder only, and /tmp is emptied when the machine
    restarts, with the work left there. Typed in a terminal: no quote, no
    backquote, nothing a shell would run. */
-export const BRANCHES = 'Check out your branches in the main folder of the repository or under /work, never in /tmp: a branch can be checked out in one folder only, and /tmp is emptied when the machine restarts.';
+export const BRANCHES = 'Check out your branches in the main folder of the repository or under /work, never in /tmp: a branch can be checked out in one folder only, and /tmp is emptied when the machine restarts. The checks before sending run in a copy made at exactly the commit to send (CLAVARIUM_CHECK_COPY, CLAVARIUM_CHECK_HEAD): never write a check that needs the main folder on a branch or at that commit.';
+/* THE LINE TYPED AGAIN BY ITSELF (17-11): one line lost (a pane in copy mode, a tool drawing a modal)
+   silenced every later one, the tool "told" till it read. A message still unread this long after its
+   line was typed has it typed again, these long after the last -- three times at most, then no more
+   (never a reminder without end): the owner's "Remind it" is there. Kept in its record: a restart of this server goes on. */
+export const RENUDGE_MS = Object.freeze([60_000, 180_000, 600_000]);
 /* After a restart, the tool is given this long to start before REREAD is typed. */
 export const REREAD_AFTER_MS = 10_000;
 /* READY, NOT JUST STARTED. The tool starts when its terminal is opened, which
@@ -137,13 +160,17 @@ export const SYSTEM_MAX = 50;
    branch: the owner allowed each one. The owner may move a kind to another
    level (Settings); nothing else of a line changes with it. */
 export const LEVELS = Object.freeze(['needs-you', 'news', 'trace']);
+/* The file a tool puts beside its chat to be restarted (see restartAsked). */
+export const RESTART_ASKED = 'restart-asked';
 export const EVENT_LEVELS = Object.freeze({
     sent: 'news',
+    'room-hops': 'news',
     refused: 'needs-you',
     'sent-by-hand': 'news',
     origin: 'trace',
     wakeup: 'trace',
     'machine-problem': 'needs-you',
+    'machine-ok': 'news',
     restarted: 'news',
     /* New tools in its machine that its tool reads only when it starts: a restart recommended (main.mjs). */
     'tools-updated': 'news',
@@ -153,6 +180,16 @@ export const EVENT_LEVELS = Object.freeze({
     'docket-failed': 'needs-you',
     'docket-unhandled': 'needs-you',
     'docket-reminder': 'trace',
+    /* Its tool signs in through another conversation's browser (signinhelp.mjs, 15-11): handed over, signed in, or back to the person. */
+    'signin-help': 'news',
+    /* A Tether call its agent asks the owner to allow (tethers.mjs): offered in the thread with
+       Accept / Refuse, the same block a machine problem uses. Its closing line (decided here, from
+       Assets, or by the agent) is a trace that carries the call's id, so the buttons close with it. */
+    'tether-demande': 'needs-you',
+    'tether-done': 'trace',
+    /* Something that happened later to what its agent did (a mail that came back, an invitation declined):
+       news, raised to needs-you when it failed or was refused (tethers.mjs). */
+    'tether-notice': 'news',
 });
 const TONES = ['warn', 'bad'];
 /* Bounds of a line: its text, its group (topic), what the grouped line says of it (brief), its buttons. */
@@ -161,6 +198,24 @@ const TOPIC_MAX = 40;
 const BRIEF_MAX = 60;
 const ACTIONS_MAX = 4;
 const ACTION = /^[a-z]{1,20}(:[a-z0-9][a-z0-9._-]{0,63})?$/;
+const REQUEST_MAX = 8000;
+const OUTCOMES = ['yes', 'always', 'no', 'timeout', 'withdrawn', 'stopped'];
+/* A LINE'S TEXT IN THE READER'S WORDS (Parley 0.17.71): plain text, or `{k, v, t}` -- a word of Parley's
+   dictionary, its values (text, a number, or such a word again), and `t`, the plain English an older screen
+   says. Kept bounded: `t` as long as a plain text may be; a word without its `t` is none. */
+const WORD = /^[a-z0-9-]{1,60}$/;
+function lineWords(x, max, depth = 0) {
+    if (typeof x === 'string') { const t = x.trim(); return t ? t.slice(0, max) : null; }
+    if (typeof x === 'number') return Number.isFinite(x) ? x : null;
+    if (!x || typeof x !== 'object' || Array.isArray(x) || depth > 3 || typeof x.k !== 'string' || !WORD.test(x.k)) return null;
+    const t = typeof x.t === 'string' ? x.t.trim().slice(0, max) : '';
+    if (!t) return null;
+    const v = x.v && typeof x.v === 'object' && !Array.isArray(x.v)
+        ? Object.fromEntries(Object.entries(x.v).filter(([n]) => /^[a-z]{1,20}$/.test(n)).slice(0, 8).map(([n, y]) => [n, lineWords(y, EVENT_TEXT_MAX, depth + 1)]).filter(([, y]) => y !== null)) : null;
+    return { k: x.k, ...(v && Object.keys(v).length ? { v } : {}), t };
+}
+/* A line's text, topic or brief as given: text, or such a word; null when it says nothing. */
+const lineSaid = (x, max) => lineWords(x && typeof x === 'object' ? x : String(x ?? ''), max);
 /* Where the person's files go, in the bridge folder; one folder per file, named by an id. */
 const FILES = 'files';
 const ATTACHED = new RegExp(`^/work/\\${FOLDER}/${FILES}/([0-9a-f-]{36})/([^/]+)$`);
@@ -180,9 +235,9 @@ export const windowOf = (choice) => { const [kind, n] = String(choice).split(':'
 /* What the page may ask for: a part of the thread (Parley's read(options)), its own cursor for "since". */
 const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
-    #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #listening = new Map(); #every; #now;
-    #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
-    #terminal; #health; #ranAt = new Map(); #kept;
+    #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #spoke; #inRoom; #listening = new Map(); #every; #now;
+    #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #ticking = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
+    #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret; #log;
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
@@ -192,16 +247,20 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null }) {
-        this.#terminal = terminal; this.#health = health; this.#kept = keptDir;
-        this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null, log = (line) => console.log(line) }) {
+        this.#log = log;
+        this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen; this.#dropSecret = dropSecret;
+        this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#spoke = spoke; this.#inRoom = inRoom; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
         this.#timer = setInterval(() => { void this.#tick(); }, Math.min(listenEveryMs, 1000));
         this.#timer.unref?.();
     }
 
+    /* One conversation's record, as kept (18-11: the whole list was made again -- sorted, each with its tool -- for each
+       path a message showed: half a second for one page of a long thread on the owner's server). */
+    #one(name) { return typeof this.#conversations.get === 'function' ? this.#conversations.get(name) : this.#conversations.list().find((x) => x.name === name); }
     #known(name) {
-        const c = isConversationName(name) ? this.#conversations.list().find((x) => x.name === name) : undefined;
+        const c = isConversationName(name) ? this.#one(name) : undefined;
         if (!c) throw new Refusal(404, 'No such conversation.');
         return c;
     }
@@ -256,7 +315,10 @@ export class Talk {
         const lang = s.lang === 'device' ? String(device ?? 'en') : s.lang;
         const words = texts(lang, s.own);
         this.#lastLang = words.lang;
-        return words;
+        /* The words of Features (features.mjs) and of the settings pages (settingswords.mjs) for this language, the owner's own over them as over the others. */
+        const more = { ...featureWords(words.lang), ...settingsWords(words.lang) };
+        for (const [key, value] of Object.entries(s.own ?? {})) if ((key.startsWith('features-') || key.startsWith('set-')) && typeof value === 'string') more[key] = value.slice(0, 500);
+        return { ...more, ...words };
     }
 
     /* ---- what the tool posts ---- */
@@ -267,11 +329,15 @@ export class Talk {
             const inner = p.slice('/work/'.length);
             /* The bridge folder is not the tool's to show -- but for the files the person attached there. */
             if (!inner || inner === FOLDER || (inner.startsWith(`${FOLDER}/`) && !ATTACHED.test(p))) return null;
-            return this.#conversations.list().find((x) => x.name === name)?.work === 'kept' ? `work:${inner}` : null;
+            return this.#one(name)?.work === 'kept' ? `work:${inner}` : null;
         }
         const m = /^\/resources\/([a-z][a-z0-9-]{0,31})\/(.+)$/.exec(p);
         return m && this.#resources.of(name).some((x) => x.name === m[1]) ? `${m[1]}:${m[2]}` : null;
     }
+
+    /* How this conversation's chat opens a path of its own ("work:report.html"), or null: what a room it is in
+       opens of what it shows there (rooms.mjs), with its rights. */
+    reachOf(name, path) { return this.#reach(name, path); }
 
     #parley(name, reacted = () => {}) {
         return new Parley(this.#dir(name), {
@@ -280,6 +346,13 @@ export class Talk {
             on: (event) => {
                 if (event.type === 'person-reacted') { reacted(event); return; }
                 if (event.type === 'person-wrote') { this.#want(name); return; }
+                /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
+                /* Answered in a room it is in (#268): the room takes it, signed by where it came from (rooms.mjs). */
+                /* A file it shows there too (06-11), once its Parley carries `room` on a show: opened through this conversation. */
+                if (['agent-said', 'agent-asked', 'agent-doing', 'agent-showed'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : event.type === 'agent-asked' ? 'ask' : event.type === 'agent-showed' ? 'show' : 'say'); } catch { /* the room's */ } return; }
+                if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { asked: event.type === 'agent-asked' });
+                /* What it is doing: said by a box that was just spoken to, so nobody waits in silence. */
+                if (event.type === 'agent-doing') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { doing: true });
                 const words = texts(this.#lastLang, this.settings().own);
                 if (event.type === 'agent-asked') this.#alert({ title: fill(words['alert-asks'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });
                 if (event.type === 'agent-status' && event.message.state === 'waiting') this.#alert({ title: fill(words['alert-waits'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });
@@ -302,11 +375,12 @@ export class Talk {
         /* The machine's lines go among the messages, where they happened. */
         const lines = (record.system ?? []).map((l) => ({ from: 'system', kind: 'system', choices: [], ...l }));
         const asked = partOf(part);
-        if (asked?.state) return { on: true, possible, tools, wake };
+        /* When its thread is archived (split), with the rest of its chat's state: a small file read. */
+        if (asked?.state) return { on: true, possible, tools, wake, split: this.split(name) };
         if (!asked) {
             const read = this.#parley(name).read();
             const messages = [...read.messages, ...lines].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-SHOWN_MAX);
-            return { on: true, possible, tools, ...read, messages, wake };
+            return { on: true, possible, tools, ...read, messages, wake, split: this.split(name) };
         }
         /* Its own lines change apart from the thread (and their buttons with what was marked seen): their stamp is part of the cursor. */
         const stamp = createHash('sha256').update(JSON.stringify([record.system ?? [], this.#health?.of?.(name)?.seenAt ?? null])).digest('hex').slice(0, 10);
@@ -324,6 +398,26 @@ export class Talk {
     search(name, text) {
         if (!this.of(name).on) throw new Refusal(409, 'Its chat is off.');
         return this.#parley(name).search(String(text ?? '').slice(0, 200));
+    }
+
+    /* WHEN ITS THREAD IS ARCHIVED (Parley's split, "The archive" in its protocol): its older messages go into
+       volumes, nothing deleted, every part still read as one thread. The owner's choice per conversation, kept in
+       its bridge folder (.parley/settings.json): { messages: N } once the thread holds N lines, { days: D } for
+       volumes of D days at most, or false (never). Parley's own default is { messages: 5000 }. */
+    split(name) { this.#known(name); return this.#parley(name).split(); }
+    setSplit(name, { messages, days, off } = {}) {
+        if (this.#known(name).work !== 'kept') throw new Refusal(409, 'Its work folder is not kept here: its chat has no thread to archive.');
+        let value;
+        if (off === true) value = false;
+        else if (messages !== undefined) {
+            if (!Number.isInteger(messages) || messages < SPLIT_MESSAGES[0] || messages > SPLIT_MESSAGES[1]) throw new Refusal(400, `"messages" is a whole number from ${SPLIT_MESSAGES[0]} to ${SPLIT_MESSAGES[1]}.`);
+            value = { messages };
+        } else if (days !== undefined) {
+            if (typeof days !== 'number' || !Number.isFinite(days) || days < SPLIT_DAYS[0] || days > SPLIT_DAYS[1]) throw new Refusal(400, `"days" is a number from ${SPLIT_DAYS[0]} to ${SPLIT_DAYS[1]}.`);
+            value = { days };
+        } else throw new Refusal(400, 'Say {messages}, {days} or {off: true}.');
+        this.#parley(name).setSplit(value);
+        return { split: this.split(name) };
     }
 
     /* What the tool reads of its chat after a restart (REREAD), the owner's choice of WINDOWS. */
@@ -351,7 +445,8 @@ export class Talk {
             /* Its last message, either way: the list says when it last spoke, and what (app.js, Recent). */
             /* What the person or the tool said -- never a line of this server (a restart, a machine put to sleep):
                those are no one using it, and would lift it in Recent. */
-            const last = (now.messages ?? []).filter((m) => m.kind !== 'doing' && (m.from === 'person' || m.from === 'agent')).at(-1);
+            /* Nor what was said in a room (03-11): the room moves up in Recent, not each conversation in it. */
+            const last = (now.messages ?? []).filter((m) => m.kind !== 'doing' && !m.room && (m.from === 'person' || m.from === 'agent')).at(-1);
             /* IT NEEDS ITS OWNER while a question of it is open (neither answered nor closed) and the owner wrote
                nothing since -- but the answer to ANOTHER question, which says nothing of this one (two asked, one
                answered: the other still waits, seen 22-10); or while it said it waits, and the owner wrote nothing since. */
@@ -363,13 +458,21 @@ export class Talk {
             const asks = open.some((q) => !person.some((p) => p.at >= q.at && !(p.answers && p.answers !== q.id)));
             const needs = asks || (now.status?.state === 'waiting' && String(now.status.at ?? '') > personAt);
             /* What it said it does (status, doing): it is at work, even without a message. */
-            const stepAt = (now.steps ?? []).map((m) => m.at).sort().at(-1) ?? null;
+            const stepAt = (now.steps ?? []).filter((m) => !m.room).map((m) => m.at).sort().at(-1) ?? null;
             return { waiting: now.waiting, state: now.status?.state ?? null, needs, ...(stepAt ? { stepAt } : {}), ...(last ? { lastAt: last.at, lastFrom: last.from === 'person' ? 'person' : 'agent', lastText: String(last.short || last.text || '').replace(/\s+/g, ' ').trim().slice(0, 90) } : {}) };
         } catch { return { waiting: 0, state: null }; }
     }
 
     /* Is its chat on? (cheap: the record alone) */
     isOn(name) { return this.#store.get(name)?.on === true; }
+
+    /* ITS TOOL ASKS TO BE RESTARTED (02-11): a file it puts in its chat's folder (RESTART_ASKED); the server
+       restarts it once its turn has ended -- the one command a tool may ask of the server, nothing typed. */
+    restartAsked(name) {
+        if (this.#store.get(name)?.on !== true) return false;
+        try { return lstatSync(join(this.#dir(name), RESTART_ASKED), { throwIfNoEntry: false })?.isFile() === true; } catch { return false; }
+    }
+    restartTaken(name) { try { rmSync(join(this.#dir(name), RESTART_ASKED), { force: true }); } catch { /* gone already */ } }
 
     /* Its tool's pulse (Parley): { busy, at }, or null. Where the chat is off: null. */
     pulse(name) {
@@ -391,17 +494,22 @@ export class Talk {
         return this.of(name);
     }
 
-    /* Types a line and Enter in the tool's terminal. Through the terminal the
-       bridge keeps open into the same tmux pane when there is one (nothing
-       sent into the machine: the bytes go down a channel already open), or
-       else one command in the machine. */
+    /* Types a line and Enter in the tool's terminal. BY ONE COMMAND IN THE MACHINE FIRST (17-11): it
+       leaves copy mode before it types (typeCommand), which the terminal the bridge keeps open cannot --
+       bytes down it are copy-mode keys while the pane is scrolled back, and the line was lost, said
+       typed. That terminal, into the same tmux pane, when the command fails. Each line said in the log,
+       and each one lost, with why. */
     async #type(name, line) {
+        const what = line === WAKE ? 'wake' : line === URGENT ? 'urgent' : line.length > 60 ? `${line.slice(0, 60)}...` : line;
         await this.#warm(name);
+        const ran = await this.#vms.exec(name, typeCommand(line), { timeoutMs: 30_000 }).catch((error) => ({ code: -1, stderr: error?.message }));
+        if (ran.code === 0) { this.#ranAt.set(name, this.#now()); this.#log(`talk: ${name}: typed (${what})`); return true; }
+        const why = `exit ${ran.code}${ran.stderr ? `: ${String(ran.stderr).trim().slice(0, 200)}` : ''}`;
         const down = this.#terminal?.open(name) ? await Promise.resolve(this.#terminal.type(name, line, ENTER_AFTER_MS)).catch(() => false) : false;
-        if (down === true) { this.#ranAt.set(name, this.#now()); return true; }
         /* The line went, its Enter did not (the channel closed meanwhile): the Enter alone, never the line twice. */
-        const ok = (await this.#vms.exec(name, down === 'enter' ? enterCommand() : typeCommand(line), { timeoutMs: 30_000 })).code === 0;
+        const ok = down === true || (down === 'enter' && (await this.#vms.exec(name, enterCommand(), { timeoutMs: 30_000 }).catch(() => ({ code: -1 }))).code === 0);
         if (ok) this.#ranAt.set(name, this.#now());
+        this.#log(ok ? `talk: ${name}: typed down its terminal (${what}), the command in the machine failed (${why})` : `talk: ${name}: NOT typed (${what}): ${why}; ${this.#terminal?.open(name) ? 'its terminal refused too' : 'no terminal open'}`);
         return ok;
     }
 
@@ -433,8 +541,18 @@ export class Talk {
         return { ...this.of(name), invited: text };
     }
 
+    /* The voice boxes of a conversation, as Parley names them to its agent and its screen (#215). */
+    speakers(name, list) { try { this.#parley(name).setSpeakers(list); } catch { /* its folder is not there yet */ } }
+    /* The rooms it is in, and who is there (#268): told to its agent, which answers there by their ids. */
+    rooms(name, list) { try { this.#parley(name).setRooms(list); } catch { /* its folder is not there yet */ } }
+
+    /* Whether its chat is on, without reading the thread (`of` builds it all: too dear before each message). */
+    #on(name) { return this.#known(name).work === 'kept' && this.#store.get(name)?.on === true; }
+
+    /* `extra.quick` (the page's own send, 14-11): answered as soon as the message is written -- its tool told
+       after, by itself -- so that the message shows at once; the page draws the thread again anyway. */
     async say(name, text, answers, files, via, extra) {
-        if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
+        if (!this.#on(name)) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
         const given = files === undefined || files === null ? [] : files;
         if (!Array.isArray(given) || given.length > FILES_MAX) throw new Refusal(400, `A message has ${FILES_MAX} files at most.`);
         /* Only files put here by `attach`: their paths are this server's, and each is there. Each is
@@ -448,7 +566,14 @@ export class Talk {
             const note = item && typeof item === 'object' && typeof item.note === 'string' ? item.note : '';
             return { path, name: m[2], size: info.size, ...(note ? { note } : {}) };
         });
-        try { this.#parley(name).say(text ?? '', answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        /* A secret pasted in the message (a token, a key) is lifted into a
+           short-lived store, and the message keeps only a reference -- the
+           thread never holds the value (secret-scan.mjs, secrets.mjs). It must
+           never lose a message: on any trouble the text is sent as it came. */
+        let said = text ?? '';
+        if (this.#screen && said) { try { said = await this.#screen(name, said); } catch { said = text ?? ''; } }
+        try { this.#parley(name).say(said, answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about, by: extra.by, room: extra.room } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        if (extra?.quick === true) { void this.#wake(name).catch(() => {}); return { ok: true, told: 'later' }; }
         const told = await this.#wake(name);
         return { ...this.of(name), told };
     }
@@ -466,6 +591,15 @@ export class Talk {
         return { ...this.of(name), told };
     }
 
+    /* THE OWNER PINS a message of the chat, either side (`on` false: unpinned). Kept at the top of the
+       chat, 5 at most (Parley), and read again by the tool after a restart: it is not woken for it. */
+    async pin(name, to, on = true) {
+        if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
+        if (typeof to !== 'string' || typeof on !== 'boolean') throw new Refusal(400, 'Say which message (to), and on: true or false.');
+        try { this.#parley(name).pin(to, on); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        return this.of(name);
+    }
+
     /* A FILE THE PERSON ATTACHES, before the message that carries it: put in
        the bridge folder, in a folder of its own, under the name it had.
        Resolves with where the tool finds it. */
@@ -481,6 +615,32 @@ export class Talk {
         mkdirSync(join(this.#dir(name), FILES, id));
         const kept = await importFile(join(this.#dir(name), FILES), id, String(fileName ?? ''), request);
         return { path: `${IN_MACHINE}/${FILES}/${id}/${kept.name}`, name: kept.name, size: kept.size };
+    }
+
+    /* A TEXT THIS SERVER GIVES THE TOOL TO READ (all a git remote said when it refused a sending): put
+       where the person's files go, in a folder of its own. Resolves with where the tool finds it, or
+       null when the chat is off or its folder is not as it should be. */
+    keepText(name, fileName, text) {
+        if (!this.of(name).on) return null;
+        const own = (path) => { const i = lstatSync(path, { throwIfNoEntry: false }); return i === undefined || (i.isDirectory() && !i.isSymbolicLink()); };
+        const dir = this.#dir(name);
+        if (!lstatSync(dir, { throwIfNoEntry: false }) || !own(dir) || !own(join(dir, FILES))) return null;
+        if (!lstatSync(join(dir, FILES), { throwIfNoEntry: false })) mkdirSync(join(dir, FILES));
+        if (!own(join(dir, FILES))) return null;
+        const id = randomUUID();
+        const file = String(fileName).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80) || 'text.txt';
+        /* Those of the same name given before go after KEPT_TEXT_DAYS, and beyond the newest KEPT_TEXTS. */
+        const before = [];
+        for (const d of readdirSync(join(dir, FILES), { withFileTypes: true })) {
+            if (!d.isDirectory()) continue;
+            const f = lstatSync(join(dir, FILES, d.name, file), { throwIfNoEntry: false });
+            if (f?.isFile() && readdirSync(join(dir, FILES, d.name)).length === 1) before.push({ name: d.name, at: f.mtimeMs });
+        }
+        before.sort((a, b) => b.at - a.at);
+        before.forEach((x, i) => { if (i >= KEPT_TEXTS - 1 || Date.now() - x.at > KEPT_TEXT_DAYS * 86_400_000) rmSync(join(dir, FILES, x.name), { recursive: true, force: true }); });
+        mkdirSync(join(dir, FILES, id));
+        writeFileSync(join(dir, FILES, id, file), Buffer.isBuffer(text) ? text : String(text ?? ''), { flag: 'wx', mode: 0o644 });
+        return `${IN_MACHINE}/${FILES}/${id}/${file}`;
     }
 
     /* Whether a file (as the page opens it: "work:report.html") is one of
@@ -506,21 +666,29 @@ export class Talk {
        Only where the chat is on; never counted as unread (the page counts
        the tool's messages only); at most SYSTEM_MAX kept. Resolves with the
        line kept, or null. `actions`: ids the page maps to buttons. */
-    event(name, { kind, text, level, tone, topic, brief, actions = [] } = {}) {
+    event(name, { kind, text, level, tone, topic, brief, actions = [], request, outcome, re } = {}) {
         if (!Object.hasOwn(EVENT_LEVELS, kind)) throw new RangeError(`No such kind of event: ${kind}`);
-        const said = String(text ?? '').trim();
-        if (!said) return null;
+        const said = lineSaid(text, EVENT_TEXT_MAX);
+        if (said === null) return null;
+        const group = lineSaid(topic, TOPIC_MAX);
+        const short = lineSaid(brief, BRIEF_MAX);
         /* The owner's choice when there is one (stored only where it differs from the kind's own). */
         const chosen = this.thread().levels[kind];
         const line = {
             /* Not `kind`: the page reads that of every message ('system' for these). */
             event: kind,
-            text: said.slice(0, EVENT_TEXT_MAX),
+            text: said,
             level: chosen !== EVENT_LEVELS[kind] ? chosen : LEVELS.includes(level) ? level : chosen,
             ...(TONES.includes(tone) ? { tone } : {}),
-            ...(topic ? { topic: String(topic).slice(0, TOPIC_MAX) } : {}),
-            ...(brief ? { brief: String(brief).slice(0, BRIEF_MAX) } : {}),
+            ...(group !== null ? { topic: group } : {}),
+            ...(short !== null ? { brief: short } : {}),
             actions: (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && ACTION.test(a)).slice(0, ACTIONS_MAX),
+            /* A request's card, as Parley draws it (demandes.mjs): plain data, bounded. */
+            ...(request && typeof request === 'object' && !Array.isArray(request) && JSON.stringify(request).length <= REQUEST_MAX ? { request } : {}),
+            /* What it is about (Parley's `re`, 06-11): the mail that came back, a chip after its text. */
+            ...(re && typeof re === 'object' && typeof re.ref === 'string' && re.ref.length <= 2000 && JSON.stringify(re).length <= 4000 ? { re } : {}),
+            /* How the call a line closes ended (tether-done): yes, always, no, timeout, withdrawn, stopped. */
+            ...(OUTCOMES.includes(outcome) ? { outcome } : {}),
         };
         return this.#line(name, line);
     }
@@ -538,27 +706,39 @@ export class Talk {
         const before = new Set(r.machineKeys ?? []);
         const fresh = serious.filter((p) => !before.has(p.key ?? p.text));
         if (keys.join('|') !== (r.machineKeys ?? []).join('|')) this.#store.put({ ...r, machineKeys: keys });
+        /* What went away, said once, the machine running: the lines that asked for it ask no more (app.js). */
+        const gone = record.state === 'Running' ? [...before].filter((k) => !keys.includes(k)) : [];
+        if (gone.length) {
+            const said = [...new Set(gone.map((k) => (/^disk:/.test(k) ? 'Its disk has room again.' : k === 'memory-low' ? 'Its memory is no longer short.' : /^oom:/.test(k) ? '' : 'What was wrong with its machine is gone.')).filter(Boolean))];
+            if (said.length) this.event(name, { kind: 'machine-ok', text: said.join(' '), topic: 'Machine', brief: 'Fixed' });
+        }
         if (fresh.length === 0) return;
         this.event(name, {
             kind: 'machine-problem',
             text: fresh.map((p) => p.text).join(' '),
             tone: fresh.some((p) => p.level === 'bad') ? 'bad' : 'warn',
             topic: 'Machine',
+            /* Its name on the one line a problem is in the simple view (Parley, 03-11). */
+            brief: fresh.some((p) => p.kind === 'memory' || /^oom:|^memory/.test(p.key ?? '')) ? 'Out of memory' : fresh.every((p) => p.kind === 'disk') ? 'Disk almost full' : fresh.every((p) => p.kind === 'link') ? 'Shared folder' : 'Machine problem',
             /* What can be done: a disk short of room is looked at (what takes it) or made larger --
                a restart frees nothing; otherwise more memory where memory is short, a restart, its terminal. */
-            actions: [...(fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal']), 'seen'],
+            /* A link in a folder (linkguard.mjs) is the folder's business: a restart changes nothing. */
+            actions: [...(fresh.every((p) => p.kind === 'link') ? [] : fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal']), 'seen'],
         });
     }
 
     /* Its machine was restarted, or built again (conversations.mjs): said in
        the thread, and, the tool having started again with nothing of the
        chat in mind, REREAD is typed with the person's next message (never alone). */
+    /* Set by the server (15-11): its machine restarted and nothing written since -- posted to its docket, which
+       tells it once it is free. (name, why) -> whether it was posted. */
+    restarted = null;
     renewed(name, text, started = true) {
         const r = this.#store.get(name);
         if (r?.on !== true) return;
         if (text) this.event(name, started ? { kind: 'restarted', text, topic: 'Restarted' } : { kind: 'machine-problem', text, tone: 'bad', topic: 'Machine', actions: ['restart', 'terminal'] });
         if (started) {
-            this.#store.put({ ...this.#store.get(name), reread: true });
+            this.#store.put({ ...this.#store.get(name), reread: true, renewedText: text || undefined });
             this.#nextTry.set(`reread:${name}`, this.#now() + this.#rereadAfter);
         }
     }
@@ -571,7 +751,10 @@ export class Talk {
         /* Typed only when the person has written since: a line typed while the tool
            reloads a long session after a restart sat in its input box, never sent
            (seen on a real deployment). By then the tool has long been ready. */
-        if (this.#parley(name).unread() === 0) return later(RETRY_MS);
+        /* Nothing written since (15-11, its owner's ask): its docket says it was restarted instead -- once its
+           tool is ready, as below -- and the docket tells it when it is free; never a line typed into a reload. */
+        const told = this.#parley(name).unread() === 0;
+        if (told && typeof this.restarted !== 'function') return later(RETRY_MS);
         if (!this.#conversations.awake().includes(name)) return later(RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return later(TYPING_QUIET_MS - quiet + 100);
@@ -584,16 +767,34 @@ export class Talk {
                 if (wait > 0) return later(wait + 100);
             }
         }
-        if (!(await this.#type(name, this.rereadLine()).catch(() => false))) return later(RETRY_MS);
+        if (told) {
+            if (!this.restarted(name, r.renewedText ?? '')) return later(RETRY_MS);
+            this.#store.put({ ...this.#store.get(name), reread: false, renewedText: undefined });
+            return 'told';
+        }
+        if (!(await this.#type(name, this.rereadLine()).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return later(RETRY_MS);
         /* Reading the whole thread, it reads what waits too: that line is not typed after it. */
-        const waits = this.#parley(name).unread() > 0;
-        this.#store.put({ ...this.#store.get(name), reread: false, ...(waits ? { pending: false, woke: true, why: null, again: false } : {}), typedAt: new Date(this.#now()).toISOString() });
+        const unread = this.#parley(name).unread(); const waits = unread > 0;
+        this.#store.put({ ...this.#store.get(name), reread: false, ...(waits ? { pending: false, woke: true, why: null, again: false, toldRead: this.#readCount(name), toldUnread: unread, renudged: 0 } : {}), typedAt: new Date(this.#now()).toISOString() });
         return 'typed';
     }
 
     /* ---- the line that wakes the tool ---- */
     /* Somebody typed in its terminal: nothing is typed over them. */
     typed(name) { this.#typedAt.set(name, this.#now()); }
+
+    /* How far the tool has read (Parley's read.json: messages read, archived ones counted). Grows only. */
+    #readCount(name) { try { return Math.max(0, Number(JSON.parse(readFileSync(`${this.#dir(name)}/read.json`, 'utf8')).lines) || 0); } catch { return 0; } }
+    /* TOLD, THEN READ, THEN WRITTEN TO AGAIN before `woke` was put back (the tick's, every second -- or
+       never, while a tick waited on another conversation): the line typed was used, the next is owed. */
+    #readSince(name, r) { return Number.isInteger(r?.toldRead) && this.#readCount(name) > r.toldRead; }
+    /* More waits than when its line was typed: a message came since (its reminders, used up, do not hold it back). */
+    /* One told before this was counted, its reminders used up (stuck since 17-11): told once more, then counted. */
+    /* Messages come together (a burst): one line for them, a minute at least after the last. */
+    #newSince(r, unread) {
+        if (!(this.#now() - Date.parse(r?.typedAt ?? '') >= RENUDGE_MS[0])) return false;
+        return Number.isInteger(r?.toldUnread) ? unread > r.toldUnread : (r?.renudged ?? 0) >= RENUDGE_MS.length;
+    }
 
     #want(name) {
         const r = this.#store.get(name);
@@ -604,46 +805,88 @@ export class Talk {
        'typed', 'read' (nothing waits), 'told' (typed already, not read yet),
        'asleep', 'typing', 'failed' -- the last three wait, and are tried
        again. `again`: the owner asked to remind it, typed before or not. */
-    #wake(name, again = false) {
+    #wake(name, again = false, urgent = false, renudge = false) {
         const going = this.#trying.get(name);
         if (going) return going;
-        const run = this.#tryWake(name, again).finally(() => this.#trying.delete(name));
+        const run = this.#tryWake(name, again, urgent, renudge).finally(() => this.#trying.delete(name));
         this.#trying.set(name, run);
         return run;
     }
-    async #tryWake(name, again) {
+    async #tryWake(name, again, urgent = false, renudge = false) {
         const r = this.#store.get(name);
         if (r?.on !== true) return 'read';
-        const waits = (why, ms) => { this.#store.put({ ...this.#store.get(name), pending: true, why, again }); this.#nextTry.set(name, this.#now() + ms); return why; };
-        if (this.#parley(name).unread() === 0) { if (r.pending || r.woke) this.#store.put({ ...r, pending: false, woke: false, why: null, again: false }); return 'read'; }
+        const waits = (why, ms) => { this.#store.put({ ...this.#store.get(name), pending: true, why, again, renudge }); this.#nextTry.set(name, this.#now() + ms); return why; };
+        const unread = this.#parley(name).unread();
+        if (unread === 0) { if (r.pending || r.woke) this.#store.put({ ...r, pending: false, woke: false, why: null, again: false, renudge: false }); return 'read'; }
         /* Its machine has just restarted: the line that will be typed tells it to read everything. */
         if (r.reread === true) { this.#store.put({ ...r, pending: true, why: 'restarting', again }); return 'restarting'; }
-        if (r.woke === true && !again) { if (r.pending) this.#store.put({ ...r, pending: false, why: null }); return 'told'; }
+        /* Told already, nothing read since -- and nothing new either: one line is enough. A message come since is
+           owed its own line (19-11: an AI that missed its reminders was never told again, a room's questions with it). */
+        if (r.woke === true && !again && !this.#readSince(name, r) && !this.#newSince(r, unread)) { if (r.pending) this.#store.put({ ...r, pending: false, why: null }); return 'told'; }
         if (!this.#conversations.awake().includes(name)) return waits('asleep', RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return waits('typing', TYPING_QUIET_MS - quiet + 100);
         if (!(await this.#runs(name))) return waits('asleep', RETRY_MS);
-        if (!(await this.#type(name, WAKE).catch(() => false))) return waits('failed', RETRY_MS);
-        this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, typedAt: new Date(this.#now()).toISOString() });
+        if (renudge) this.#log(`talk: ${name}: still unread ${Math.round((this.#now() - Date.parse(r.typedAt ?? '')) / 1000)} s after its line: typed again (${(r.renudged ?? 0) + 1})`);
+        if (!(await this.#type(name, urgent ? URGENT : WAKE).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return waits('failed', RETRY_MS);
+        this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, renudge: false, typedAt: new Date(this.#now()).toISOString(), toldRead: this.#readCount(name), toldUnread: unread, renudged: renudge ? (r.renudged ?? 0) + 1 : 0 });
         return 'typed';
     }
 
     /* The owner asks to remind it: the line is typed again, now if it can be. */
-    async remind(name) {
+    /* `urgent` (#322): the owner wants it read now, while it works -- the line says so. */
+    async remind(name, { urgent = false } = {}) {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
-        const told = await this.#wake(name, true);
+        const told = await this.#wake(name, true, urgent === true);
         return { ...this.of(name), told };
     }
 
-    async #tick() {
+    /* NO CONVERSATION WAITS ON ANOTHER: each one's work is started, never awaited in turn -- a machine
+       that does not answer (its terminal opening, its state asked) held every conversation after it in
+       the store, ticks piling up behind, and their `woke` never put back: their next line was never
+       typed. One run at a time for each (#wake's own, and this one's for the rest). */
+    #tick() {
         for (const r of this.#store.all()) {
-            if (r.on === true && r.reread === true) { await this.#tryReread(r.name).catch(() => {}); continue; }
-            if (r.on !== true || (!r.pending && !r.woke)) continue;
-            /* It has read: what waited is done, and the next message wakes it again. */
-            if (r.woke && !r.pending) { try { if (this.#parley(r.name).unread() === 0) this.#store.put({ ...r, woke: false }); } catch { /* its folder went */ } continue; }
-            if (this.#now() < (this.#nextTry.get(r.name) ?? 0)) continue;
-            await this.#wake(r.name, r.again === true).catch(() => {});
+            if (this.#ticking.has(r.name)) continue;
+            const run = this.#tickOne(r).catch(() => {}).finally(() => this.#ticking.delete(r.name));
+            this.#ticking.set(r.name, run);
         }
+    }
+    async #tickOne(r) {
+        if (r.on === true) this.#reapForgets(r);
+        if (r.on === true && r.reread === true) { await this.#tryReread(r.name); return; }
+        if (r.on !== true || (!r.pending && !r.woke)) return;
+        if (r.woke && !r.pending) {
+            let unread;
+            try { unread = this.#parley(r.name).unread(); } catch { return; /* its folder went */ }
+            /* It has read: what waited is done, and the next message wakes it again. */
+            if (unread === 0) { this.#store.put({ ...r, woke: false }); return; }
+            /* It read since, and more was written: the line is owed now. A message come since its line: the same. */
+            if (this.#readSince(r.name, r) || this.#newSince(r, unread)) { await this.#wake(r.name); return; }
+            /* Still unread long after: typed again, RENUDGE_MS apart -- AS MANY TIMES AS THERE ARE, NO MORE (17-11,
+               the owner: never a reminder without end). Then it waits: its chat keeps "Remind it" for the owner. */
+            if ((r.renudged ?? 0) >= RENUDGE_MS.length) return;
+            const after = RENUDGE_MS[r.renudged ?? 0];
+            const at = Date.parse(r.typedAt ?? '');
+            if (Number.isFinite(at) && this.#now() - at >= after && this.#now() >= (this.#nextTry.get(r.name) ?? 0)) await this.#wake(r.name, true, false, true);
+            return;
+        }
+        if (this.#now() < (this.#nextTry.get(r.name) ?? 0)) return;
+        await this.#wake(r.name, r.again === true, false, r.renudge === true);
+    }
+
+    /* The agent asked to forget short-lived secrets (parley forget -> forget.jsonl beside its thread): the
+       parloir drops each from its vault and machine at once. Each request is acted on once, counted in the store. */
+    #reapForgets(r) {
+        if (!this.#dropSecret) return;
+        let lines;
+        try { lines = readFileSync(`${this.#dir(r.name)}/forget.jsonl`, 'utf8').split('\n').filter(Boolean); } catch { return; }
+        const done = r.forgotten ?? 0;
+        if (lines.length <= done) return;
+        for (const line of lines.slice(done)) {
+            try { const name = JSON.parse(line)?.name; if (typeof name === 'string' && /^SECRET_[0-9A-F]{10}$/.test(name)) void this.#dropSecret(r.name, name); } catch { /* a stray line */ }
+        }
+        this.#store.put({ ...r, forgotten: lines.length });
     }
 
     forget(name) { this.#deaf(name); if (this.#keep(name)) rmSync(this.#keep(name), { recursive: true, force: true }); this.#store.remove(name); this.#typedAt.delete(name); this.#ranAt.delete(name); this.#nextTry.delete(name); this.#nextTry.delete(`reread:${name}`); }

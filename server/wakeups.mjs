@@ -41,6 +41,9 @@ import { SOCKET } from './tmux.mjs';
 import { isConversationName } from './names.mjs';
 
 export const TICK_MS = 5000;
+/* A folder is looked through (up to 5000 entries, at once) at most this often per arrival (18-11: every 5 s each, on
+   every turn of a busy server); the rest of the wake-ups still every TICK_MS. */
+export const ARRIVAL_EVERY_MS = 30_000;
 export const MESSAGE_MAX = 1000;
 export const ITEMS_MAX = 8;
 export const DEFAULT_PER_HOUR = 12;
@@ -150,13 +153,14 @@ const FIRED_SHOWN = 120;
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export class Wakeups {
-    #store; #vms; #conversations; #resources; #warm; #now; #fired; #docket; #typing; #pause; #held = new Map(); #busy = false;
+    #store; #vms; #conversations; #resources; #warm; #now; #fired; #docket; #typing; #pause; #held = new Map(); #busy = false; #looked = new Map(); #arrivalEveryMs;
 
     /* `warm(name)`: opens the terminal of a machine that runs, if it is not open.
        `fired(name, { text, item })`: a wake-up was typed (its chat says so: Talk.event). */
     /* `docket`: { on(name), post(name, {kind, text, data}) } (dockets.mjs), or none: typed always. */
     /* `typing(name)`: someone is typing in its terminal from a screen (see TypingWatch): a line is held until it is free. */
-    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {}, docket = null, typing = () => false, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)) }) {
+    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {}, docket = null, typing = () => false, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)), arrivalEveryMs = ARRIVAL_EVERY_MS }) {
+        this.#arrivalEveryMs = arrivalEveryMs;
         this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now; this.#fired = fired; this.#docket = docket;
         this.#typing = typing; this.#pause = pause;
     }
@@ -234,6 +238,39 @@ export class Wakeups {
         return once ? { ...this.of(name), address: `${CALL_PATH}${once}` } : this.of(name);
     }
 
+    /* A COPY'S WAKE-UPS (15-11, asked when it is copied): its original's, each its own again (a new id, its clock
+       counted from now); a call from outside is not -- its address is the original's, said once and never again. */
+    copyTo(from, to) {
+        this.#known(from); this.#known(to);
+        const was = this.#record(from);
+        const now = this.#now().toISOString();
+        const items = was.items.filter((i) => i.kind !== 'call').map(({ last, ...i }) => ({ ...i, id: randomUUID(), made: now, last: null, ...(i.fired !== undefined ? { fired: now } : {}) }));
+        const r = this.#record(to);
+        this.#store.put({ ...r, perHour: was.perHour, items: [...r.items, ...items].slice(0, ITEMS_MAX) });
+        return this.of(to);
+    }
+
+    /* A WHOLE EXPORT'S WAKE-UPS (15-11): what each is, never its id, its clock or a call from outside (its address
+       is the original's). Given again on its import when asked, each through add(): checked as one written here;
+       one that is not (its folder not attached here) is left out. -> how many */
+    exportOf(name) {
+        const r = this.#record(name);
+        return { perHour: r.perHour, items: r.items.filter((i) => i.kind !== 'call').map(({ kind, on, message, resource, onlyNew, quiet, minutes, at, line }) => ({ kind, on, message, resource, onlyNew, quiet, minutes, at, line })) };
+    }
+    importTo(name, given) {
+        let n = 0;
+        try { if (given?.perHour !== undefined) this.setLimit(name, given.perHour); } catch { /* not a cap */ }
+        for (const i of (Array.isArray(given?.items) ? given.items : []).slice(0, ITEMS_MAX)) {
+            if (!i || typeof i !== 'object' || i.kind === 'call') continue;
+            try {
+                const made = this.add(name, i).items.at(-1);
+                if (i.on === false) this.turn(name, made.id, false);
+                n++;
+            } catch { /* not one this conversation can have */ }
+        }
+        return n;
+    }
+
     #change(name, id, change) {
         this.#known(name);
         const r = this.#record(name);
@@ -267,6 +304,9 @@ export class Wakeups {
         /* An arrival. The folder must still be attached: what was taken back wakes nobody. */
         if (!this.#resources.of(name).some((x) => x.name === item.resource)) return undefined;
         const key = `${name}/${item.id}`;
+        const lookedAt = this.#looked.get(key) ?? 0;
+        if (this.#now().getTime() - lookedAt < this.#arrivalEveryMs) return undefined;
+        this.#looked.set(key, this.#now().getTime());
         const seen = look(this.#resources.folder(item.resource));
         /* A repository: a commit is an arrival too. Only the date and size of
            its journal are looked at; git is never run here. */

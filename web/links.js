@@ -24,12 +24,12 @@
 (() => {
     const SVG = 'http://www.w3.org/2000/svg';
     /* Each kind's icon, from the set of the chat (Lucide, see icons.js): the same drawing on every screen, whatever its fonts. */
-    const KIND_ICON = { device: 'smartphone', conversation: 'square-terminal', folder: 'folder', git: 'git-branch', mailbox: 'mail', secret: 'key-round' };
+    const KIND_ICON = { device: 'smartphone', conversation: 'square-terminal', folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'users', secret: 'key-round', group: 'layers' };
     /* An icon of that set, or, until it is there, nothing in its place. */
     const ic = (name, cls = 'lk-svg') => window.clavariumIcons?.icon(name, cls) ?? null;
     const kindIcon = (kind) => h('span', { class: 'lk-ic', 'aria-hidden': 'true' }, ic(KIND_ICON[kind]));
-    const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', secret: 'secret' };
-    const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', secret: 'asset' };
+    const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', agenda: 'calendar', contacts: 'address book', secret: 'secret', group: 'group' };
+    const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', agenda: 'asset', contacts: 'asset', secret: 'asset', group: 'asset' };
     const TITLES = { device: 'Devices', conversation: 'Conversations', asset: 'Assets' };
     const VIEWS = {
         devices: { cols: [['device'], ['conversation', 'asset']], sources: ['device'] },
@@ -69,6 +69,18 @@
         let allLines = true;
         try { allLines = localStorage.getItem('clavarium-links-all') !== '0'; } catch { /* none kept */ }
         let picked = null; let pinned = null; let focus = null; let drag = null; let pop = null; let popLink = null; let drawnMany = false;
+        /* The graph as the server sends it; `graph` below is the folded view of it.
+           A group folds to one node by default; the owner opens the ones they want.
+           Which are open is kept per device. */
+        let rawGraph = { nodes: [], links: [], flows: [] };
+        const expanded = new Set((() => { try { const v = JSON.parse(localStorage.getItem('clavarium-links-open') ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })());
+        const keepExpanded = () => { try { localStorage.setItem('clavarium-links-open', JSON.stringify([...expanded])); } catch { /* none kept */ } };
+        /* A box is shown only if its column's filter is empty or its name holds what was typed: so a
+           crowded map (many assets) is narrowed to a few boxes, their links with them. The layout is
+           kept while typing (no reorder), and a filter cleared brings everything back. */
+        const filters = { device: '', conversation: '', asset: '' };
+        let laidOut = null;
+        const matches = (n, k) => { const f = (filters[k] || '').trim().toLowerCase(); return !f || n.name.toLowerCase().includes(f) || String(n.sub || '').toLowerCase().includes(f); };
         const ph = { screen: 'list', kind: 'device', id: null, adding: false, sheet: null };
         let traceOf = '*';
 
@@ -85,16 +97,40 @@
             if (k === 'chat' && !l.rights.includes('w')) return 'chat, read only';
             return WORDS[k].toLowerCase();
         };
-        const allowed = (a, b) => !a.pending && !b.pending && ((a.kind === 'device' && ['conversation', 'folder', 'git', 'mailbox'].includes(b.kind)) || (a.kind === 'conversation' && ['folder', 'git', 'mailbox', 'secret'].includes(b.kind)));
+        const allowed = (a, b) => !a.pending && !b.pending && ((a.kind === 'device' && ['conversation', 'folder', 'git', 'mailbox'].includes(b.kind)) || (a.kind === 'conversation' && ['folder', 'git', 'mailbox', 'agenda', 'contacts', 'secret'].includes(b.kind)));
         const inView = (n) => VIEWS[view].cols.flat().includes(COLUMN[n.kind]);
         const shown = (l) => VIEWS[view].sources.includes(node(l.from)?.kind) && inView(node(l.to));
 
-        async function load() {
-            const r = await fetch(`${env.API()}/flows`);
-            graph = r.ok ? await r.json() : { nodes: [], links: [], flows: [] };
+        /* The graph as drawn: a folded group becomes a single node, and its members'
+           links move onto it (deduped, rights merged); an opened group shows its
+           members as before. The server gives the parts; the folding is here. */
+        const mergeRights = (a = '', b = '') => [...'rwx'].filter((c) => a.includes(c) || b.includes(c)).join('') || a || b;
+        function foldedGraph(raw) {
+            const toGroup = new Map();
+            for (const n of raw.nodes) if (n.kind === 'group' && !expanded.has(n.id)) for (const m of n.members ?? []) toGroup.set(m, n.id);
+            const nodes = raw.nodes.filter((n) => !toGroup.has(n.id));
+            const at = (id) => toGroup.get(id) ?? id;
+            const merged = new Map();
+            for (const l of raw.links) {
+                const from = at(l.from); const to = at(l.to);
+                if (from === to) continue;
+                const key = `${from}\u0000${to}`;
+                const prev = merged.get(key);
+                merged.set(key, prev ? { ...prev, rights: mergeRights(prev.rights, l.rights), pending: Boolean(prev.pending && l.pending) } : { ...l, from, to });
+            }
+            return { nodes, links: [...merged.values()], flows: raw.flows ?? [] };
+        }
+        function applyFold() {
+            graph = foldedGraph(rawGraph);
             byId = new Map(graph.nodes.map((n) => [n.id, n]));
             if (pinned && !byId.has(pinned)) pinned = null;
             if (picked && !byId.has(picked.id)) picked = null; else if (picked) picked = byId.get(picked.id);
+        }
+        function toggleGroup(id) { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); keepExpanded(); laidOut = null; applyFold(); paint(); }
+        async function load() {
+            const r = await fetch(`${env.API()}/flows`);
+            rawGraph = r.ok ? await r.json() : { nodes: [], links: [], flows: [] };
+            applyFold();
         }
         const err = (text) => { const e = $('links-error'); e.textContent = text ?? ''; e.hidden = !text; };
 
@@ -106,14 +142,19 @@
             return j;
         }
         /* A link given or changed. `rights` as grants.mjs writes them. */
+        /* A live Tether connexion is given to a conversation at a level; the map gives
+           it at "watch" (read only) and sends finer levels to Assets. */
+        const tetherId = (b) => b.record?.id ?? b.id.replace(/^connexion:/, '');
         async function give(l, rights, extra = {}) {
             const a = node(l.from); const b = node(l.to);
+            if (b.tether) return request('/tether/level', { target: tetherId(b), agent: `conversation:${a.name}`, level: rights.includes('w') ? 'free' : 'watch' });
             if (a.kind === 'device') return request(`/devices/${nameOf(a.id)}/give`, { asset: b.id, rights });
             if (b.kind === 'secret') return request(`/conversations/${encodeURIComponent(a.name)}/secrets`, { secret: b.name, attached: true });
             return request(`/conversations/${encodeURIComponent(a.name)}/resources`, { resource: b.name, access: rights.includes('w') ? 'write' : 'read', ...extra });
         }
         async function takeAway(l) {
             const a = node(l.from); const b = node(l.to);
+            if (b.tether) return request('/tether/level', { target: tetherId(b), agent: `conversation:${a.name}`, level: 'none' });
             if (a.kind === 'device') return request(`/devices/${nameOf(a.id)}/take`, { asset: b.id });
             if (b.kind === 'secret') return request(`/conversations/${encodeURIComponent(a.name)}/secrets`, { secret: b.name, attached: false });
             return request(`/conversations/${encodeURIComponent(a.name)}/resources`, { resource: b.name, access: 'none' });
@@ -150,7 +191,7 @@
            times, puts each box at the average place of what it is linked to; the order
            that crossed least is kept. What is linked to nothing goes last, by name. */
         function layout() {
-            const ASSETS = ['folder', 'git', 'mailbox', 'secret'];
+            const ASSETS = ['group', 'folder', 'git', 'mailbox', 'agenda', 'contacts', 'secret'];
             const base = (k) => graph.nodes.filter((n) => COLUMN[n.kind] === k).sort((a, b) => (ASSETS.indexOf(a.kind) - ASSETS.indexOf(b.kind)) || a.name.localeCompare(b.name));
             let cols = VIEWS[view].cols.map((ks) => ks.map(base));
             const colOf = new Map(); cols.forEach((gs, ci) => gs.flat().forEach((n) => colOf.set(n.id, ci)));
@@ -182,27 +223,35 @@
             }
             return best;
         }
-        function paint() {
+        /* `relayout` false keeps the order found last: used while typing a filter, so boxes do not jump. */
+        function paint(relayout = true) {
             for (const b of document.querySelectorAll('#links-tabs [data-view]')) b.setAttribute('aria-selected', String(b.dataset.view === view));
             $('links-all').checked = allLines;
             legend();
             const bd = board();
             bd.className = `lk-board ${VIEWS[view].cols.length === 3 ? 'three' : 'two'}`;
             bd.querySelectorAll('.lk-col, .lk-knob').forEach((e) => e.remove()); closePop();
-            const lists = layout();
+            if (relayout || !laidOut) laidOut = layout();
+            const lists = laidOut;
             VIEWS[view].cols.forEach((cols, ci) => {
                 const col = h('div', { class: 'lk-col' });
                 cols.forEach((k, i) => {
                     if (i) col.append(h('div', { class: 'lk-gap' }));
-                    col.append(h('h3', { class: 'lk-colh' }, h('span', { text: TITLES[k] }), plus(k)));
-                    const list = lists[ci][i];
+                    col.append(h('h3', { class: 'lk-colh' }, h('span', { class: 'lk-colt', text: TITLES[k] }), plus(k)));
+                    const whole = lists[ci][i];
+                    const list = whole.filter((n) => matches(n, k));
                     for (const n of list) col.append(nodeEl(n));
-                    if (!list.length) col.append(empty(k));
+                    if (!list.length) col.append(whole.length ? h('p', { class: 'hint lk-none', text: 'Nothing matches.' }) : empty(k));
                 });
                 bd.append(col);
             });
             fit(); draw(); hint(); paintPhone();
         }
+        /* The filters sit in a bar of their own, ABOVE the board and out of its zoom, so that fitting
+           a crowded map (which zooms it down) never shrinks them. Each narrows its column; the board
+           is repainted without a relayout (the inputs are not rebuilt, so the caret stays). */
+        const onFind = (e) => { filters[e.target.dataset.k] = e.target.value; paint(false); };
+        for (const inp of document.querySelectorAll('#links-filters .lk-find')) inp.addEventListener('input', onFind);
         /* How each kind is made: a device paired, a conversation created, an asset added. The same,
            from the small round "+" by each column's title (always there, however many it holds)
            and from an empty column. */
@@ -223,8 +272,9 @@
             const e = h('div', { class: `lk-node lk-c-${COLUMN[n.kind]}${n.pending ? ' pending' : ''}`, 'data-id': n.id, 'data-kind': n.kind, tabindex: 0, role: 'button', title: `${n.name} · ${n.sub}`, 'aria-label': `${n.name}, ${n.sub}, ${cnt} link${cnt === 1 ? '' : 's'}` },
                 kindIcon(n.kind),
                 h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name })),
+                n.kind === 'group' && h('span', { class: 'lk-fold', text: expanded.has(n.id) ? '▾' : '▸', 'aria-hidden': 'true' }),
                 state && h('span', { class: 'lk-st', 'data-state': state, 'aria-hidden': 'true' }),
-                h('span', { class: 'lk-cnt', text: String(cnt), title: `${cnt} link${cnt === 1 ? '' : 's'}` }));
+                n.kind !== 'group' && h('span', { class: 'lk-cnt', text: String(cnt), title: `${cnt} link${cnt === 1 ? '' : 's'}` }));
             if (VIEWS[view].sources.includes(n.kind) && !n.pending) {
                 const dot = h('span', { class: 'lk-handle', title: 'Drag to what it gets', 'aria-hidden': 'true' });
                 dot.addEventListener('pointerdown', (ev) => startDrag(ev, n));
@@ -353,6 +403,8 @@
         /* A tap shows only what concerns that box; tapped again, everything comes back.
            A box that gives is also ready to be linked: tap a dashed box to link it. */
         function tap(n) {
+            /* A group folds/unfolds on a tap -- it is not something to give or pair. */
+            if (n.kind === 'group') { toggleGroup(n.id); return; }
             if (picked && picked.id !== n.id && allowed(picked, n)) { void link(picked, n); return; }
             const again = pinned === n.id;
             pinned = again ? null : n.id;
@@ -568,6 +620,7 @@
             const a = node(l.from); const b = node(l.to);
             if (b.kind === 'conversation') return { type: 'parts' };
             if (b.kind === 'secret') return { type: 'fixed', text: 'Use: handed to its tool as a variable and a file, the next time it starts.' };
+            if (b.tether) return { type: 'fixed', text: 'Given at a level (watch / propose / frame / free). Set the level in Assets.' };
             if (b.kind === 'mailbox') return { type: 'fixed', text: 'Read only: a mailbox is never written here.' };
             return { type: 'levels', write: b.kind === 'git' && a.kind === 'conversation' ? 'Commits; sending stays under your rules' : 'Add, change, delete' };
         }
@@ -618,13 +671,13 @@
             rm.addEventListener('click', () => {
                 const last = a.kind === 'device' && graph.links.filter((x) => x.from === a.id).length === 1;
                 /* The question in words above, two short buttons side by side below. */
-                const question = a.kind === 'device' ? `Take ${b.name} back from ${a.name}?${last ? ' It has nothing else: the device is removed too.' : ''}` : b.kind === 'secret' ? `Stop handing ${b.name} to ${a.name}?` : `Detach ${b.name} from ${a.name}?`;
+                const question = a.kind === 'device' ? `Take ${b.name} back from ${a.name}?${last ? ' It has nothing else: the device is removed too.' : ''}` : b.kind === 'secret' ? `Stop handing ${b.name} to ${a.name}?` : `Take ${b.name} from ${a.name}? It stays in Assets.`;
                 const ask = h('p', { class: 'lk-ask', text: question });
                 const sure = h('button', { type: 'button', class: 'danger', text: 'Remove' });
                 const keep = h('button', { type: 'button', text: 'Cancel', onclick: () => openPop(l) });
                 sure.addEventListener('click', async () => {
                     sure.disabled = true;
-                    try { await takeAway(l); closePop(); await changed(); if (b.kind === 'secret') err(`${b.name} will no longer be handed to ${a.name}'s tool the next time it starts.`); } catch (e) { fail(e); }
+                    try { await takeAway(l); closePop(); await changed(); if (b.kind === 'secret') err(`${b.name} is taken out of ${a.name}'s machine now; its tool keeps it as a variable until its next start.`); } catch (e) { fail(e); }
                 });
                 row.before(ask);
                 row.replaceChildren(sure, keep);
@@ -719,7 +772,7 @@
                 h('div', { class: 'lk-top' }, h('i', { style: `background:${css(KIND(l))}` }), h('b', { text: other.name }), h('span', { class: 'lk-sb', text: what }),
                     l.pending ? null : h('button', { type: 'button', class: 'lk-x', 'aria-label': `Remove the link to ${other.name}`, text: '×', onclick: (ev) => {
                         const btn = ev.currentTarget;
-                        btn.replaceWith(h('button', { type: 'button', class: 'danger', text: n.kind === 'device' || node(l.from).kind === 'device' ? 'Take back' : 'Detach', onclick: async () => { try { await takeAway(l); await changed(); } catch (e) { err(e.message); } } }));
+                        btn.replaceWith(h('button', { type: 'button', class: 'danger', text: n.kind === 'device' || node(l.from).kind === 'device' ? 'Take back' : 'Remove', onclick: async () => { try { await takeAway(l); await changed(); } catch (e) { err(e.message); } } }));
                     } })),
                 seg(l));
             const out = graph.links.filter((l) => l.from === n.id); const inn = graph.links.filter((l) => l.to === n.id);

@@ -33,6 +33,11 @@ const free = 1.4; // GB
 \`\`\`
 
 \`\`\`mermaid
+graph LR
+Disk --> Snaps
+\`\`\`
+
+\`\`\`mermaid
 pie title Disk
 "system" : 3
 "snaps" : 1.5
@@ -70,10 +75,12 @@ test('the chat renders what the tool writes: Markdown built element by element, 
     assert.match(await thread.locator('.parley-callout[data-kind=important]').first().innerText(), /Decide: grow the disk/, 'its IMPORTANT box in sight, folded');
     await thread.locator('.parley-unfold').first().click();
     const first = thread.locator('.parley-said[data-from=agent]').first();
-    await me.until('unfolded: a table, badges, a highlight', async () => (await first.locator('table').count()) === 1 && (await first.locator('.parley-badge').count()) === 2 && (await first.locator('mark').count()) === 1);
+    await me.until('unfolded: a table, badges, a highlight', async () => (await first.locator('table:not(.parley-chart table)').count()) === 1 && (await first.locator('.parley-badge').count()) === 2 && (await first.locator('mark').count()) === 1);
     /* Its code, coloured from Prism's token tree; a Copy button. */
     await me.until('the code is coloured', async () => (await first.locator('.parley-code .parley-tok-keyword').count()) > 0);
     assert.equal(await first.locator('.parley-code pre').innerText(), 'const free = 1.4; // GB');
+    /* A Mermaid pie is drawn by the chat as a chart of its own, its figures in reach. */
+    await me.until('the pie is a chart', async () => (await first.locator('.parley-chart').count()) === 1);
     /* Its drawing: by Mermaid, shown as a picture. */
     await me.until('the drawing is a picture', async () => /^blob:/.test(await first.locator('.parley-diagram img').getAttribute('src').catch(() => '') ?? ''), 30_000);
     /* The drawing has a size of its own (a picture that once came out at 0 x 0). */

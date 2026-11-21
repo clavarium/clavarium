@@ -39,6 +39,8 @@ import { Refusal, DISK_GB } from './conversations.mjs';
 import { MIN_FREE_MB } from './shelf.mjs';
 
 export const RESERVE_DISK_MB = 5 * 1024;
+/* Short of memory: what is done to the machine that takes the most (pressureWay). */
+export const PRESSURE_WAYS = Object.freeze(['force', 'sleep', 'alert']);
 export const RESERVE_MEMORY_MB = 1024;
 export const RESERVE_DISK_PERCENT = 5;
 export const RESERVE_MEMORY_PERCENT = 5;
@@ -49,6 +51,13 @@ export const RESERVE_DISK_MAX_MB = 1024 * 1024;
 export const RESERVE_MEMORY_MAX_MB = 256 * 1024;
 export const ROOM_MS = 10_000;
 export const USAGE_MS = 5 * 60_000;
+/* A sleeping machine whose qemu still holds at least this much host memory is a
+   suspend that did not free it (see the host program's `vm suspend`); the watch
+   reclaims it. */
+export const RECLAIM_MIN_MB = 128;
+/* The same machine is not reclaimed again within this, so a stubborn one (rare,
+   needs a VM-manager restart) is reported once, not looped on. */
+export const RECLAIM_EVERY_MS = 30 * 60_000;
 /* The page shows its small gauge when disk or memory is fuller than this, or
    when what is free is under this many times the reserve. */
 export const HIGH_PERCENT = 85;
@@ -62,12 +71,13 @@ const whole = (text) => (/^\d{1,12}$/.test(String(text)) ? Number(text) : undefi
 
 /* What "server room" printed, as facts; any other line is left out. */
 export function readRoom(text) {
-    const facts = { places: [], memory: null, machines: [], cpu: null, machineCpu: {} };
+    const facts = { places: [], memory: null, machines: [], cpu: null, machineCpu: {}, machineAge: {} };
     for (const line of String(text ?? '').slice(0, 64 * 1024).split('\n').slice(0, 500)) {
         const p = line.trim().split(' ');
         if (p[0] === 'place' && p.length === 5 && PLACES.includes(p[1]) && [2, 3, 4].every((i) => whole(p[i]) !== undefined) && !facts.places.some((x) => x.what === p[1])) facts.places.push({ what: p[1], device: whole(p[2]), sizeMb: whole(p[3]), freeMb: whole(p[4]) });
         if (p[0] === 'memory' && p.length === 3 && whole(p[1]) > 0 && whole(p[2]) !== undefined) facts.memory = { totalMb: whole(p[1]), availableMb: whole(p[2]) };
         if (p[0] === 'cpu' && p.length === 4 && [1, 2, 3].every((i) => whole(p[i]) !== undefined)) facts.cpu = { ticks: whole(p[1]), idle: whole(p[2]), cores: whole(p[3]) };
+        if (p[0] === 'machineage' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined) facts.machineAge[p[1]] = whole(p[2]);
         if (p[0] === 'machinecpu' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined) facts.machineCpu[p[1]] = whole(p[2]);
         if (p[0] === 'machine' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined && !facts.machines.some((m) => m.vm === p[1])) facts.machines.push({ vm: p[1], rssMb: whole(p[2]) });
     }
@@ -92,7 +102,7 @@ const percent = (part, all) => (all > 0 ? Math.round((part / all) * 100) : 0);
 export class Capacity {
     /* What the machines take on their disk, as last measured (MB), or undefined. */
     machinesUsedMb() { const u = this.#usage; if (!u) return undefined; return Object.values(u.machines ?? {}).reduce((a, b) => a + b, 0) + (u.shelf ?? 0) + (u.images ?? 0); }
-    #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #alert; #say; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
+    #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #force; #alert; #say; #reclaim; #reclaimEveryMs; #sweeping = false; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
 
     /* `run(argv)`: the host program. `store`: where the reserve is kept.
        `conversations`: what each machine was given. `shelf`: how large a
@@ -100,8 +110,8 @@ export class Capacity {
     /* `roomMs`: how long what is free is taken as known (ROOM_MS). */
     /* `sleep(name)`, `alert(payload)`, `say(name, text)`: what watch() does
        when what is free falls under the reserve. */
-    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS, sleep = null, alert = null, say = null }) {
-        this.#roomMs = roomMs; this.#sleep = sleep; this.#alert = alert; this.#say = say;
+    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS, sleep = null, force = null, alert = null, say = null, reclaim = null, reclaimEveryMs = RECLAIM_EVERY_MS }) {
+        this.#roomMs = roomMs; this.#sleep = sleep; this.#force = force; this.#alert = alert; this.#say = say; this.#reclaim = reclaim; this.#reclaimEveryMs = reclaimEveryMs;
         this.#run = run; this.#store = store; this.#conversations = conversations; this.#shelf = shelf; this.#now = now;
     }
 
@@ -126,6 +136,17 @@ export class Capacity {
         };
         this.#store.put({ name: 'reserve', ...kept });
         return this.reserve();
+    }
+
+    /* SHORT OF MEMORY (under the reserve), WHAT IS DONE to the running machine that takes the most, as
+       its owner chose (09-11): forced off ('force', the default: quick, and sure for this server), put
+       to sleep ('sleep': keeps its state, but writes all its memory to disk at the worst time; a frozen
+       one, which cannot be put to sleep, is forced off), or nothing but the alert ('alert'). */
+    pressureWay() { const w = this.#store.get('pressure')?.way; return PRESSURE_WAYS.includes(w) ? w : 'force'; }
+    setPressureWay(way) {
+        if (!PRESSURE_WAYS.includes(way)) throw new Refusal(400, 'Short of memory, a machine is forced off (force), put to sleep (sleep), or only said (alert).');
+        this.#store.put({ name: 'pressure', way });
+        return this.pressureWay();
     }
 
     /* What is free now. `fresh`: asked again whatever the cache says. */
@@ -159,9 +180,13 @@ export class Capacity {
         const set = this.reserve();
         const all = this.#conversations.list();
         const records = new Map(all.map((c) => [`clv-${c.name}`, c]));
+        /* A shared machine (#221) is no conversation's own: named, with who lives in it (14-11: it showed as « another machine »). */
+        const shared = new Map();
+        for (const c of all) if (c.sharedMachine) { const s = shared.get(`clv-${c.sharedMachine}`) ?? { shared: c.sharedMachine, who: [], sizeMb: c.machineMb ?? null }; s.who.push(c.title ?? c.name); shared.set(`clv-${c.sharedMachine}`, s); }
         const machines = room.machines.map((m) => {
             const c = records.get(m.vm);
-            return { name: c ? c.name : null, shelf: m.vm.startsWith('clvshelf-'), rssMb: m.rssMb, sizeMb: c?.memoryMb ?? null };
+            const s = c ? null : shared.get(m.vm);
+            return { name: c ? c.name : null, ...(s ? { shared: s.shared, who: s.who } : {}), shelf: m.vm.startsWith('clvshelf-'), rssMb: m.rssMb, sizeMb: c?.memoryMb ?? s?.sizeMb ?? null, ...(room.machineAge?.[m.vm] !== undefined ? { ageS: room.machineAge[m.vm] } : {}) };
         });
         /* What the system says is available: the machines' own use is in it already. */
         const memory = room.memory ? { totalMb: room.memory.totalMb, freeMb: room.memory.availableMb, usedPercent: percent(room.memory.totalMb - room.memory.availableMb, room.memory.totalMb) } : null;
@@ -208,7 +233,7 @@ export class Capacity {
             machines: { disksMb: Object.values(u.machines).reduce((a, b) => a + b, 0), each: Object.entries(u.machines).map(([name, mb]) => ({ name, mb })).sort((a, b) => b.mb - a.mb), shelfMb: u.shelf ?? null, imagesMb: u.images ?? null, othersMb: u.others ?? null },
             at: new Date(this.#usageAt).toISOString(),
         } : null;
-        return { known: Boolean(figures), reserve: { diskMb: this.reserve().diskMb, memoryMb: this.reserve().memoryMb }, settings: this.reserve(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
+        return { known: Boolean(figures), reserve: { diskMb: this.reserve().diskMb, memoryMb: this.reserve().memoryMb }, settings: this.reserve(), pressure: this.pressureWay(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
     }
 
     /* For the list: only whether it is high, and how much. Cheap: what is
@@ -278,19 +303,74 @@ export class Capacity {
             const running = f.machines.filter((m) => m.name && awake.has(m.name));
             const takes = (m) => (what === 'disk' ? this.#usage?.machines?.[m.name] ?? -1 : m.rssMb);
             const most = running.sort((a, b) => takes(b) - takes(a) || b.rssMb - a.rssMb)[0] ?? null;
-            let slept = null;
-            if (most && this.#sleep) slept = await Promise.resolve(this.#sleep(most.name)).then(() => most.name, () => null);
+            let slept = null; let frozen = null; let forced = null; let held = null;
+            /* Memory: as its owner chose (pressureWay). Disk: put to sleep, as before. */
+            const way = what === 'memory' ? this.pressureWay() : 'sleep';
+            if (most && way === 'alert') held = most.name;
+            if (most && way === 'force' && this.#force) forced = await Promise.resolve(this.#force(most.name)).then((ok) => (ok === false ? null : most.name), () => null);
+            if (most && way === 'sleep' && this.#sleep) slept = await Promise.resolve(this.#sleep(most.name)).then(() => most.name, (error) => { if (/frozen/.test(String(error?.message ?? ''))) frozen = most.name; return null; });
+            /* Frozen: never suspended (it would hang the VM manager); forced off instead. */
+            if (frozen && this.#force) forced = await Promise.resolve(this.#force(frozen)).then((ok) => (ok === false ? null : frozen), () => null);
             const figures = `${gb(free)} free, ${gb(f.reserve[`${what}Mb`])} kept in reserve`;
-            this.#alert?.({ title: `This server is short of ${what}`, body: `${figures}.${slept ? ` ${slept} was put to sleep.` : ''}`, url: '/?open=settings&at=resources' });
+            const did = slept ? ` ${slept} was put to sleep.` : forced ? ` ${forced} was forced off${frozen ? ' (frozen)' : ''}.` : frozen ? ` ${frozen} takes the most but is frozen: Force stop frees it.` : held ? ` ${held} takes the most: nothing was done, as you chose.` : '';
+            this.#alert?.({ title: `This server is short of ${what}`, body: `${figures}.${did}`, url: '/?open=settings&at=resources' });
             if (slept) this.#say?.(slept, `This server ran short of ${what} (${figures}). This machine took the most, so it was put to sleep. Wake it once there is room again.`);
-            done.push({ what, slept });
+            if (forced) this.#say?.(forced, `This server ran short of ${what} (${figures}). This machine took the most${frozen ? ' and was frozen' : ''}, so it was forced off, as after a power cut. Start it again once there is room.`);
+            else if (frozen) this.#say?.(frozen, `This server ran short of ${what} (${figures}). This machine took the most but is frozen: it could not be put to sleep. Force stop frees it.`);
+            done.push({ what, way, slept, ...(forced ? { forced } : {}), ...(frozen ? { frozen } : {}), ...(held ? { held } : {}) });
         }
         return done;
     }
 
+    /* WATCHED too, and on its own: machines that are ASLEEP (not awake) yet whose
+       qemu still holds the host RAM -- a suspend that did not end the process,
+       including ones left stuck before this ran. Each is freed through the host
+       program (`vm reclaim`: wake+resleep, then a clean stop if needed), the owner
+       told, and not tried again within reclaimEveryMs, so a stubborn one (rare,
+       the VM manager would need a restart) is reported once, not looped on. Only
+       asleep machines are touched; the others are never disturbed, and the VM
+       manager is never restarted. Resolves with what was reclaimed. */
+    async reclaimSleepers() {
+        if (!this.#reclaim || this.#sweeping) return [];
+        this.#sweeping = true;
+        try {
+            const f = this.#figures(await this.room({ fresh: true }).catch(() => null));
+            if (!f) return [];
+            const awake = new Set(this.#conversations.awake?.() ?? []);
+            /* Only a machine put to sleep: one being built is not awake either, yet must never be touched. */
+            const asleep = this.#conversations.asleep ? new Set(this.#conversations.asleep()) : null;
+            const holding = f.machines.filter((m) => m.name && !m.shelf && !awake.has(m.name) && (!asleep || asleep.has(m.name)) && m.rssMb >= RECLAIM_MIN_MB);
+            if (!holding.length) return [];
+            const now = this.#now();
+            const at = this.#store.get('reclaim')?.at ?? {};
+            const done = [];
+            for (const m of holding) {
+                if (at[m.name] && now - at[m.name] < this.#reclaimEveryMs) continue;
+                at[m.name] = now;
+                this.#store.put({ name: 'reclaim', at });
+                const held = m.rssMb;
+                const how = await Promise.resolve(this.#reclaim(m.name)).then((x) => String(x || ''), () => '');
+                const by = how.includes('resleep') ? ' by waking it and putting it back to sleep'
+                    : how.includes('stop') ? ' with a clean stop (it will boot when you open it)'
+                    : '';
+                const after = this.#figures(await this.room({ fresh: true }).catch(() => null));
+                const freed = !after?.machines.some((x) => x.name === m.name && !awake.has(x.name) && x.rssMb >= RECLAIM_MIN_MB);
+                this.#alert?.(freed
+                    ? { title: "Reclaimed a sleeping machine's memory", body: `${m.name} was asleep but still held ${gb(held)} (its sleep had not freed it); its memory was reclaimed${by}.`, url: '/?open=settings&at=resources' }
+                    : { title: 'A sleeping machine still holds memory', body: `${m.name} was asleep but still held ${gb(held)} and could not be freed; the VM manager may need a restart.`, url: '/?open=settings&at=resources' });
+                this.#say?.(m.name, freed
+                    ? `This machine was asleep but still held ${gb(held)} of memory (its sleep had not freed it). Its memory was reclaimed${by}; it still wakes when you open it.`
+                    : `This machine was asleep but still held ${gb(held)} of memory, and it could not be freed automatically — the VM manager may need a restart.`);
+                done.push({ name: m.name, heldMb: held, freed });
+            }
+            return done;
+        } finally { this.#sweeping = false; }
+    }
+
     /* Watches every `everyMs`; returns what stops it. */
     start(everyMs = WATCH_MS) {
-        const timer = setInterval(() => { void this.watch().catch(() => {}); }, everyMs);
+        const tick = () => { void this.watch().catch(() => {}).finally(() => { void this.reclaimSleepers().catch(() => {}); }); };
+        const timer = setInterval(tick, everyMs);
         timer.unref?.();
         return () => clearInterval(timer);
     }
