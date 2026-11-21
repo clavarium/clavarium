@@ -18,7 +18,9 @@ function walk(dir, at = '') {
         return e.isDirectory() ? walk(dir, rel) : [rel];
     });
 }
-const FILES = walk(ROOT);
+/* preview/ (21-11, #403): the NEW site, looked at for real before it replaces this one -- a site of its own
+   (its own header, menu and pages), not held to this one's. */
+const FILES = walk(ROOT).filter((f) => !f.startsWith('preview/'));
 const PAGES = FILES.filter((f) => f.endsWith('.html'));
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
 const markup = (html) => html.replace(/<!--[\s\S]*?-->/g, '').replace(/(<script\b[^>]*>)[\s\S]*?<\/script>/gi, '$1</script>');
