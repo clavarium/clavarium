@@ -52,6 +52,8 @@ const RULES = [
             + 'somewhere real.',
         find: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
         allow: (m) => m === '127.0.0.1' || m === '0.0.0.0' || m === '255.255.255.255',
+        /* As for addresses above: a compressed film's bytes make these shapes by chance. */
+        skip: (file) => /\.(webm|mp4)$/i.test(file),
     },
 ];
 

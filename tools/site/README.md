@@ -7,6 +7,7 @@ then captured by a browser. Run them again whenever Parley or a demo changes:
 
     PLAYWRIGHT=/path/to/playwright-core/index.mjs node tools/site/make-shots.mjs   # docs/preview/shots/chat-*.png
     PLAYWRIGHT=/path/to/playwright-core/index.mjs node tools/site/make-demo.mjs    # docs/preview/shots/demo-*.webm (+ posters)
+    PLAYWRIGHT=/path/to/playwright-core/index.mjs node tools/site/make-desktop.mjs # docs/preview/shots/desktop-*.webm: the real web app on the e2e bench, no VM
     node tools/site/make-demo.mjs your-ok home                                    # only some films
 
 - `brief.mjs`: the text of the "busy person's daily brief" demo.
