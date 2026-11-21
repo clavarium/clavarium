@@ -4,6 +4,8 @@ import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { Boxes, forSpeech, wavOf, newCode, handleBoxes, soundOf, levelOf } from '../server/boxes.mjs';
 import { toPcm16k } from '../server/speech.mjs';
+/* The boxes as before 21-11 (CLAVARIUM_WAKE_DROP=0): a wake not heard again still goes. */
+const keeping = async () => { const before = process.env.CLAVARIUM_WAKE_DROP; process.env.CLAVARIUM_WAKE_DROP = '0'; try { return (await import('../server/boxes.mjs?keep')).Boxes; } finally { if (before === undefined) delete process.env.CLAVARIUM_WAKE_DROP; else process.env.CLAVARIUM_WAKE_DROP = before; } };
 
 class MemoryFile { #v; constructor(v) { this.#v = v; } get() { return structuredClone(this.#v); } set(v) { this.#v = structuredClone(v); } }
 
@@ -707,9 +709,13 @@ test('the wake word heard again: its clip is dictated apart from the sentence, a
     assert.deepEqual(yes.sentences, [SENTENCE_BYTES], 'none of the clip went into the sentence');
     assert.equal(yes.whys[0], 'mot ✓ « Mésange. » · éveil 93 % · reçu 0,8 s niv 0 (silence)');
 
-    const no = wakeRig(Boxes, { clip: 'Bonjour à tous' });
+    /* Not heard: dropped by default since 21-11 (#396); with CLAVARIUM_WAKE_DROP=0, said with its mark. */
+    const dropped = wakeRig(Boxes, { clip: 'Bonjour à tous' });
+    await dropped.say({ clipBytes: 51_200 });
+    assert.equal(dropped.whys.length, 0, 'not said: dropping is on by default');
+    const no = wakeRig(await keeping(), { clip: 'Bonjour à tous' });
     await no.say({ clipBytes: 51_200 });
-    assert.equal(no.whys.length, 1, 'still said: dropping is off by default');
+    assert.equal(no.whys.length, 1, 'said when dropping is turned off');
     assert.ok(no.whys[0].startsWith('mot ✗ « Bonjour à tous » · éveil 93 %'), no.whys[0]);
 });
 
@@ -754,11 +760,8 @@ test('what Whisper makes of the wake word reads as it, « messenges » too; othe
     for (const t of ['bonjour', 'messe', 'mensonge']) assert.equal(WAKE_HEARD.test(t), false, t);
 });
 
-test('with CLAVARIUM_WAKE_DROP=1, a sentence whose wake word is not heard again is dropped in silence; a heard one goes', async () => {
-    const before = process.env.CLAVARIUM_WAKE_DROP;
-    process.env.CLAVARIUM_WAKE_DROP = '1';
-    let Dropping;
-    try { ({ Boxes: Dropping } = await import('../server/boxes.mjs?wake-drop')); } finally { if (before === undefined) delete process.env.CLAVARIUM_WAKE_DROP; else process.env.CLAVARIUM_WAKE_DROP = before; }
+test('by default (21-11, #396), a sentence whose wake word is not heard again is dropped in silence; a heard one goes', async () => {
+    const Dropping = Boxes;
     const no = wakeRig(Dropping, { clip: 'Bonjour à tous' });
     await no.say({ clipBytes: 51_200 });
     assert.equal(no.whys.length, 0, 'not said');
@@ -774,15 +777,16 @@ test('the wake word by its sound (05-11): what Whisper writes for « Mésange »
     for (const t of ['Mes anges.', 'Mésange.', 'les anges', 'Les ongles.', 'Mise en jeu.', 'Mise en oeuvre', 'Mise en route.', 'Mise en oche.', 'Mes doigts.', 'Les anges, est-ce que...']) assert.ok(wakeHeard(t), t);
     for (const t of ["Oui, à l'ombre.", 'bonjour', 'merci', 'mes amis', 'les autres', 'mensonge']) assert.equal(wakeHeard(t), false, t);
     assert.equal(dropsWake(false, 429), true, 'not heard, faint: the room from afar');
-    assert.equal(dropsWake(false, 812), false, 'not heard but a firm voice: kept, a real call may be');
-    assert.equal(dropsWake(false, NaN), false, 'no voice measured: kept');
+    /* Since 21-11 (#396) every wake not heard again is dropped: the owner chose so. */
+    assert.equal(dropsWake(false, 812), true, 'not heard, a firm voice: dropped too now');
+    assert.equal(dropsWake(false, NaN), true, 'no voice measured: dropped too now');
     assert.equal(dropsWake(true, 100), false, 'heard: kept');
     assert.ok(WAKE_FAINT > 429 && WAKE_FAINT < 812);
     assert.equal(dropsWake(false, NaN, 'timeout'), true, 'not heard and never ended (a radio, 06-11): dropped');
     assert.equal(dropsWake(true, NaN, 'timeout'), false, 'heard: kept, even long');
-    assert.equal(dropsWake(false, 1200, 'silence', "l'application de ton téléphone"), false, 'not heard, firm, ended, words in its clip: kept');
+    assert.equal(dropsWake(false, 1200, 'silence', "l'application de ton téléphone"), true, 'not heard, firm, ended, words in its clip: dropped now');
     assert.equal(dropsWake(false, 2439, 'silence', ''), true, 'no word at all in the clip (a radio, 06-11): dropped');
-    assert.equal(dropsWake(false, 812, 'silence', 'Laisse-moi te bouge.'), false, 'a real call of 05-11 missed by the check: always kept');
+    assert.equal(dropsWake(false, 812, 'silence', 'Laisse-moi te bouge.'), true, 'a call missed by the check: dropped now (the owner\'s choice, 21-11)');
 });
 
 test('a false wake on a radio (06-11), the whole way: not heard + cut by the length limit, or no word in its clip -> dropped, nothing said; a real call missed but firm -> said', async () => {
@@ -794,7 +798,10 @@ test('a false wake on a radio (06-11), the whole way: not heard + cut by the len
     assert.equal(music.whys.length, 0, 'no word in its clip: not said');
     const real = wakeRig(Boxes, { clip: "l'application de ton téléphone" });
     await real.say({ clipBytes: 51_200 });
-    assert.equal(real.whys.length, 1, 'a real call the check missed, ended by silence: said');
+    assert.equal(real.whys.length, 0, 'not heard, ended by silence: dropped by default since 21-11');
+    const kept = wakeRig(await keeping(), { clip: "l'application de ton téléphone" });
+    await kept.say({ clipBytes: 51_200 });
+    assert.equal(kept.whys.length, 1, 'with dropping turned off: said, as before');
 });
 
 test('woken by the word but no clip came to check it (06-11): a faint voice is dropped as the room\'s; a firm one, a button go', async () => {

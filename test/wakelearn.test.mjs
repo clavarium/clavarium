@@ -88,7 +88,7 @@ test('learns: each clip is kept as a 16 kHz WAV with its label; the sentence nev
     assert.equal(index.clips[1].heard, 'Bonjour à tous');
     const st = r.boxes.wakeStats(r.id);
     assert.deepEqual({ mode: st.mode, kept: st.kept, real: st.real, false: st.false, oldest: st.oldest }, { mode: 'learn', kept: 2, real: 1, false: 1, oldest: new Date(T0).toISOString() });
-    assert.equal(r.said.length, 2, 'both sentences still said (dropping is off)');
+    assert.equal(r.said.length, 1, 'the real one said; the false one dropped (on by default since 21-11, #396), its clip still kept to learn');
     /* A wake with no sentence after it is kept too: the check is the clip's. */
     await r.wake({ sentence: false });
     assert.equal(r.boxes.wakeStats(r.id).kept, 3);
