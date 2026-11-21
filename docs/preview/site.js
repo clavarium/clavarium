@@ -93,3 +93,11 @@
     };
   });
 })();
+
+/* The demo's play button: starts the film and steps aside. */
+document.querySelectorAll('.play').forEach(function (box) {
+  var v = box.querySelector('video'), b = box.querySelector('.playbtn');
+  if (!v || !b) return;
+  b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
+  v.addEventListener('play', function () { box.classList.add('on'); });
+});
