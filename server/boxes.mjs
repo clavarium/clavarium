@@ -33,7 +33,9 @@ export const FIRMWARE_MINUTES = 10;
 /* THE WAKE WORD HEARD AGAIN (03-11): « Mésange » and what a dictation makes of it (mes anges, mais sange...). */
 export const CLIP_MAX_BYTES = 16_000 * 2 * 3;
 export const WAKE_HEARD = /\bm[ae]i?s+\s?an?ge?s?\b|\b[ml][ae]s anges?\b|\bmesange|\bmaisange|\bmessage?s?\b|\bmessenge?s?\b/;   /* « Messenges »: Whisper's reading of the server's own voice saying it */
-export const WAKE_DROP = process.env.CLAVARIUM_WAKE_DROP === '1';
+/* ON BY DEFAULT since 21-11 (the owner, #396: a box woke on the radio some 8 times a morning, the word never heard,
+   each time a sentence sent): a wake whose word is not heard again sends nothing. CLAVARIUM_WAKE_DROP=0 turns it off. */
+export const WAKE_DROP = process.env.CLAVARIUM_WAKE_DROP !== '0';
 /* THE WORD BY ITS SOUND (05-11): on a lone word, Whisper writes « Mise en jeu », « Les ongles », « Mes doigts »
    for « Mésange » -- 14 of 21 real calls of 05-11 were marked ✗ by the spelling alone. Read by its sound: a first
    word in m/l ending on an s/z sound, then a word in an/en/on (« mise en… », « les ongles », « mes anges »), or
@@ -951,8 +953,8 @@ export class Boxes {
         }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (${soundOf(pcm)})`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
-        /* The wake word heard again (wake.clip): said beside the message; dropped in silence only once that is
-           turned on (WAKE_DROP), after its results were looked at -- a real call must never be lost to it. */
+        /* The wake word heard again (wake.clip): said beside the message; not heard, dropped in silence (WAKE_DROP, on
+           since 21-11, #396), one discreet line in the thread. */
         const check = link.wakeCheck ? await link.wakeCheck.catch(() => null) : null; link.wakeCheck = null;
         /* WOKEN BY THE WORD, BUT NO CLIP TO CHECK IT (06-11: « ce ne sera pas au niveau de fond », voice 195, passed): as a
            clip with no word in it -- dropped only when faint too; a firm voice, a button, a knock still go. */
