@@ -224,3 +224,10 @@ h2.sec{font-size:1rem;text-transform:uppercase;letter-spacing:.06em;color:var(--
 
 /* On a computer, the phone-format films sit in a phone's frame (21-11). */
 @media (min-width:700px){video.demo{box-sizing:border-box;border:10px solid #15171a;border-radius:34px;max-width:340px}}
+
+/* desktop films of the real app; a phone keeps its phone film */
+video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
+.play.wide{max-width:100%;width:100%}
+.only-phone{display:none}
+@media (max-width:760px){.only-desk,video.only-desk{display:none}.only-phone,video.only-phone{display:block}}
+@media (min-width:761px){.demo-grid{grid-template-columns:minmax(0,2.4fr) minmax(0,1fr);align-items:center}}
