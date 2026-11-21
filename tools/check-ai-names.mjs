@@ -146,7 +146,7 @@ if (mode === 'message') {
     bad = findings(who, 'git identity');
     /* Added lines only: a commit that DELETES a name must not be refused, or
        the guard would forbid its own cleanup. */
-    const diff = execFileSync('git', ['diff', '--cached', '--unified=0'], { encoding: 'utf8' });
+    const diff = execFileSync('git', ['diff', '--cached', '--unified=0'], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
     /* Walked file by file so the exemption can apply to one of them: a `+++`
        line names the file the hunks that follow belong to. */
     const added = [];
