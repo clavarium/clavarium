@@ -203,3 +203,12 @@ footer .meta a{color:var(--mute)}
   .map .col a{font-size:.95rem;flex-direction:column;align-items:flex-start;justify-content:center}
   .map .col a .go{display:none}
 }
+
+/* generated Parley chat shots (light/dark by <picture>) */
+picture{display:block}
+img.chat{display:block;border:1px solid var(--line);border-radius:16px;box-shadow:0 6px 24px rgba(0,0,0,.08)}
+img.chat.tel{width:100%;max-width:330px;margin:0 auto}
+img.chat.ordi{width:100%}
+.card img.chat.ordi{aspect-ratio:16/10;object-fit:cover;object-position:top}
+img.chat.ordi{max-width:800px;margin:0 auto}
+.card img.card-shot{max-width:none;aspect-ratio:16/10;object-fit:cover;object-position:top}
