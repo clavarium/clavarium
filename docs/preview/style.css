@@ -212,3 +212,6 @@ img.chat.ordi{width:100%}
 .card img.chat.ordi{aspect-ratio:16/10;object-fit:cover;object-position:top}
 img.chat.ordi{max-width:800px;margin:0 auto}
 .card img.card-shot{max-width:none;aspect-ratio:16/10;object-fit:cover;object-position:top}
+video.demo{display:block;width:100%;max-width:330px;margin:0 auto;border:1px solid var(--line);border-radius:16px;background:#fff}
+.diff{list-style:none;margin:0;padding:0;display:grid;gap:10px;align-content:center}
+.diff li{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--f);border-radius:10px;padding:12px 14px;font-weight:650}

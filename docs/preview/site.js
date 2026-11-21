@@ -16,7 +16,7 @@
     ['Data sovereignty', 'data-sovereignty.html', 'Your server, a European AI provider.'],
     ['Home and voice', 'home-and-voice.html', 'A voice assistant that runs at home.'],
     ['Mail & calendar assistant', 'mail-and-calendar.html', 'It drafts; you approve what goes out.'],
-    ['Team or office', 'team-and-office.html', 'One agent per client, shared by QR code.']
+    ['Work, home, club — kept apart', 'work-home-club.html', 'One assistant per life, nothing crosses over.']
   ];
   function el(tag, cls, text) {
     var e = document.createElement(tag);
