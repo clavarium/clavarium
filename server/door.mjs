@@ -27,6 +27,7 @@
  *   POST /c/api/<pairing>/conversations/<any>/talk/react        {to, reaction}: a reaction to a message of the tool (null: taken back)
  *   POST /c/api/<pairing>/conversations/<any>/talk/file?name=   a file attached to a message
  *   POST /c/api/<pairing>/terminal/repair   its terminal does not come (see conversations.mjs)
+ *   POST /c/api/<pairing>/conversations/<any>/signin-code?c=<any>   {code}: only a device given its terminal, which could type it there (#405)
  *        the chat of its conversation, where it talks through the app (see
  *        talk.mjs): read, written to, reminded. Turning it on and inviting
  *        the tool stay the owner's.
@@ -86,7 +87,7 @@ export function devicePairing(devices, headers, pairing) {
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
-export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes }) {
+export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes, signinCode }) {
     const url = new URL(request.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/c/api/')) return false;
     /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
@@ -189,6 +190,13 @@ export async function handleDoor(request, response, { devices, conversations, re
                 return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
             }
             if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
+        }
+        /* A sign-in code (#405): a device given its terminal could type it there; no other. Named twice, never guessed. */
+        const codeFor = /^\/conversations\/([^/]+)\/signin-code$/.exec(route);
+        if (request.method === 'POST' && codeFor && signinCode) {
+            need(part.terminal, 'the terminal');
+            if (decodeURIComponent(codeFor[1]) !== name) throw new Refusal(403, 'This device was not given the terminal of this conversation.');
+            return send(200, await signinCode(name, (await readJson(request)).code));
         }
         /* Its terminal does not come: only a device given it asks for it to be repaired. */
         if (request.method === 'POST' && route === '/terminal/repair') { need(part.terminal, 'the terminal'); return send(200, await repair(name)); }

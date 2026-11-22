@@ -11,6 +11,11 @@ export const SETTINGS_WORDS_FR = {
     'set-ch-s-words': 'Écran du chat', 'set-ch-s-dictation': 'Dictée', 'set-ch-s-shortcuts': 'Raccourcis', 'set-ch-s-thread': 'Événements du chat',
     'set-ch-s-updates': 'Mises à jour', 'set-ch-s-binders': 'Classeurs', 'set-ch-s-events': 'Activité', 'set-ch-s-jobs': 'Tâches', 'set-ch-s-logs': 'Journaux',
     'set-ch-s-usage': 'Usage', 'set-ch-s-backup': 'Sauvegarde', 'set-ch-s-advanced': 'Avancé',
+    /* The sign-in of a tool: its code pasted in a field, kept nowhere; the companion, its user's choice (#405). */
+    'set-signin-code-line': 'Une fois connecté, collez le code.', 'set-signin-code-sent': 'Code envoyé à l\'outil.', 'set-signin-code-act': 'Coller le code',
+    'set-signin-code-title': 'Code de connexion', 'set-signin-code-send': 'Envoyer', 'set-signin-code-bad': 'Ce n\'est pas un code.',
+    'set-signin-code-late': 'L\'outil n\'attend plus de code.', 'set-signin-code-failed': 'Non envoyé. Réessayez.',
+    'set-companion-yours': 'Votre choix, votre responsabilité',
     /* Chat › when its thread is archived (talk.mjs setSplit). */
     'set-chat-split': 'Archiver son fil', 'set-split-2000': 'Tous les 2 000 messages', 'set-split-5000': 'Tous les 5 000',
     'set-split-week': 'Chaque semaine', 'set-split-day': 'Chaque jour', 'set-split-never': 'Jamais',

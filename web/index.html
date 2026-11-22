@@ -276,7 +276,7 @@
             <!-- ITS ASSETS (07-11, assets step 4): one line; what it was given lives in its Assets tab (Give…, its rights). -->
             <div class="row access-assets"><button type="button" id="access-assets" class="as-link"></button></div>
             <!-- ITS SIGN-IN COMPANION (15-11, #362): the conversation that signs its tool in, if not the general one. -->
-            <div class="set-row" id="companion-here-row"><div class="set-what"><label for="companion-here">Sign-in companion</label><small id="companion-here-hint">Signs its tool in with its browser</small></div><div class="set-control"><select id="companion-here"></select></div></div>
+            <div class="set-row" id="companion-here-row"><div class="set-what"><label for="companion-here">Sign-in companion</label><small id="companion-here-hint">Signs its tool in with its browser</small><small data-said="set-companion-yours">Your choice, your responsibility</small></div><div class="set-control"><select id="companion-here"></select></div></div>
             <div id="signin-setup" hidden>
             <div class="panel-top"><b>Sign-in mailbox</b></div>
             <p class="hint">Its sign-in links, beside the terminal</p><p class="hint tip" hidden>A mailbox for this tool's account, read only; its password never enters the machine.</p>
@@ -1056,6 +1056,7 @@
         <!-- SIGN-IN COMPANION (15-11, #362): the conversation whose browser signs the others' tools in. -->
         <div class="set-row"><div class="set-what"><label for="companion-general">Sign-in companion</label><small id="companion-general-hint">Signs the tools in with its browser</small></div><div class="set-control"><select id="companion-general"></select></div></div>
         <div class="set-row"><div class="set-what"><label for="companion-clicks">It clicks Authorize itself</label><small>You have nothing to do</small></div><div class="set-control"><input type="checkbox" id="companion-clicks"></div></div>
+        <p class="companion-yours" data-said="set-companion-yours">Your choice, your responsibility</p>
         <p class="error" id="companion-general-error" role="alert" hidden></p>
           </div>
         </details>

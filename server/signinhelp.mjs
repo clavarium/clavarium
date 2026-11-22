@@ -16,7 +16,7 @@
  * WHAT HAPPENS. The link is written in the companion's docket folder (a file of its work folder, nowhere
  * else), and an event of kind KIND is posted to its docket: open it in its browser, let the person click
  * Authorize, read the code the page shows, give it back as the note of `docket done`. That note is typed
- * here into the asking tool, once, as screen-watch types a code the person pastes. The asking chat says
+ * here into the asking tool, once. The asking chat says
  * one line ("Signing in through « B »...") with a button that shows the link to the person instead.
  * No answer in WAIT_MS, a failure, or no code: the link goes to the person, as before.
  *
@@ -26,6 +26,11 @@
  * The link must be HTTPS and lead to a domain the tool declares ("signin.links"): an agent that writes a
  * forged ask in its own chat folder can have the companion open nothing else -- and the person still
  * sees the page and decides to click. No link is made here, none is reachable without signing in.
+ *
+ * THE PERSON'S OWN CODE (22-11, #405). Told the link, the person gets a line in the chat with a button that opens
+ * a small field. What is pasted there comes to enterCode: checked, typed into the tool once, and kept nowhere (not
+ * the thread, the inbox, a log, an event). A chat message is never typed as a code: the secret scan treats it as any
+ * other message.
  */
 import { lstatSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -40,9 +45,14 @@ export const ROUTE = 'signin-route.json';
 export const CHAT = '.parley';
 export const DOCKET = '.docket';
 export const WAIT_MS = 10 * 60_000;
-/* How long after its tool asked a code pasted by the person is taken as that code (and not as a secret). */
+/* How long after its tool asked its code field stays open. */
 export const CODE_WAIT_MS = 30 * 60_000;
 export const TICK_MS = 3000;
+/* How often the screen of a tool told its link is read, until it shows its code prompt. */
+export const OFFER_EVERY_MS = 6000;
+const SCREEN_LINES = 12;
+export const CODE_LINE = 'Once signed in, paste the code.';
+export const CODE_SENT = 'Code sent to the tool.';
 export const NONE = 'none';
 const ASK_BYTES = 16_384;
 const LINK_MAX = 4000;
@@ -60,7 +70,7 @@ export function linkAllowed(link, domains = []) {
 }
 const cut = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 
-/* The code typed into the tool, then Enter -- as screen-watch types a code the person pastes. Never logged. */
+/* The code typed into the tool, then Enter. Never logged. */
 export async function typeInto(vms, name, text) {
     const tmux = ['tmux', '-L', SOCKET, 'send-keys', '-t', `=${SESSION}:`];
     if ((await vms.exec(name, [...tmux, '-l', '--', text], { timeoutMs: 30_000 })).code !== 0) return false;
@@ -68,18 +78,24 @@ export async function typeInto(vms, name, text) {
 }
 
 export class SigninHelp {
-    #store; #conversations; #tools; #awake; #chatOn; #work; #browsers; #post; #type; #event; #now;
+    #store; #conversations; #tools; #awake; #chatOn; #work; #browsers; #post; #type; #event; #now; #exec;
     /* asker -> { id (its ask), companion, event (the docket event's id), at, file, code (a code is awaited) } */
     #open = new Map();
     /* asker -> the id of the last ask looked at: each is routed once. */
     #seen = new Map();
     #busy = false;
+    /* asker -> the ask whose field was offered in its chat; when its screen was last read for that; a code being typed. */
+    #offered = new Map();
+    #looked = new Map();
+    #typing = new Set();
 
     /* `store`: { get(), set(v) } of { general, per: { name: companion | NONE } }. `conversations()`: [{ name, tool }].
        `tools()`: config/tools.json as read. `awake()`, `chatOn(name)`. `workFolder(name)`. `browsers(name)`: the
        browser targets it was given, [{ id, level }]. `post(name, {kind, text, data})`: its docket. `type(name, text)`:
-       typed into its tool, then Enter (resolves true when typed). `event(name, line)`: a line in its chat. */
-    constructor({ store, conversations, tools, awake, chatOn, workFolder, browsers, post, type, event = () => {}, now = () => Date.now() }) {
+       typed into its tool, then Enter (resolves true when typed). `event(name, line)`: a line in its chat.
+       `exec(name, argv, options)`: a command in its machine (to read its tool's screen). */
+    constructor({ store, conversations, tools, awake, chatOn, workFolder, browsers, post, type, event = () => {}, now = () => Date.now(), exec = null }) {
+        this.#exec = exec;
         this.#store = store; this.#conversations = conversations; this.#tools = tools; this.#awake = awake; this.#chatOn = chatOn;
         this.#work = workFolder; this.#browsers = browsers; this.#post = post; this.#type = type; this.#event = event; this.#now = now;
     }
@@ -145,17 +161,57 @@ export class SigninHelp {
         if (!this.#own(dir)) return;
         try { writeFileSync(join(dir, `.${ROUTE}.new`), JSON.stringify(route)); renameSync(join(dir, `.${ROUTE}.new`), join(dir, ROUTE)); } catch { /* its chat folder cannot be written: screen-watch tells the person itself */ }
     }
-    /* A CODE AWAITED FROM THE PERSON (20-11, #394): its tool asked to sign in, the link was told to the person (not
-       handed to a companion), a short while ago. Then a message that is nothing but a code is that code: typed into
-       the tool by screen-watch, never lifted out as a secret (19-11: « code#state » kept as two secrets, the tool
-       never got it). */
-    awaitsCode(name, text) {
-        if (!CODE.test(String(text ?? '').trim())) return false;
-        const ask = this.#readAsk(name); if (!ask) return false;
-        const at = Date.parse(ask.at); if (!Number.isFinite(at) || this.#now() - at > CODE_WAIT_MS || at > this.#now() + 60_000) return false;
-        if (ask.told === true) return true;
+    /* The ask is the person's to answer: told the link, or routed to them, a short while ago. */
+    #personsAsk(name) {
+        const ask = this.#readAsk(name); if (!ask) return null;
+        const at = Date.parse(ask.at); if (!Number.isFinite(at) || this.#now() - at > CODE_WAIT_MS || at > this.#now() + 60_000) return null;
+        if (this.#open.has(name)) return null;
+        if (ask.told === true) return ask;
         const route = this.#readRoute(name);
-        return route?.id === ask.id && route.route === 'person';
+        return route?.id === ask.id && route.route === 'person' ? ask : null;
+    }
+    /* DURING AN UPDATE: a tool started before #405 keeps its old screen-watch until it restarts (the launcher is read at
+       its start), and that one types the next code-like message of the chat. Its ask has no `field`. Such a message is
+       then lifted whole as a secret: what reaches the inbox is a marker, which it cannot take for a code. */
+    oldWatcherArmed(name, text) {
+        if (!CODE.test(String(text ?? '').trim())) return false;
+        const ask = this.#personsAsk(name);
+        return ask !== null && ask.field !== true;
+    }
+    /* THE CODE PASTED IN ITS FIELD (#405). Typed once, only while its tool shows its prompt; the value is in no answer,
+       no error, no log, no file. */
+    async enterCode(name, value) {
+        if (!this.#exists(name)) throw new Refusal(404, 'No such conversation.');
+        const code = typeof value === 'string' ? value.trim() : '';
+        if (!CODE.test(code)) throw new Refusal(400, 'This is not a sign-in code.');
+        const ask = this.#personsAsk(name);
+        if (!ask) throw new Refusal(409, 'No sign-in is waiting for a code here.');
+        if (this.#typing.has(name)) throw new Refusal(409, 'A code is already being sent.');
+        this.#typing.add(name);
+        try {
+            const exec = (argv, options) => this.#exec(name, argv, options);
+            const at = this.#exec ? await this.atCodePrompt(name, exec).catch(() => false) : false;
+            if (!at) throw new Refusal(409, 'Its tool is not waiting for a code now.');
+            const typed = await Promise.resolve(this.#type(name, code)).catch(() => false);
+            if (!typed) throw new Refusal(502, 'The code could not be typed into the tool.');
+            /* Typed: the ask is over, whatever comes next is not this code. */
+            const dir = this.#chat(name);
+            if (this.#own(dir)) { try { rmSync(join(dir, ASK), { force: true }); } catch { /* it runs out by itself */ } }
+            this.#route(name, { id: ask.id, route: 'done' });
+            this.#offered.delete(name); this.#looked.delete(name);
+            this.#line(name, { kind: KIND, text: CODE_SENT, topic: 'Sign-in', brief: 'Code sent' });
+            return { ok: true };
+        } finally { this.#typing.delete(name); }
+    }
+    /* Its tool shows its prompt, its link told: one line in its chat, with the button that opens the field. */
+    async #offerCode(name, ask) {
+        if (ask.told !== true || !this.#exec || this.#offered.get(name) === ask.id || this.#open.has(name)) return;
+        if (this.#now() - (this.#looked.get(name) ?? -Infinity) < OFFER_EVERY_MS) return;
+        this.#looked.set(name, this.#now());
+        const at = await this.atCodePrompt(name, (argv, options) => this.#exec(name, argv, options)).catch(() => false);
+        if (!at || this.#readAsk(name)?.id !== ask.id) return;
+        this.#offered.set(name, ask.id);
+        this.#line(name, { kind: KIND, text: CODE_LINE, level: 'needs-you', topic: 'Sign-in', brief: 'Paste the code', actions: ['signincode'] });
     }
     /* ITS TOOL IS AT ITS « PASTE THE CODE » PROMPT (22-11, seen on a real machine): a line typed now goes into that field
        and the sign-in fails. Asked of its screen, only while a sign-in is open and its tool has such a prompt. */
@@ -166,7 +222,10 @@ export class SigninHelp {
         if (!rules.length) return false;
         const r = await exec(['tmux', '-L', SOCKET, 'capture-pane', '-p', '-t', `=${SESSION}:`], { timeoutMs: 10_000 });
         if (r.code !== 0) return false;
-        return rules.some((p) => { try { return new RegExp(p).test(String(r.stdout)); } catch { return false; } });
+        /* As screen-watch reads it: the bottom of the screen, whatever the case. A prompt left higher up is over, and a
+           code typed then would go to the AI as a message. */
+        const bottom = String(r.stdout).replace(/\s+$/u, '').split('\n').slice(-SCREEN_LINES).join('\n');
+        return rules.some((p) => { try { return new RegExp(p, 'i').test(bottom); } catch { return false; } });
     }
     #readRoute(name) { try { return JSON.parse(readFileSync(join(this.#chat(name), ROUTE), 'utf8')); } catch { return null; } }
     #line(name, line) { try { this.#event(name, line); } catch { /* its chat may be off */ } }
@@ -178,13 +237,15 @@ export class SigninHelp {
         this.#busy = true;
         try {
             for (const [name, o] of [...this.#open]) if (this.#now() - o.at > WAIT_MS) this.#toPerson(name, `« ${o.companion} » did not answer in ${Math.round(WAIT_MS / 60_000)} minutes: the sign-in link is shown to you.`);
+            const offers = [];
             for (const name of this.#awake()) {
                 if (!this.#chatOn(name)) continue;
                 const ask = this.#readAsk(name);
-                if (!ask || this.#seen.get(name) === ask.id) continue;
-                this.#seen.set(name, ask.id);
-                this.#ask(name, ask);
+                if (!ask) continue;
+                if (this.#seen.get(name) !== ask.id) { this.#seen.set(name, ask.id); this.#ask(name, ask); }
+                offers.push(this.#offerCode(name, ask).catch(() => {}));
             }
+            await Promise.all(offers);
         } finally { this.#busy = false; }
     }
 

@@ -594,15 +594,17 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
            the chat shows as stars; the value reaches the machine as
            /run/secrets/<name>, and is swept after a few minutes. */
         screen: async (conversation, text) => {
-            /* A sign-in code its tool waits for (#394): left whole, screen-watch types it in. */
-            if (signinHelp?.awaitsCode(conversation, text)) return text;
-            const hits = scan(text);
+            /* A chat message is never a sign-in code (#405). A tool still run by an older screen-watch would type this
+               one: lifted whole, so that only a marker reaches its inbox. */
+            const armed = signinHelp?.oldWatcherArmed(conversation, text) === true;
+            const whole = String(text).trim();
+            const hits = armed ? [{ start: text.indexOf(whole), end: text.indexOf(whole) + whole.length, value: whole }] : scan(text);
             if (!hits.length) return text;
             let out = ''; let last = 0; let any = false;
             for (const h of hits) {
                 out += text.slice(last, h.start);
                 try { const { name, expiresAt } = secrets.stash(conversation, h.value); out += secretRef(name, Date.parse(expiresAt)); any = true; }
-                catch { out += text.slice(h.start, h.end); }      /* cannot be stashed (too large): left as it is */
+                catch { out += armed ? '(not kept)' : text.slice(h.start, h.end); }      /* cannot be stashed (too large): left as it is, but never for an older screen-watch to type */
                 last = h.end;
             }
             out += text.slice(last);
@@ -646,9 +648,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         workFolder: (name) => folders.workFolder(name),
         browsers: (name) => { try { return tethers.store().targets().filter((t) => t.kind === 'browser').map((t) => ({ id: t.id, level: t.grants?.[`conversation:${name}`]?.level ?? '' })).filter((b) => b.level); } catch { return []; } },
         post: (name, event) => dockets.post(name, event), type: (name, text) => typeInto(vms, name, text),
+        exec: (name, argv, options) => vms.exec(name, argv, options),
         event: (name, line) => talk.event(name, line) });
     const stopSigninHelp = signinHelp.start();
     all.signinHelp = signinHelp;
+    door.signinCode = (name, code) => signinHelp.enterCode(name, code);
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
     /* A mail cited by its reference, opened on a device that may read its mailbox (mailref.mjs). */
