@@ -157,6 +157,17 @@ export class SigninHelp {
         const route = this.#readRoute(name);
         return route?.id === ask.id && route.route === 'person';
     }
+    /* ITS TOOL IS AT ITS « PASTE THE CODE » PROMPT (22-11, seen on a real machine): a line typed now goes into that field
+       and the sign-in fails. Asked of its screen, only while a sign-in is open and its tool has such a prompt. */
+    async atCodePrompt(name, exec) {
+        const ask = this.#readAsk(name); if (!ask) return false;
+        const at = Date.parse(ask.at); if (!Number.isFinite(at) || this.#now() - at > CODE_WAIT_MS) return false;
+        const rules = (this.#tool(name)?.signin?.screen ?? []).filter((r) => String(r).startsWith('code:')).map((r) => String(r).slice(5));
+        if (!rules.length) return false;
+        const r = await exec(['tmux', '-L', SOCKET, 'capture-pane', '-p', '-t', `=${SESSION}:`], { timeoutMs: 10_000 });
+        if (r.code !== 0) return false;
+        return rules.some((p) => { try { return new RegExp(p).test(String(r.stdout)); } catch { return false; } });
+    }
     #readRoute(name) { try { return JSON.parse(readFileSync(join(this.#chat(name), ROUTE), 'utf8')); } catch { return null; } }
     #line(name, line) { try { this.#event(name, line); } catch { /* its chat may be off */ } }
     #tool(name) { const id = this.#conversations().find((c) => c.name === name)?.tool; return this.#tools().find((t) => t.id === id); }

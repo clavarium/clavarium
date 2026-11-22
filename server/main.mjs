@@ -502,8 +502,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A wake-up typed is said in its chat (talk, made below: called only once a wake-up fires). */
     /* Where its chat is on, what wakes a tool is an event it acknowledges: see dockets.mjs. */
     let signinHelp = null;
+    const atCodePrompt = async (name) => { try { return (await signinHelp?.atCodePrompt(name, (argv, options) => vms.exec(name, argv, options))) === true; } catch { return false; } };
     const dockets = new Dockets({ store: new Store(`${dataDir}/dockets.json`), resources: folders,
-        say: (name, line) => wakeups.say(name, line),
+        /* Not while its tool waits for a sign-in code: the line would go into that field; the docket tries again. */
+        say: async (name, line) => ((await atCodePrompt(name)) ? false : wakeups.say(name, line)),
         event: (name, line) => talk.event(name, line),
         alert: (message) => { void alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }); },
         /* Not in a turn: its pulse ended, or is old (Parley's own measure). */
@@ -579,7 +581,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
     let boxes; let rooms; let machineList;
-    const talk = new Talk({ spoke: (name, text, to, how) => { void boxes?.agentSaid(name, text, to, how); }, inRoom: (name, entry, kind) => rooms?.answered(name, entry, kind), store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+    const talk = new Talk({ holdLine: atCodePrompt, spoke: (name, text, to, how) => { void boxes?.agentSaid(name, text, to, how); }, inRoom: (name, entry, kind) => rooms?.answered(name, entry, kind), store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
            what is already known of a machine used instead of asking (talk.mjs). */

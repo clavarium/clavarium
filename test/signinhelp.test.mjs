@@ -235,3 +235,18 @@ test("a code the person pastes while their tool waits for it is that code, not a
     assert.equal(b.route('alpha').route, 'companion');
     assert.equal(b.help.awaitsCode('alpha', CODE), false);
 });
+
+test('at its code prompt nothing may be typed: asked of its screen, only while a sign-in is open and its tool has such a prompt', async (t) => {
+    const b = bench(t);
+    const screen = (text, code = 0) => async () => ({ code, stdout: text, stderr: '' });
+    const prompt = 'Paste code here if prompted >';
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt)), false, 'no sign-in open');
+    b.ask('alpha');
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt)), true);
+    assert.equal(await b.help.atCodePrompt('alpha', screen('> ready')), false, 'signed in: its screen moved on');
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt, 1)), false, 'its screen could not be read');
+    b.ask('gamma');
+    assert.equal(await b.help.atCodePrompt('gamma', screen(prompt)), false, 'a tool without a code prompt');
+    b.world.now += 31 * 60_000;
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt)), false, 'after its time: never held for ever');
+});
