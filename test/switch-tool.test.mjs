@@ -161,3 +161,16 @@ test('the catalogue says which tools can be changed to; the real one offers the 
     for (const id of ['claude-code', 'vibe', 'codex']) assert.ok(can.includes(id), id);
     assert.ok(!can.includes('shell')); assert.ok(!can.includes('guichet'));
 });
+
+test('an install cut off is marked: the mark goes only once it is done and written to disk', async (t) => {
+    const cut = bench(t, { failInstall: true }); cut.put();
+    await go(cut, 'beta');
+    assert.ok(cut.calls.some((c) => c.includes('touch') && c.includes('.clavarium-installing-beta')));
+    assert.ok(!cut.calls.some((c) => c.includes('rm -f') && c.includes('.clavarium-installing-beta')));
+    const whole = bench(t); whole.put();
+    await go(whole, 'beta');
+    const setup = whole.calls.findIndex((c) => c.includes('setup'));
+    const gone = whole.calls.findIndex((c) => c.includes('rm -f') && c.includes('.clavarium-installing-beta'));
+    assert.ok(setup >= 0 && gone > setup);
+    assert.match(whole.calls[gone], /^sh -c sync;/);
+});

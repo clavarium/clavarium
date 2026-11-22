@@ -1055,12 +1055,19 @@ export class Conversations {
     async #installFor(name, tool, act) {
         act.ctl = new AbortController();
         const run = (argv, options = {}) => this.#vms.exec(name, argv, { ...options, signal: act.ctl.signal });
-        const present = async () => (await run(['sh', '-c', 'command -v "$1"', 'probe', tool.command[0]])).code === 0;
+        /* AN INSTALL CUT OFF (22-11, seen on a real machine: forced off in the middle, its program left EMPTY, which
+           starts and exits at once): marked while it runs, written to disk before the mark goes. Marked or empty: not there. */
+        const mark = `.clavarium-installing-${tool.id}`;
+        const present = async () => (await run(['sh', '-c', 'command -v "$1" >/dev/null && [ -s "$(readlink -f "$(command -v "$1")")" ] && [ ! -e "$HOME/$2" ]', 'probe', tool.command[0], mark])).code === 0;
         let steps = tool.steps;
         if (tool.steps.length === 0 || await present()) {
             const r = await run(['sh', '-c', 'for p in "$@"; do [ -e "$HOME/$p" ] && exit 0; done; exit 3', 'probe', ...tool.state.keep]);
             if (r.code !== 0 && r.code !== 3) return `its machine could not be read (${firstLine(r.stderr) || `exit ${r.code}`})`;
             steps = r.code === 0 ? [] : tool.steps.filter((s) => s.argv[0] !== 'sudo');
+        }
+        if (steps.length > 0) {
+            const r = await run(['sh', '-c', 'touch "$HOME/$1" && sync', 'probe', mark]);
+            if (r.code !== 0) return `its machine could not be written (${firstLine(r.stderr) || `exit ${r.code}`})`;
         }
         for (const [i, step] of steps.entries()) {
             if (!this.#store.get(name)) return 'it was archived';
@@ -1071,6 +1078,7 @@ export class Conversations {
             if (r.code !== 0) return `installing ${tool.label} failed at step ${i + 1}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
         }
         if (act.preempted) return 'its machine was forced off';
+        if (steps.length > 0) await run(['sh', '-c', 'sync; rm -f "$HOME/$1"; sync', 'probe', mark]);
         if (steps.length > 0 && !(await present())) return `${tool.label} is not there after its install`;
         return undefined;
     }

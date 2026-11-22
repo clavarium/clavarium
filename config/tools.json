@@ -298,6 +298,7 @@
         "install",
         "-q",
         "--disable-pip-version-check",
+        "--force-reinstall",
         "mistral-vibe"
       ],
       [
