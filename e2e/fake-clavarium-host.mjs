@@ -464,6 +464,11 @@ if (area === 'vm') {
             const r = spawnSync('sh', ['-c', script, ...rest.slice(2)], { env: { ...process.env, HOME: homeDir }, stdio: 'inherit' });
             process.exit(r.status ?? 1);
         }
+        /* The look that its work folder is shown in its machine, before a copy or a move (0.2.450): the same mapping. */
+        if (program === 'sh' && rest[0] === '-c' && /^mkdir -p \/work\/\.clavarium-carry && : > \/work\/\.clavarium-carry\/probe-\d+$/.test(rest[1])) {
+            const r = spawnSync('sh', ['-c', rest[1].replaceAll('/work/.clavarium-carry', `${join(DATA, 'work', vm.replace(/^clv-/, ''))}/.clavarium-carry`)], { stdio: 'inherit' });
+            process.exit(r.status ?? 1);
+        }
         /* A copy's first start, and the look that its tool is there: each given
            a moment, so that a test sees every step of the build go by. */
         if (program === 'cloud-init' || program === 'which') {
