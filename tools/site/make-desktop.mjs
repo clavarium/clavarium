@@ -33,7 +33,7 @@ const VIEW = { width: 1280, height: 800 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tool = (id, label) => ({ id, label, command: ['env', 'PS1=agent@work:/work$ ', 'bash', '--norc', '--noprofile'], memoryMb: 2048, install: [['true']] });
 const TOOLS = [tool('claude-code', 'Claude Code'), tool('codex', 'Codex CLI'), tool('opencode', 'OpenCode'), tool('vibe', 'Mistral Vibe')];
-const TEAM = [['Archive search', 'claude-code'], ['Newsletter', 'opencode'], ['Client data', 'vibe'], ['Invoices', 'codex'], ['Shop site', 'claude-code']];
+const TEAM = [['My genealogist', 'claude-code'], ['Family organizer', 'opencode'], ['My personal assistant', 'claude-code'], ['Assistant for Dad', 'vibe'], ['My confidential work', 'vibe'], ['My work assistant', 'codex'], ['My app Lys', 'claude-code']];
 const MAILBOX = { id: 'work-mail', title: 'Work mailbox', kind: 'mail', connector: 'mail', config: { user: 'sam@example.com', host: 'mail.example.com', port: 993, smtpHost: 'mail.example.com', smtpPort: 587 } };
 /* The mailbox of the film: it answers, and sends nothing. */
 const mailConnector = { run: async (verb) => {
@@ -52,16 +52,18 @@ async function seed(b, me) {
     await me.until('the team is ready', async () => (await me.api('/api/conversations')).body.filter((c) => c.phase === 'ready').length === TEAM.length, 60_000);
     for (const [title] of TEAM) await me.api(`/api/conversations/${title.toLowerCase().replace(/ /g, '-')}/talk`, { on: true });
     const agents = Object.fromEntries(TEAM.map(([title]) => { const name = title.toLowerCase().replace(/ /g, '-'); return [name, bridge(parleyDir(b, name))]; }));
-    agents.newsletter.tell('November issue drafted: 4 articles, ready for you to read.');
-    agents['client-data'].tell('Summary of the 12 interviews is in `summary.md`.');
-    agents['client-data'].status('working', 'Removing names from the interviews');
-    agents.invoices.tell('3 invoices are unpaid for more than 30 days.');
-    agents.invoices.ask('Send the 3 reminders?', ['Yes, send them', 'Not yet']);
-    agents['shop-site'].tell('Found the login bug: the session ended after 5 minutes.');
-    agents['shop-site'].status('working', 'Running the tests');
-    agents['archive-search'].tell('The 2019 contracts are indexed.');
-    await me.api('/api/conversations/archive-search/sleep', {});
-    await me.until('one is asleep', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'archive-search')?.stopped !== false, 8000).catch(() => {});
+    agents['family-organizer'].tell('School trip on Friday: the form is ready to sign.');
+    agents['my-personal-assistant'].tell('Your week is ready: 3 things need you.');
+    agents['assistant-for-dad'].tell('Told Dad about his doctor on Tuesday at 10.');
+    agents['my-confidential-work'].tell('Summary of the 12 interviews is in `summary.md`.');
+    agents['my-confidential-work'].status('working', 'Removing names from the interviews');
+    agents['my-work-assistant'].tell('3 invoices are unpaid for more than 30 days.');
+    agents['my-work-assistant'].ask('Send the 3 reminders?', ['Yes, send them', 'Not yet']);
+    agents['my-app-lys'].tell('Found the login bug: the session ended after 5 minutes.');
+    agents['my-app-lys'].status('working', 'Running the tests');
+    agents['my-genealogist'].tell('Two new ancestors found in the 1891 census.');
+    await me.api('/api/conversations/my-genealogist/sleep', {});
+    await me.until('one is asleep', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'my-genealogist')?.stopped !== false, 8000).catch(() => {});
     /* The app's "what to try next" banner has no place in the film. */
     await me.page.goto(`${b.origin}/`);
     const x = me.page.locator('.ft-x').first();
@@ -132,21 +134,21 @@ const FILMS = {
         await tap(page.locator('#list-pin'), 500);
         await f.poster();
         await sleep(1400);
-        agents['shop-site'].tell('Login fixed. 42 tests pass.');
+        agents['my-app-lys'].tell('Login fixed. 42 tests pass.');
         await sleep(1700);
-        await tap(page.locator('#list .item[data-name="invoices"]:visible').first(), 2300);
-        agents['client-data'].doing('Removing names from the interviews');
-        await tap(page.locator('#list .item[data-name="client-data"]:visible').first(), 2400);
-        agents['shop-site'].doing('Writing the release notes');
-        await tap(page.locator('#list .item[data-name="shop-site"]:visible').first(), 2400);
+        await tap(page.locator('#list .item[data-name="my-work-assistant"]:visible').first(), 2300);
+        agents['my-confidential-work'].doing('Removing names from the interviews');
+        await tap(page.locator('#list .item[data-name="my-confidential-work"]:visible').first(), 2400);
+        agents['my-app-lys'].doing('Writing the release notes');
+        await tap(page.locator('#list .item[data-name="my-app-lys"]:visible').first(), 2400);
         await tap('#nav-home', 2000);
-        await closing('A team of agents, on your server.', 2800);
+        await closing('The best of each AI. Your server, your rules.', 2800);
     },
     async machine(b, f, agents) {
         const { page, tap, closing, me, noBenchLine } = f;
-        writeFileSync(join(b.dir, 'kept-work', 'shop-site', 'work', 'checkout.js'), 'export const SESSION_MINUTES = 60;\nexport const cart = (items) => items.length;\n');
-        writeFileSync(join(b.dir, 'kept-work', 'shop-site', 'work', 'notes.md'), '# Shop site\nLogin: session was 5 min, now 60.\n');
-        await page.goto(`${b.origin}/?c=shop-site`);
+        writeFileSync(join(b.dir, 'kept-work', 'my-app-lys', 'work', 'checkout.js'), 'export const SESSION_MINUTES = 60;\nexport const cart = (items) => items.length;\n');
+        writeFileSync(join(b.dir, 'kept-work', 'my-app-lys', 'work', 'notes.md'), '# Lys app\nLogin: session was 5 min, now 60.\n');
+        await page.goto(`${b.origin}/?c=my-app-lys`);
         await page.locator('#view-chat').waitFor();
         await page.locator('#view-chat').click();
         await sleep(1800);
@@ -176,7 +178,7 @@ const FILMS = {
     },
     async assets(b, f) {
         const { page, tap, closing, me } = f;
-        await page.goto(`${b.origin}/?c=invoices`);
+        await page.goto(`${b.origin}/?c=my-work-assistant`);
         await page.locator('#view-assets').waitFor();
         await tap('#view-assets', 900);
         const give = async (name, right) => {
@@ -203,17 +205,17 @@ const FILMS = {
     },
     async approval(b, f, agents) {
         const { page, tap, closing, me } = f;
-        const side = join(b.dir, 'kept-work', 'invoices', 'work', '.tether');
+        const side = join(b.dir, 'kept-work', 'my-work-assistant', 'work', '.tether');
         mkdirSync(side, { recursive: true });
-        await page.goto(`${b.origin}/?c=invoices`);
+        await page.goto(`${b.origin}/?c=my-work-assistant`);
         await page.locator('#view-chat').waitFor();
         await page.locator('#view-chat').click();
         await sleep(1300);
         await tap(page.locator('#simple-thread .parley-replies button, #simple-thread button').filter({ hasText: 'Yes, send them' }).first(), 900);
-        agents.invoices.read();
-        agents.invoices.doing('Reading the 3 unpaid invoices');
+        agents['my-work-assistant'].read();
+        agents['my-work-assistant'].doing('Reading the 3 unpaid invoices');
         await sleep(1800);
-        agents.invoices.doing('Drafting the reminder to Harbor Print');
+        agents['my-work-assistant'].doing('Drafting the reminder to Harbor Print');
         await sleep(1500);
         appendFileSync(join(side, 'asks.jsonl'), `${JSON.stringify({ id: 'film-1', op: 'mail.send', args: { target: 'work-mail', to: 'accounts@harborprint.example.com', subject: 'Invoice 2026-114: a friendly reminder', body: 'Hello,\nOur invoice 2026-114 of 14 October is still open.\nCould you confirm the payment date?\nThank you,\nSam', why: 'you asked me to remind unpaid clients' }, at: new Date().toISOString() })}\n`);
         const card = page.locator('#simple-thread .parley-request').first();
@@ -225,7 +227,7 @@ const FILMS = {
         await sleep(3200);
         await tap(card.locator('.parley-request-yes'), 800);
         await me.until('Tether has the decision', async () => ((await me.api('/api/tether')).body.approvals ?? []).length === 0, 20_000);
-        agents.invoices.tell('Sent to Harbor Print. Two reminders left.');
+        agents['my-work-assistant'].tell('Sent to Harbor Print. Two reminders left.');
         await sleep(3400);
         await closing('Nothing leaves without your OK.');
     },
@@ -245,7 +247,7 @@ async function run(names) {
                 await setup.api('/api/resources', { name: 'client-files' });
                 await setup.api('/api/secrets', { name: 'BOOKING_KEY', value: 'demo-value-not-a-real-key' });
             }
-            if (name === 'approval') await setup.api('/api/tether/level', { target: 'work-mail', agent: 'conversation:invoices', level: 'propose' });
+            if (name === 'approval') await setup.api('/api/tether/level', { target: 'work-mail', agent: 'conversation:my-work-assistant', level: 'propose' });
             await setup.page.close();
             const f = await filmed(b, vids);
             f.poster = () => f.page.screenshot({ path: join(OUT, `desktop-${name}-poster.png`) });
