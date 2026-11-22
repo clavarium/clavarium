@@ -4,17 +4,17 @@
 (function () {
   var F = [
     ['One machine each', 'isolated-agents.html', 'One VM per agent, or several in one.', 'agents stay apart', 'agents stay apart'],
-    ['Choose who sees what', 'assets-and-keys.html', 'Keys, folders, accounts: given per agent, taken back.', 'accounts and folders', 'accounts and folders'],
+    ['Choose what each sees', 'assets-and-keys.html', 'Keys, folders, accounts: given per agent, taken back.', 'accounts and folders', 'accounts and folders'],
     ['Work from your phone', 'parley.html', 'Chat with your agents from your phone or computer.', 'or computer', 'or computer'],
-    ['Mail, contacts, calendar', 'tether.html', 'Mail, contacts, calendar, files, browser, MCP.', 'files, browser, MCP', 'files, browser, MCP'],
-    ['Speak, it answers', 'voice-boxes.html', 'Talk to your AI from any room.', 'home voice speakers', 'home voice speakers'],
-    ['Get AIs collaborating', 'rooms.html', 'Several AIs in one room, hand-overs capped.', 'shared rooms', 'shared rooms']
+    ['Connect what you use', 'tether.html', 'Mail, contacts, calendar, files, browser, MCP.', 'mail, calendar, files, more', 'mail, calendar, files, more'],
+    ['Speak, it answers', 'voice-boxes.html', 'Talk to your AI from any room.', 'with a voice box', 'with a voice box'],
+    ['One room, several AIs', 'rooms.html', 'Several AIs in one room, hand-overs capped.', 'they work together', 'they work together']
   ];
   var U = [
     ['Help the whole family', 'family.html', 'Marcel, 82, talks to a box at home.'],
     ['Fix bugs, review code', 'coding-agents.html', 'Several agents in parallel, you review.'],
-    ['Keep your logins yours', 'data-sovereignty.html', 'Your server, a European AI provider.'],
-    ['Ask aloud at home', 'home-and-voice.html', 'A voice assistant that runs at home.'],
+    ['Share access, not logins', 'data-sovereignty.html', 'Your server, a European AI provider.'],
+    ['Switch AI, keep your work', 'switch-ai.html', 'Accounts, files and thread stay. The old AI\'s private memory does not.', 'accounts, files, thread'],
     ['Sort mail, plan meetings', 'mail-and-calendar.html', 'It drafts; you approve what goes out.'],
     ['Separate work, home, club', 'work-home-club.html', 'One assistant per life, nothing crosses over.']
   ];
