@@ -231,3 +231,14 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 .only-phone{display:none}
 @media (max-width:760px){.only-desk,video.only-desk{display:none}.only-phone,video.only-phone{display:block}}
 @media (min-width:761px){.demo-grid{grid-template-columns:minmax(0,2.4fr) minmax(0,1fr);align-items:center}}
+
+/* The rotating word of the home title: all words in one cell, so the line never moves. */
+.rot{display:inline-grid;justify-items:start;color:var(--f);text-align:left;transition:width .35s ease}
+.rot{overflow-x:clip}
+.rot>span{white-space:nowrap}
+.rot>span{grid-area:1/1;opacity:0;transform:translateY(.28em);transition:opacity .35s ease,transform .35s ease}
+.rot>span.on{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.rot>span{transition:none}}
+@media (prefers-reduced-motion:reduce){.rot{transition:none}}
+/* Narrow two-column map: one box per line, so that no label overflows. */
+@media (min-width:761px) and (max-width:1080px){.map .col{grid-template-columns:1fr}.map .col a{min-height:46px}}

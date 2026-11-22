@@ -3,20 +3,20 @@
    Green = feature, orange = use case. "#soon" = page not built yet. */
 (function () {
   var F = [
-    ['One machine per agent', 'isolated-agents.html', 'One VM per agent, or several in one.', 'isolated', 'isolated'],
-    ['Keys and folders', 'assets-and-keys.html', 'Keys, folders, accounts: given per agent, taken back.', 'given per agent', 'given per agent'],
-    ['Chat from your phone', 'parley.html', 'Chat with your agents from your phone or computer.', 'or computer', 'or computer'],
+    ['One machine each', 'isolated-agents.html', 'One VM per agent, or several in one.', 'agents stay apart', 'agents stay apart'],
+    ['Choose who sees what', 'assets-and-keys.html', 'Keys, folders, accounts: given per agent, taken back.', 'accounts and folders', 'accounts and folders'],
+    ['Work from your phone', 'parley.html', 'Chat with your agents from your phone or computer.', 'or computer', 'or computer'],
     ['Mail, contacts, calendar', 'tether.html', 'Mail, contacts, calendar, files, browser, MCP.', 'files, browser, MCP', 'files, browser, MCP'],
-    ['Talk to it at home', 'voice-boxes.html', 'Talk to your AI from any room.', 'voice boxes', 'voice boxes'],
-    ['AIs work together', 'rooms.html', 'Several AIs in one room, hand-overs capped.', 'Claude, Codex, Mistral', 'Claude, Codex, Mistral']
+    ['Speak, it answers', 'voice-boxes.html', 'Talk to your AI from any room.', 'home voice speakers', 'home voice speakers'],
+    ['Get AIs collaborating', 'rooms.html', 'Several AIs in one room, hand-overs capped.', 'shared rooms', 'shared rooms']
   ];
   var U = [
-    ['Family', 'family.html', 'Marcel, 82, talks to a box at home.'],
-    ['Coding agents', 'coding-agents.html', 'Several agents in parallel, you review.'],
-    ['Data sovereignty', 'data-sovereignty.html', 'Your server, a European AI provider.'],
-    ['Home and voice', 'home-and-voice.html', 'A voice assistant that runs at home.'],
-    ['Mail & calendar assistant', 'mail-and-calendar.html', 'It drafts; you approve what goes out.'],
-    ['Work, home, club — kept apart', 'work-home-club.html', 'One assistant per life, nothing crosses over.']
+    ['Help the whole family', 'family.html', 'Marcel, 82, talks to a box at home.'],
+    ['Fix bugs, review code', 'coding-agents.html', 'Several agents in parallel, you review.'],
+    ['Keep your logins yours', 'data-sovereignty.html', 'Your server, a European AI provider.'],
+    ['Ask aloud at home', 'home-and-voice.html', 'A voice assistant that runs at home.'],
+    ['Sort mail, plan meetings', 'mail-and-calendar.html', 'It drafts; you approve what goes out.'],
+    ['Separate work, home, club', 'work-home-club.html', 'One assistant per life, nothing crosses over.']
   ];
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -100,4 +100,22 @@ document.querySelectorAll('.play').forEach(function (box) {
   if (!v || !b) return;
   b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
+
+  /* The rotating word of the home title: one word at a time; stays still for people who ask for less motion. */
+  document.querySelectorAll('[data-rotate]').forEach(function (box) {
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { box.style.width = box.children[0].getBoundingClientRect().width + 'px'; return; }
+    var words = box.children, at = 0;
+    /* The box takes the width of the word shown, smoothly: the line stays centred. */
+    var fit = function () { box.style.width = words[at].getBoundingClientRect().width + 'px'; };
+    fit();
+    window.addEventListener('resize', fit);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+    setInterval(function () {
+      if (document.hidden) return;
+      words[at].classList.remove('on');
+      at = (at + 1) % words.length;
+      words[at].classList.add('on');
+      fit();
+    }, 2400);
+  });
 });
