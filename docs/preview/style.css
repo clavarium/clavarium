@@ -235,11 +235,8 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 /* Narrow two-column map: one box per line, so that no label overflows. */
 @media (min-width:761px) and (max-width:1080px){.map .col{grid-template-columns:1fr}.map .col a{min-height:46px}}
 @media (max-width:380px){.hero h1{font-size:1.5rem}}
-/* The four AIs of the home: each on its job, with its level of access. */
-.ais{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:760px;margin:18px auto 16px}
-.ai{display:flex;flex-direction:column;gap:2px;padding:10px 8px;background:var(--card);border:1px solid var(--line);border-radius:12px;transition:border-color .3s ease,transform .3s ease}
-.ai b{font-size:1.02rem}.ai span{color:var(--mute);font-size:.88rem}
-.ai .lv{margin-top:4px;font-weight:650;font-size:.76rem;color:var(--f)}
-.ai.spot{border-color:var(--f);transform:translateY(-2px)}
-@media (max-width:560px){.ais{grid-template-columns:1fr 1fr}}
-@media (prefers-reduced-motion:reduce){.ai{transition:none}}
+/* The changing words of the home subtitle: all in one cell; the box takes the width of the one shown. */
+.rot{display:inline-grid;justify-items:start;color:var(--f);font-weight:650;text-align:left;overflow-x:clip;vertical-align:bottom;transition:width .35s ease}
+.rot>span{grid-area:1/1;white-space:nowrap;opacity:0;transform:translateY(.28em);transition:opacity .35s ease,transform .35s ease}
+.rot>span.on{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.rot,.rot>span{transition:none}}

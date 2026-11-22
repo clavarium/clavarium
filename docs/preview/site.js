@@ -101,12 +101,17 @@ document.querySelectorAll('.play').forEach(function (box) {
   b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
 
-  /* The four AIs of the home: all visible at once; a light passes over them once, for people who accept motion. */
-  document.querySelectorAll('[data-spot]').forEach(function (row) {
+  /* The changing words of the home subtitle: ONE pass of under 5 s, then they stay on the last ones, which is also
+     what shows without script or for people who ask for less motion. */
+  document.querySelectorAll('[data-rotate]').forEach(function (box) {
+    var words = box.children, last = words.length - 1, at = last;
+    var fit = function () { box.style.width = words[at].getBoundingClientRect().width + 'px'; };
+    var show = function (i) { words[at].classList.remove('on'); at = i; words[at].classList.add('on'); fit(); };
+    fit();
+    window.addEventListener('resize', fit);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
     if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    Array.prototype.forEach.call(row.children, function (card, i) {
-      setTimeout(function () { card.classList.add('spot'); }, 500 + i * 800);
-      setTimeout(function () { card.classList.remove('spot'); }, 1250 + i * 800);
-    });
+    show(0);
+    for (var i = 1; i <= last; i++) (function (n) { setTimeout(function () { show(n); }, n * 1600); })(i);
   });
 });
