@@ -14,7 +14,7 @@ export const SETTINGS_WORDS_FR = {
     /* The sign-in of a tool: its code pasted in a field, kept nowhere; the companion, its user's choice (#405). */
     'set-signin-code-line': 'Une fois connecté, collez le code.', 'set-signin-code-sent': 'Code envoyé à l\'outil.', 'set-signin-code-act': 'Coller le code',
     'set-signin-code-title': 'Code de connexion', 'set-signin-code-send': 'Envoyer', 'set-signin-code-bad': 'Ce n\'est pas un code.',
-    'set-signin-code-late': 'L\'outil n\'attend plus de code.', 'set-signin-code-failed': 'Non envoyé. Réessayez.',
+    'set-signin-code-late': 'L\'outil n\'attend plus de code.', 'set-signin-code-failed': 'Non envoyé. Réessayez.', 'set-signin-code-rejected': 'Code refusé. Collez-le à nouveau.',
     'set-companion-yours': 'Votre choix, votre responsabilité',
     /* Chat › when its thread is archived (talk.mjs setSplit). */
     'set-chat-split': 'Archiver son fil', 'set-split-2000': 'Tous les 2 000 messages', 'set-split-5000': 'Tous les 5 000',

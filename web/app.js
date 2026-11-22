@@ -9117,7 +9117,7 @@
                 try { status = (await fetch(`${API}/conversations/${encodeURIComponent(to)}/signin-code?c=${encodeURIComponent(to)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })).status; } catch { /* said below */ }
                 send.disabled = false;
                 if (status === 200) { box.close(); void thread?.refresh?.(); return; }
-                why.textContent = status === 400 ? uiSaid('set-signin-code-bad', 'This is not a code.') : status === 409 ? uiSaid('set-signin-code-late', 'The tool is no longer waiting for a code.') : uiSaid('set-signin-code-failed', 'Not sent. Try again.');
+                why.textContent = status === 400 ? uiSaid('set-signin-code-bad', 'This is not a code.') : status === 409 ? uiSaid('set-signin-code-late', 'The tool is no longer waiting for a code.') : status === 422 ? uiSaid('set-signin-code-rejected', 'Code not accepted. Paste it again.') : uiSaid('set-signin-code-failed', 'Not sent. Try again.');
                 why.hidden = false; input.focus();
             });
         }

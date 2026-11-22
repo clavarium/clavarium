@@ -56,7 +56,7 @@ test('the rules of each tool are those of config/tools.json, its launcher\'s the
     assert.deepEqual(Object.keys(file).sort(), ['claude-code', 'codex', 'opencode', 'vibe']);
     const launcher = ['link:https://old\\.example\\.com/\\S+', 'notice:restart=Restart when it suits you.'];
     const rules = rulesFor(['--tool', 'claude-code', ...launcher], file);
-    assert.deepEqual(rules.map((r) => r.kind), ['type', 'keys', 'link', 'code', 'notice'], 'its own sign-in rules, the launcher\'s notice kept');
+    assert.deepEqual(rules.map((r) => r.kind), ['type', 'keys', 'link', 'keys', 'code', 'notice'], 'its own sign-in rules, the launcher\'s notice kept');
     assert.deepEqual(rulesFor(['--tool', 'nope', ...launcher], file).map((r) => r.kind), ['link', 'notice'], 'no rules for it: the launcher\'s');
     assert.deepEqual(rulesFor(launcher, null).map((r) => r.kind), ['link', 'notice'], 'an older launcher, no --tool');
     /* Claude Code's real screen (02-11, 15-11): signed out, its method, its link, its code. */
@@ -64,6 +64,7 @@ test('the rules of each tool are those of config/tools.json, its launcher\'s the
     assert.deepEqual(kinds('⎿ Login expired · Please run /login'), ['type']);
     assert.deepEqual(kinds(' Select login method:\n ❯ 1. Claude account with subscription'), ['keys']);
     assert.deepEqual(kinds(` Browser didn't open? Use the url below to sign in:\n${LINK}\n Paste code here if prompted >`), ['link', 'code']);
+    assert.deepEqual(kinds('OAuth error: Invalid code. Please make sure the full code was copied\n\nPress Enter to retry.'), ['keys'], 'a refused code: back to its prompt');
     /* Every link rule's links lie in its declared domains. */
     for (const t of tools.filter((x) => x.signin?.screen)) assert.ok(t.signin.links.length, t.id);
     const one = (screen) => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], memoryMb: 768, install: [], signin: { senders: ['example.com'], links: ['example.com'], screen } }]));

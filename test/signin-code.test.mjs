@@ -23,8 +23,9 @@ function world(t) {
     const tools = [{ id: 'claude-code', label: 'Claude Code', signin: { senders: ['claude.ai'], links: ['claude.ai'], screen: ['code:Paste code here'] } }];
     w.help = new SigninHelp({ store: new JsonFile(join(dir, 'companion.json'), {}), conversations: () => [{ name: 'alpha', tool: 'claude-code' }], tools: () => tools,
         awake: () => ['alpha'], chatOn: () => true, workFolder: (n) => join(dir, 'work', n), browsers: () => [], post: () => ({ id: 'e' }),
-        type: async (n, text) => { w.typed.push([n, text]); return w.types; }, event: (n, line) => w.lines.push(line), now: () => w.now,
+        type: async (n, text) => { w.typed.push([n, text]); if (w.types && w.accepts !== false) w.screen = '> ready'; return w.types; }, event: (n, line) => w.lines.push(line), now: () => w.now,
         exec: async () => ({ code: 0, stdout: w.screen, stderr: '' }) });
+    w.help.codeSettleMs = 0;
     w.ask = (extra = {}) => writeFileSync(join(chat, 'signin-ask.json'), JSON.stringify({ id: ID, at: new Date(w.now).toISOString(), link: 'https://claude.ai/oauth', around: '', told: true, field: true, ...extra }));
     w.post = async (body, { origin = true, name = 'alpha' } = {}) => {
         const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { method: 'POST', url: `/api/conversations/${name}/signin-code`, headers: { 'content-type': 'application/json' } });
@@ -114,4 +115,18 @@ test('the door: only a device given its terminal reaches the field', async (t) =
     assert.equal((await call(`/c/api/${hands.id}/conversations/family/signin-code?c=family`, { code: CODE }, { cookie: hands.cookie })).status, 409, 'its terminal: reached, nothing waiting');
     assert.equal((await call(`/c/api/${hands.id}/conversations/work/signin-code?c=family`, { code: CODE }, { cookie: hands.cookie })).status, 403, 'another conversation named');
     assert.equal((await call(`/c/api/${hands.id}/conversations/family/signin-code?c=family`, { code: CODE })).status, 401, 'no session');
+});
+
+test('a code the tool does not accept: said, the ask stays, the field works again', async (t) => {
+    const w = world(t);
+    w.ask(); w.accepts = false;
+    const first = await w.post({ code: CODE });
+    assert.equal(first.status, 422);
+    assert.equal(first.text.includes(CODE), false, 'not in the answer');
+    assert.equal(existsSync(join(w.chat, 'signin-ask.json')), true, 'the ask stays');
+    assert.equal(await w.help.atCodePrompt('alpha', async () => ({ code: 0, stdout: w.screen, stderr: '' })), true, 'nothing else is typed there meanwhile');
+    w.accepts = true;
+    assert.equal((await w.post({ code: `${CODE}2` })).status, 200);
+    assert.equal(w.typed.length, 2);
+    assert.equal(existsSync(join(w.chat, 'signin-ask.json')), false, 'accepted: the ask is over');
 });

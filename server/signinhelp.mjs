@@ -53,6 +53,8 @@ export const OFFER_EVERY_MS = 6000;
 const SCREEN_LINES = 12;
 export const CODE_LINE = 'Once signed in, paste the code.';
 export const CODE_SENT = 'Code sent to the tool.';
+/* How long its tool is given to leave its prompt once a code is typed: still there, the code was not accepted. */
+export const CODE_SETTLE_MS = 12_000;
 export const NONE = 'none';
 const ASK_BYTES = 16_384;
 const LINK_MAX = 4000;
@@ -88,6 +90,7 @@ export class SigninHelp {
     #offered = new Map();
     #looked = new Map();
     #typing = new Set();
+    codeSettleMs = CODE_SETTLE_MS;
 
     /* `store`: { get(), set(v) } of { general, per: { name: companion | NONE } }. `conversations()`: [{ name, tool }].
        `tools()`: config/tools.json as read. `awake()`, `chatOn(name)`. `workFolder(name)`. `browsers(name)`: the
@@ -194,7 +197,16 @@ export class SigninHelp {
             if (!at) throw new Refusal(409, 'Its tool is not waiting for a code now.');
             const typed = await Promise.resolve(this.#type(name, code)).catch(() => false);
             if (!typed) throw new Refusal(502, 'The code could not be typed into the tool.');
-            /* Typed: the ask is over, whatever comes next is not this code. */
+            /* STILL AT ITS PROMPT (22-11, a wrong code on a real machine): the ask stays, so that the field can be used
+               again and nothing else is typed into that prompt meanwhile. */
+            const end = Date.now() + this.codeSettleMs;
+            let waiting = await this.atCodePrompt(name, exec).catch(() => false);
+            while (waiting && Date.now() < end) {
+                await new Promise((r) => { setTimeout(r, 1000).unref?.(); });
+                waiting = await this.atCodePrompt(name, exec).catch(() => false);
+            }
+            if (waiting) throw new Refusal(422, 'The tool did not accept this code.');
+            /* Accepted: the ask is over, whatever comes next is not this code. */
             const dir = this.#chat(name);
             if (this.#own(dir)) { try { rmSync(join(dir, ASK), { force: true }); } catch { /* it runs out by itself */ } }
             this.#route(name, { id: ask.id, route: 'done' });
