@@ -53,8 +53,9 @@ export const OFFER_EVERY_MS = 6000;
 const SCREEN_LINES = 12;
 export const CODE_LINE = 'Once signed in, paste the code.';
 export const CODE_SENT = 'Code sent to the tool.';
+export const CODE_REFUSED = 'Code refused. Paste it again.';
 /* How long its tool is given to leave its prompt once a code is typed: still there, the code was not accepted. */
-export const CODE_SETTLE_MS = 12_000;
+export const CODE_SETTLE_MS = 30_000;
 export const NONE = 'none';
 const ASK_BYTES = 16_384;
 const LINK_MAX = 4000;
@@ -90,6 +91,9 @@ export class SigninHelp {
     #offered = new Map();
     #looked = new Map();
     #typing = new Set();
+    #settling = new Set();
+    /* Its end, for whoever waits for it (tests). */
+    settled = Promise.resolve();
     codeSettleMs = CODE_SETTLE_MS;
 
     /* `store`: { get(), set(v) } of { general, per: { name: companion | NONE } }. `conversations()`: [{ name, tool }].
@@ -189,7 +193,7 @@ export class SigninHelp {
         if (!CODE.test(code)) throw new Refusal(400, 'This is not a sign-in code.');
         const ask = this.#personsAsk(name);
         if (!ask) throw new Refusal(409, 'No sign-in is waiting for a code here.');
-        if (this.#typing.has(name)) throw new Refusal(409, 'A code is already being sent.');
+        if (this.#typing.has(name) || this.#settling.has(name)) throw new Refusal(409, 'A code is already being sent.');
         this.#typing.add(name);
         try {
             const exec = (argv, options) => this.#exec(name, argv, options);
@@ -197,24 +201,35 @@ export class SigninHelp {
             if (!at) throw new Refusal(409, 'Its tool is not waiting for a code now.');
             const typed = await Promise.resolve(this.#type(name, code)).catch(() => false);
             if (!typed) throw new Refusal(502, 'The code could not be typed into the tool.');
-            /* STILL AT ITS PROMPT (22-11, a wrong code on a real machine): the ask stays, so that the field can be used
-               again and nothing else is typed into that prompt meanwhile. */
-            const end = Date.now() + this.codeSettleMs;
-            const still = () => this.atCodePrompt(name, exec, { last: 3 }).catch(() => false);
-            let waiting = await still();
-            while (waiting && Date.now() < end) {
-                await new Promise((r) => { setTimeout(r, 1000).unref?.(); });
-                waiting = await still();
-            }
-            if (waiting) throw new Refusal(422, 'The tool did not accept this code.');
-            /* Accepted: the ask is over, whatever comes next is not this code. */
-            const dir = this.#chat(name);
-            if (this.#own(dir)) { try { rmSync(join(dir, ASK), { force: true }); } catch { /* it runs out by itself */ } }
-            this.#route(name, { id: ask.id, route: 'done' });
-            this.#offered.delete(name); this.#looked.delete(name);
+            /* Sent: said at once. What its tool makes of it comes some 15 s later (seen on a real machine): watched. */
             this.#line(name, { kind: KIND, text: CODE_SENT, topic: 'Sign-in', brief: 'Code sent' });
+            this.#settling.add(name);
+            this.settled = this.#settle(name, ask, exec).catch(() => {}).finally(() => this.#settling.delete(name));
             return { ok: true };
         } finally { this.#typing.delete(name); }
+    }
+    /* WHAT ITS TOOL MADE OF THE CODE. Refused, in its own words (`signin.refused`), or still at its prompt at the end:
+       back to its prompt, the ask stays, a line offers the field again. Otherwise the ask is over. While this runs
+       nothing else is typed into the tool (atCodePrompt answers yes). */
+    async #settle(name, ask, exec) {
+        const refused = this.#tool(name)?.signin?.refused;
+        const end = Date.now() + this.codeSettleMs;
+        const again = () => this.#line(name, { kind: KIND, text: CODE_REFUSED, level: 'needs-you', topic: 'Sign-in', brief: 'Code refused', actions: ['signincode'] });
+        for (;;) {
+            const seen = await exec(['tmux', '-L', SOCKET, 'capture-pane', '-p', '-t', `=${SESSION}:`], { timeoutMs: 10_000 }).catch(() => ({ code: 1, stdout: '' }));
+            if (refused && seen.code === 0 && String(seen.stdout).includes(refused)) {
+                await exec(['tmux', '-L', SOCKET, 'send-keys', '-t', `=${SESSION}:`, 'Enter'], { timeoutMs: 10_000 }).catch(() => {});
+                again();
+                return;
+            }
+            if (Date.now() >= end) break;
+            await new Promise((r) => { setTimeout(r, 1000).unref?.(); });
+        }
+        if (await this.#promptOnScreen(name, exec, 3).catch(() => false)) { again(); return; }
+        const dir = this.#chat(name);
+        if (this.#own(dir)) { try { rmSync(join(dir, ASK), { force: true }); } catch { /* it runs out by itself */ } }
+        this.#route(name, { id: ask.id, route: 'done' });
+        this.#offered.delete(name); this.#looked.delete(name);
     }
     /* Its tool shows its prompt, its link told: one line in its chat, with the button that opens the field. */
     async #offerCode(name, ask) {
@@ -228,17 +243,20 @@ export class SigninHelp {
     }
     /* ITS TOOL IS AT ITS « PASTE THE CODE » PROMPT (22-11, seen on a real machine): a line typed now goes into that field
        and the sign-in fails. Asked of its screen, only while a sign-in is open and its tool has such a prompt. */
-    async atCodePrompt(name, exec, { last = 0 } = {}) {
+    async atCodePrompt(name, exec) {
+        if (this.#settling.has(name)) return true;
+        return this.#promptOnScreen(name, exec, 0);
+    }
+    /* `last`: only its last written lines: a prompt the tool has answered and moved on from stays higher up. */
+    async #promptOnScreen(name, exec, last) {
         const ask = this.#readAsk(name); if (!ask) return false;
         const at = Date.parse(ask.at); if (!Number.isFinite(at) || this.#now() - at > CODE_WAIT_MS) return false;
         const rules = (this.#tool(name)?.signin?.screen ?? []).filter((r) => String(r).startsWith('code:')).map((r) => String(r).slice(5));
         if (!rules.length) return false;
         const r = await exec(['tmux', '-L', SOCKET, 'capture-pane', '-p', '-t', `=${SESSION}:`], { timeoutMs: 10_000 });
         if (r.code !== 0) return false;
-        /* As screen-watch reads it: the bottom of the screen, whatever the case. A prompt left higher up is over, and a
-           code typed then would go to the AI as a message. */
+        /* As screen-watch reads it: the bottom of the screen, whatever the case. */
         const lines = String(r.stdout).replace(/\s+$/u, '').split('\n');
-        /* `last`: only its last written lines: a prompt the tool has answered and moved on from stays higher up. */
         const bottom = (last ? lines.filter((l) => l.trim()).slice(-last) : lines.slice(-SCREEN_LINES)).join('\n');
         return rules.some((p) => { try { return new RegExp(p, 'i').test(bottom); } catch { return false; } });
     }

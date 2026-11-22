@@ -77,9 +77,9 @@
         "type:(Not logged in|Login expired|OAuth token (has )?expired|Invalid API key)[^\\n]{0,24}/login=/login",
         "keys:Select login method:=Enter",
         "link:https://(claude\\.ai|claude\\.com|console\\.anthropic\\.com)/\\S*oauth\\S*",
-        "keys:OAuth error[\\s\\S]{0,160}Press Enter to retry=Enter",
         "code:Paste code here"
-      ]
+      ],
+      "refused": "OAuth error"
     }
   },
   {

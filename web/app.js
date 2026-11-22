@@ -3987,7 +3987,7 @@
         if (many) void openGit(many[1], { commit: many[2], base: many[3], tab: Number(many[4]) > 1 ? 'commits' : 'changes' });
         else if (one) void openGit(one[1], { commit: one[2] });
     }
-    const SIGNIN_SAID = { 'Once signed in, paste the code.': 'set-signin-code-line', 'Code sent to the tool.': 'set-signin-code-sent' };
+    const SIGNIN_SAID = { 'Once signed in, paste the code.': 'set-signin-code-line', 'Code sent to the tool.': 'set-signin-code-sent', 'Code refused. Paste it again.': 'set-signin-code-rejected' };
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
@@ -9117,7 +9117,7 @@
                 try { status = (await fetch(`${API}/conversations/${encodeURIComponent(to)}/signin-code?c=${encodeURIComponent(to)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })).status; } catch { /* said below */ }
                 send.disabled = false;
                 if (status === 200) { box.close(); void thread?.refresh?.(); return; }
-                why.textContent = status === 400 ? uiSaid('set-signin-code-bad', 'This is not a code.') : status === 409 ? uiSaid('set-signin-code-late', 'The tool is no longer waiting for a code.') : status === 422 ? uiSaid('set-signin-code-rejected', 'Code not accepted. Paste it again.') : uiSaid('set-signin-code-failed', 'Not sent. Try again.');
+                why.textContent = status === 400 ? uiSaid('set-signin-code-bad', 'This is not a code.') : status === 409 ? uiSaid('set-signin-code-late', 'The tool is no longer waiting for a code.') : uiSaid('set-signin-code-failed', 'Not sent. Try again.');
                 why.hidden = false; input.focus();
             });
         }

@@ -9,6 +9,7 @@ import { handleApi } from '../server/api.mjs';
 import { SigninHelp } from '../server/signinhelp.mjs';
 import { startHome } from '../server/main.mjs';
 import { JsonFile } from '../server/store.mjs';
+import { loadTools } from '../server/tools.mjs';
 
 const CODE = 'fieldCODE123_value#state-xyz';
 const PROMPT = 'Paste code here if prompted >';
@@ -20,11 +21,11 @@ function world(t) {
     const chat = join(dir, 'work', 'alpha', '.parley');
     mkdirSync(chat, { recursive: true });
     const w = { screen: PROMPT, types: true, typed: [], lines: [], now: Date.parse('2026-11-22T10:00:00.000Z'), chat, dir };
-    const tools = [{ id: 'claude-code', label: 'Claude Code', signin: { senders: ['claude.ai'], links: ['claude.ai'], screen: ['code:Paste code here'] } }];
+    const tools = [{ id: 'claude-code', label: 'Claude Code', signin: { refused: 'OAuth error', senders: ['claude.ai'], links: ['claude.ai'], screen: ['code:Paste code here'] } }];
     w.help = new SigninHelp({ store: new JsonFile(join(dir, 'companion.json'), {}), conversations: () => [{ name: 'alpha', tool: 'claude-code' }], tools: () => tools,
         awake: () => ['alpha'], chatOn: () => true, workFolder: (n) => join(dir, 'work', n), browsers: () => [], post: () => ({ id: 'e' }),
         type: async (n, text) => { w.typed.push([n, text]); if (w.types && w.accepts !== false) w.screen = '> ready'; return w.types; }, event: (n, line) => w.lines.push(line), now: () => w.now,
-        exec: async () => ({ code: 0, stdout: w.screen, stderr: '' }) });
+        exec: async (n, argv) => { if (argv?.includes?.('send-keys')) { w.keys = (w.keys ?? 0) + 1; w.screen = PROMPT; } return { code: 0, stdout: w.screen, stderr: '' }; } });
     w.help.codeSettleMs = 0;
     w.ask = (extra = {}) => writeFileSync(join(chat, 'signin-ask.json'), JSON.stringify({ id: ID, at: new Date(w.now).toISOString(), link: 'https://claude.ai/oauth', around: '', told: true, field: true, ...extra }));
     w.post = async (body, { origin = true, name = 'alpha' } = {}) => {
@@ -48,6 +49,7 @@ test('the code goes once into the tool at its prompt, and is kept nowhere', asyn
     assert.equal(r.status, 200);
     assert.deepEqual(w.typed, [['alpha', CODE]], 'typed once, trimmed');
     assert.equal(r.text.includes(CODE), false, 'not in the answer');
+    await w.help.settled;
     assert.equal(existsSync(join(w.chat, 'signin-ask.json')), false, 'the ask is over');
     for (const f of everyFile(w.dir)) assert.equal(readFileSync(f, 'utf8').includes(CODE), false, f);
     assert.equal(JSON.stringify(w.lines).includes(CODE), false, 'not in the chat');
@@ -121,25 +123,44 @@ test('a code the tool does not accept: said, the ask stays, the field works agai
     const w = world(t);
     w.ask(); w.accepts = false;
     const first = await w.post({ code: CODE });
-    assert.equal(first.status, 422);
+    assert.equal(first.status, 200);
     assert.equal(first.text.includes(CODE), false, 'not in the answer');
+    await w.help.settled;
     assert.equal(existsSync(join(w.chat, 'signin-ask.json')), true, 'the ask stays');
+    assert.ok(w.lines.some((l) => l.text === 'Code refused. Paste it again.' && l.actions?.includes('signincode')), 'the field is offered again');
     assert.equal(await w.help.atCodePrompt('alpha', async () => ({ code: 0, stdout: w.screen, stderr: '' })), true, 'nothing else is typed there meanwhile');
     w.accepts = true;
     assert.equal((await w.post({ code: `${CODE}2` })).status, 200);
+    await w.help.settled;
     assert.equal(w.typed.length, 2);
     assert.equal(existsSync(join(w.chat, 'signin-ask.json')), false, 'accepted: the ask is over');
 });
 
 test('a prompt the tool has moved on from, still higher on its screen, is not a refused code', async (t) => {
     const w = world(t);
-    w.ask();
-    w.help.codeSettleMs = 0;
-    const type = w.typed;
-    w.accepts = false; const before = w.screen;
-    w.screen = `${before}`;
-    const done = w.post({ code: CODE });
-    w.screen = `${PROMPT}\n${CODE.length}\nok\nready>`;
-    assert.equal((await done).status, 200);
-    assert.equal(type.length, 1);
+    w.ask(); w.accepts = false; w.help.codeSettleMs = 1200;
+    assert.equal((await w.post({ code: CODE })).status, 200);
+    w.screen = `${PROMPT}\nsomething\nok\nready>`;
+    await w.help.settled;
+    assert.equal(w.lines.some((l) => l.text === 'Code refused. Paste it again.'), false);
+    assert.equal(existsSync(join(w.chat, 'signin-ask.json')), false, 'accepted');
+});
+
+test('its tool answers « refused » after the prompt has gone: said, Enter pressed once, nothing typed meanwhile, the field works again', async (t) => {
+    const w = world(t);
+    w.ask(); w.accepts = false; w.help.codeSettleMs = 3000; w.screen = PROMPT;
+    assert.equal((await w.post({ code: CODE })).status, 200);
+    w.screen = 'Exchanging the code...';
+    assert.equal(await w.help.atCodePrompt('alpha', async () => ({ code: 0, stdout: w.screen, stderr: '' })), true, 'while it is checked, nothing is typed');
+    assert.equal((await w.post({ code: `${CODE}2` })).status, 409, 'one at a time');
+    w.screen = 'OAuth error: Invalid code.\nPress Enter to retry.';
+    await w.help.settled;
+    assert.equal(w.keys, 1);
+    assert.equal(w.screen, PROMPT, 'back at its prompt');
+    assert.equal(existsSync(join(w.chat, 'signin-ask.json')), true, 'the ask stays');
+    assert.ok(w.lines.some((l) => l.text === 'Code refused. Paste it again.'));
+});
+
+test('the words of a refused code reach the server from config/tools.json', () => {
+    assert.equal(loadTools().find((x) => x.id === 'claude-code').signin.refused, 'OAuth error');
 });
