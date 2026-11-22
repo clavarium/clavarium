@@ -240,3 +240,4 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 .rot>span{grid-area:1/1;white-space:nowrap;opacity:0;transform:translateY(.28em);transition:opacity .35s ease,transform .35s ease}
 .rot>span.on{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){.rot,.rot>span{transition:none}}
+.film-note{margin:6px 0 0;color:var(--mute);font-size:.8rem;text-align:center}

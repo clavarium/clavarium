@@ -101,6 +101,12 @@ document.querySelectorAll('.play').forEach(function (box) {
   b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
 
+  /* Every film says what it is: invented data, scripted agents. */
+  document.querySelectorAll('video.demo').forEach(function (v) {
+    var n = document.createElement('p'); n.className = 'film-note'; n.textContent = 'Demo: invented data, scripted agents.';
+    var box = v.closest('.play');
+    if (box) box.appendChild(n); else v.insertAdjacentElement('afterend', n);
+  });
   /* The changing words of the home subtitle: ONE pass of under 5 s, then they stay on the last ones, which is also
      what shows without script or for people who ask for less motion. */
   document.querySelectorAll('[data-rotate]').forEach(function (box) {

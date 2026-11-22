@@ -7,7 +7,7 @@
 <meta name="description" content="Marcel, 82, talks to a small voice box in his living room. It answers in short spoken sentences. Runs on your own server.">
 <link rel="stylesheet" href="style.css">
 <script src="site.js" defer></script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Does it listen all the time?", "acceptedAnswer": {"@type": "Answer", "text": "It waits for its word or a press. It keeps no sound."}}, {"@type": "Question", "name": "Does Marcel need a phone?", "acceptedAnswer": {"@type": "Answer", "text": "No. He only talks. The family sets it up."}}, {"@type": "Question", "name": "What is the box?", "acceptedAnswer": {"@type": "Answer", "text": "A small audio board (ESP32-S3) with open-source firmware, MIT."}}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Does it listen all the time?", "acceptedAnswer": {"@type": "Answer", "text": "It waits for its word or a press. It keeps its last 10 sentences for a week, on your server."}}, {"@type": "Question", "name": "Does Marcel need a phone?", "acceptedAnswer": {"@type": "Answer", "text": "No. He only talks. The family sets it up."}}, {"@type": "Question", "name": "What is the box?", "acceptedAnswer": {"@type": "Answer", "text": "A small audio board (ESP32-S3) with open-source firmware, MIT."}}]}</script>
 </head>
 <body>
 <div class="wrap">
@@ -41,7 +41,7 @@
         <li>It answers in short spoken sentences.</li>
         <li>Radio, a podcast or a story, on request.</li>
       </ul>
-      <p class="note">It keeps no sound. Its lights say when it listens.</p>
+      <p class="note">It keeps its last 10 sentences for a week, on your server. Its lights say when it listens.</p>
     </section>
 
     <section>
@@ -57,7 +57,7 @@
       <h2>Limits</h2>
       <ul class="limits">
         <li>What he says goes to the AI provider you chose.</li>
-        <li>Needs Wi-Fi, and your server switched on.</li>
+        <li>Needs Wi-Fi, and your server switched on.</li><li>What it hears after its word goes to a dictation service.</li>
       </ul>
       <div class="btns">
         <a class="btn p" href="install.html">Install</a>
@@ -68,7 +68,7 @@
 
     <section>
       <h2>Questions</h2>
-      <details><summary>Does it listen all the time?</summary><p>It waits for its word or a press. It keeps no sound.</p></details>
+      <details><summary>Does it listen all the time?</summary><p>It waits for its word or a press. It keeps its last 10 sentences for a week, on your server.</p></details>
       <details><summary>Does Marcel need a phone?</summary><p>No. He only talks. The family sets it up.</p></details>
       <details><summary>What is the box?</summary><p>A small audio board (ESP32-S3) with open-source firmware, MIT.</p></details>
     </section>
