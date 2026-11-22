@@ -3,7 +3,7 @@
  *
  *   PLAYWRIGHT=/path/to/playwright-core/index.mjs node tools/site/make-desktop.mjs [name ...]
  *
- * Env: PLAYWRIGHT (required), CLAVARIUM_REPO (default this repository), OUT (default docs/preview/shots).
+ * Env: PLAYWRIGHT (required), CLAVARIUM_REPO (default this repository), OUT (default docs/shots).
  * Films: overview, machine, assets, approval. Output: shots/desktop-<name>.webm + -poster.png
  *
  * What is real: the server, the page, its API, tmux terminals, files, rights, Parley and Tether, on the
@@ -21,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(process.env.CLAVARIUM_REPO || join(HERE, '..', '..'));
-const OUT = resolve(process.env.OUT || join(HERE, '..', '..', 'docs', 'preview', 'shots'));
+const OUT = resolve(process.env.OUT || join(HERE, '..', '..', 'docs', 'shots'));
 if (!process.env.PLAYWRIGHT) { console.error('Set PLAYWRIGHT to the path of playwright-core/index.mjs'); process.exit(2); }
 process.env.CLAVARIUM_E2E_PLAYWRIGHT = dirname(resolve(process.env.PLAYWRIGHT));
 const load = (path) => import(pathToFileURL(join(REPO, path)).href);
