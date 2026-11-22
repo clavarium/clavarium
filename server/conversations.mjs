@@ -303,7 +303,7 @@ export class Conversations {
         return this.#store.all().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
             /* An AI tool has an instruction file; a shell has none: what is dictated there is never marked. */
-            return { ...c, ...(c.lentTo && !this.#borrowed.has(c.name) ? { lentTo: undefined } : {}), rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), switches: canSwitch(tool), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
+            return { ...c, ...(c.lentTo && !this.#borrowed.has(c.name) ? { lentTo: undefined } : {}), rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), switches: canSwitch(tool) && !c.sharedMachine, rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
         });
     }
 
@@ -979,6 +979,8 @@ export class Conversations {
         const target = this.#tools.find((t) => t.id === to);
         if (typeof to !== 'string' || !target) throw new Refusal(400, 'This AI is not offered here.');
         if (to === c.tool) throw new Refusal(409, `It already runs ${target.label}.`);
+        /* Not tried on a real shared machine yet (22-11): refused rather than promised. */
+        if (c.sharedMachine) throw new Refusal(409, 'Changing its AI needs its own machine.');
         if (!canSwitch(from)) throw new Refusal(409, `${from?.label ?? c.tool} cannot be changed for another AI.`);
         if (!canSwitch(target)) throw new Refusal(400, `A conversation cannot change to ${target.label}.`);
         if (c.lentTo || this.#store.all().some((x) => x.copyOf === name && x.phase === 'building')) throw new Refusal(409, 'It is being copied: change its AI after.', { retry: true });

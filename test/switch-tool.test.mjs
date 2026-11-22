@@ -105,11 +105,12 @@ test('a tool never started on this disk is not said to have a session', async (t
     assert.equal(b.store.get('demo').toolsStarted, undefined);
 });
 
-test('in a shared machine: the machine-wide step as root, its settings as its own user', async (t) => {
+test('in a shared machine: refused, nothing done', async (t) => {
     const b = bench(t); b.put({ sharedMachine: 'common', machineMb: 4096 });
-    assert.equal(await go(b, 'beta'), true);
-    assert.ok(b.calls.includes('sudo -n setup beta')); assert.ok(!b.door.includes('sudo -n setup beta'));
-    assert.ok(b.door.includes('write-settings beta'));
+    await assert.rejects(b.all.switchTool('demo', 'beta'), /needs its own machine/);
+    assert.equal(b.store.get('demo').tool, 'alpha');
+    assert.ok(!b.calls.some((c) => c.includes('setup beta')));
+    assert.notEqual(b.all.list().find((c) => c.name === 'demo').switches, true, 'not offered on its page');
 });
 
 test('there already, with no state of its own here: only its own settings are written', async (t) => {
