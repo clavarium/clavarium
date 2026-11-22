@@ -1032,7 +1032,9 @@ export class Conversations {
             this.#fresh.add(name);
             await this.#endTurn(name);
             await this.ready(name);
-            return failed(`${target.label} did not start.`);
+            /* Its tools folder came loose (the VM manager's mount died): only a restart of the machine puts it back (health.mjs, STUCK_MOUNT). */
+            const loose = (await this.#vms.exec(name, ['timeout', '5', 'ls', `${TOOLS_PATH}/${LAUNCH}`], { timeoutMs: 10_000 }).catch(() => ({ code: 1 }))).code !== 0;
+            return failed(loose ? `${target.label} did not start: its tools folder came loose. Restart its machine, then try again.` : `${target.label} did not start.`);
         } catch (error) { return failed(error?.message ?? error); }
     }
 

@@ -12,7 +12,7 @@ import { readTools } from '../server/tools.mjs';
 const ai = (id, more = {}) => ({ id, label: id.toUpperCase(), instructions: `.${id}/NOTES.md`, command: [id], resume: [id, '--continue'], memoryMb: 2048, state: { keep: [`.${id}`] }, rights: { full: ['--all'], ask: [] }, install: [['sudo', '-n', 'setup', id], ['write-settings', id]], ...more });
 const TOOLS = readTools(JSON.stringify([ai('alpha'), ai('beta'), ai('big', { memoryMb: 4096 }), { id: 'shell', label: 'Shell', command: ['bash'], memoryMb: 768, install: [] }]));
 
-function bench(t, { installed = ['alpha'], failInstall = false, dies = [], withState = ['alpha'] } = {}) {
+function bench(t, { installed = ['alpha'], failInstall = false, dies = [], withState = ['alpha'], looseTools = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-switch-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = []; const door = []; const present = new Set(installed); const homes = new Set(withState); const state = { vm: 'Running' };
@@ -31,6 +31,7 @@ function bench(t, { installed = ['alpha'], failInstall = false, dies = [], withS
         if (inner[0] === 'sh' && inner[2]?.startsWith('for p in')) return { code: inner.slice(4).some((p) => homes.has(p.slice(1))) ? 0 : 3, stdout: '', stderr: '' };
         if (inner[0] === 'sudo' && inner[2] === 'setup') { if (failInstall) return { code: 1, stdout: '', stderr: 'no network' }; present.add(inner[3]); }
         if (inner[0] === 'write-settings') homes.add(inner[1]);
+        if (inner[0] === 'timeout' && inner[2] === 'ls' && looseTools) return { code: 2, stdout: '', stderr: 'not connected' };
         if (inner.includes('has-session')) return { code: dies.includes(store.get('demo').tool) ? 1 : 0, stdout: '', stderr: '' };
         return { code: 0, stdout: '', stderr: '' };
     };
@@ -173,4 +174,14 @@ test('an install cut off is marked: the mark goes only once it is done and writt
     const gone = whole.calls.findIndex((c) => c.includes('rm -f') && c.includes('.clavarium-installing-beta'));
     assert.ok(setup >= 0 && gone > setup);
     assert.match(whole.calls[gone], /^sh -c sync;/);
+});
+
+test('a tools folder that came loose is said, with what to do', async (t) => {
+    const loose = bench(t, { installed: ['alpha', 'beta'], withState: ['alpha', 'beta'], dies: ['beta'], looseTools: true }); loose.put();
+    await go(loose, 'beta');
+    assert.equal(loose.store.get('demo').tool, 'alpha');
+    assert.match(loose.store.get('demo').toolSwitchFailed, /tools folder came loose\. Restart its machine/);
+    const plain = bench(t, { installed: ['alpha', 'beta'], withState: ['alpha', 'beta'], dies: ['beta'] }); plain.put();
+    await go(plain, 'beta');
+    assert.doesNotMatch(plain.store.get('demo').toolSwitchFailed, /came loose/);
 });
