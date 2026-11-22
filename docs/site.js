@@ -15,8 +15,8 @@
     ['Fix bugs, review code', 'coding-agents.html', 'Several agents in parallel, you review.'],
     ['Use AI hosted in Europe', 'data-sovereignty.html', 'Your server, a European AI provider.'],
     ['Ask aloud at home', 'home-and-voice.html', 'A voice assistant that runs at home.'],
-    ['Sort mail, plan meetings', 'mail-and-calendar.html', 'It drafts; you choose what needs your OK.'],
-    ['Separate work, home, club', 'work-home-club.html', 'One assistant per life, each with its own accounts.']
+    ['Sort mail, plan meetings', 'mail-and-calendar.html', 'It drafts; you approve what goes out.'],
+    ['Separate work, home, club', 'work-home-club.html', 'One assistant per life, nothing crosses over.']
   ];
   function el(tag, cls, text) {
     var e = document.createElement(tag);
