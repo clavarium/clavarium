@@ -14,7 +14,7 @@
     ['Help the whole family', 'family.html', 'Marcel, 82, talks to a box at home.'],
     ['Fix bugs, review code', 'coding-agents.html', 'Several agents in parallel, you review.'],
     ['Share access, not logins', 'data-sovereignty.html', 'Your server, a European AI provider.'],
-    ['Switch AI, keep your work', 'switch-ai.html', 'Accounts, files and thread stay. The old AI\'s private memory does not.', 'accounts, files, thread'],
+    ['Ask aloud at home', 'home-and-voice.html', 'A voice assistant that runs at home.'],
     ['Sort mail, plan meetings', 'mail-and-calendar.html', 'It drafts; you approve what goes out.'],
     ['Separate work, home, club', 'work-home-club.html', 'One assistant per life, nothing crosses over.']
   ];

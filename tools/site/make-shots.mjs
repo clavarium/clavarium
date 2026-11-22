@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /* SCREENSHOTS OF THE REAL PARLEY CHAT, made from code, never by hand, never from real data.
  *
- *   node tools/site/make-shots.mjs   (pictures into docs/preview/shots)
+ *   node tools/site/make-shots.mjs   (pictures into docs/shots)
  *
  * Env: PARLEY_DIR (default: the installed clavarium-parley), PLAYWRIGHT (path to playwright-core's
- * index.mjs), OUT (default docs/preview/shots).
+ * index.mjs), OUT (default docs/shots).
  *
  * How: each demo thread is written with Parley's own host and agent bridge (the same code a real
  * conversation uses) into a throw-away folder; its read() is then handed to the real UI
@@ -24,7 +24,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PARLEY = process.env.PARLEY_DIR || (await import('../../server/parley.mjs')).packageDir('clavarium-parley');
 /* A Playwright of yours (not a dependency of Clavarium): PLAYWRIGHT=/path/to/playwright-core/index.mjs, or one npm can find. */
 const PW = process.env.PLAYWRIGHT || 'playwright-core';
-const OUT = resolve(process.env.OUT || join(HERE, '..', '..', 'docs', 'preview', 'shots'));
+const OUT = resolve(process.env.OUT || join(HERE, '..', '..', 'docs', 'shots'));
 const { Parley, texts } = await import(pathToFileURL(join(PARLEY, 'host/parley-host.mjs')).href);
 const { bridge } = await import(pathToFileURL(join(PARLEY, 'server/parley-mcp.mjs')).href);
 const { chromium } = await import(PW.startsWith('/') ? pathToFileURL(PW).href : PW);

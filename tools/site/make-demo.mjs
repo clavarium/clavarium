@@ -2,10 +2,10 @@
 /* THE DEMO FILMS: what differs from a chat with Claude or ChatGPT, recorded from the REAL Parley
  * chat UI, never by hand.
  *
- *   node tools/site/make-demo.mjs [name ...]   (all when none; films into docs/preview/shots)
+ *   node tools/site/make-demo.mjs [name ...]   (all when none; films into docs/shots)
  *
  * Env: PARLEY_DIR (default: the installed clavarium-parley), PLAYWRIGHT (playwright-core's index.mjs),
- * OUT (default docs/preview/shots).
+ * OUT (default docs/shots).
  *
  * Each thread is written with Parley's own host and agent bridge (the code a real conversation uses):
  * doing lines, statuses, a room's AIs (relay), a box's words (by, via voice), a pasted key (the
@@ -28,7 +28,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PARLEY = process.env.PARLEY_DIR || (await import('../../server/parley.mjs')).packageDir('clavarium-parley');
 /* A Playwright of yours (not a dependency of Clavarium): PLAYWRIGHT=/path/to/playwright-core/index.mjs, or one npm can find. */
 const PW = process.env.PLAYWRIGHT || 'playwright-core';
-const OUT = resolve(process.env.OUT || join(HERE, '..', '..', 'docs', 'preview', 'shots'));
+const OUT = resolve(process.env.OUT || join(HERE, '..', '..', 'docs', 'shots'));
 const { Parley, texts } = await import(pathToFileURL(join(PARLEY, 'host/parley-host.mjs')).href);
 const { bridge } = await import(pathToFileURL(join(PARLEY, 'server/parley-mcp.mjs')).href);
 const { chromium } = await import(PW.startsWith('/') ? pathToFileURL(PW).href : PW);
@@ -193,7 +193,7 @@ const FILMS = {
         await a.show(9, 1300); await a.show(10, 1100);
         await a.type('demo-key-not-a-real-one', 20);
         await a.show(11, 1300); await a.show(12, 1600);
-        await a.card('Nothing leaves without your OK.', 2200);
+        await a.card('You choose what needs your OK.', 2200);
     } },
     'your-ok': { thread: yourOk, async play(a) {
         await a.go('your-ok');
@@ -206,7 +206,7 @@ const FILMS = {
         await a.show(9, 2500); await a.show(10, 2200);
         await a.type('demo-key-not-a-real-one', 40);
         await a.show(11, 2200); await a.show(12, 2800);
-        await a.card('Nothing leaves without your OK.', 3200);
+        await a.card('You choose what needs your OK.', 3200);
     } },
     'always-on': { thread: alwaysOn, async play(a) {
         await a.go('always-on');
