@@ -265,6 +265,7 @@ export const SETTINGS_WORDS_FR = {
     'set-secret-next-on': '{name} : remis à son outil au prochain démarrage', 'set-secret-next-off': '{name} : plus remis dès son prochain démarrage',
     'set-files-list': 'Liste', 'set-files-icons': 'Icônes', 'set-files-empty': 'Ce dossier est vide.',
     'set-files-read-only': 'Lecture seule : rien ne peut y être changé.',
+    'set-ai': 'IA', 'set-ai-back': 'Revenir à {name}', 'set-ai-ask': 'Passer à {name} ? Elle relira ce fil.', 'set-ai-go': 'Changer', 'set-ai-no': 'Annuler',
     'set-this-conv': 'Cette conversation · {name}', 'set-ask-first': 'Demander avant d\'agir',
     'set-online': 'En ligne', 'set-offline-btn': 'Hors ligne', 'set-sleep': 'Endormir',
     'set-room-name': 'Nom', 'set-room-welcomes': 'Accueille', 'set-room-ais': 'Ses IA',

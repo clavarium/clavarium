@@ -167,6 +167,12 @@
           <summary><span class="chapter-title" data-said="set-ch-general">General</span><span class="chapter-about">Name, group, chat.</span></summary>
           <div class="chapter-body">
             <dl id="general-facts" class="facts"></dl>
+            <!-- ITS AI, changed in the same conversation (#404), the one before offered to go back. -->
+            <div id="ai-box" hidden>
+              <div class="set-row"><div class="set-what"><label for="ai-choice" data-said="set-ai">AI</label></div><div class="set-control"><select id="ai-choice"></select><button type="button" id="ai-back" hidden></button></div></div>
+              <div class="set-row" id="ai-sure" hidden><div class="set-what"><span id="ai-ask"></span></div><div class="set-control"><button type="button" id="ai-go" class="primary" data-said="set-ai-go">Change</button><button type="button" id="ai-no" data-said="set-ai-no">Cancel</button></div></div>
+              <p class="hint" id="ai-said" role="status" hidden></p>
+            </div>
             <div id="title-box" hidden>
             <form id="title-form" class="set-row" autocomplete="off"><div class="set-what"><label for="title-name">Name</label></div><div class="set-control"><input id="title-name" maxlength="60" spellcheck="false"><button type="submit">Save</button></div></form>
             </div>

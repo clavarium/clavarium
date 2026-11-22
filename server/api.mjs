@@ -40,6 +40,7 @@
  *   POST /api/conversations/<name>/talk/pin      {to, on}: the owner pins a message of the chat (on: false unpins); 5 at most
  *   POST /api/conversations/<name>/talk/split    {messages: 500..100000} | {days: 0.5..365} | {off: true}: when its thread is
  *                                                archived into volumes (nothing deleted) -> {split}; read back as `split` in GET .../talk
+ *   POST /api/conversations/<name>/tool          {tool}: changes its AI, in the same conversation (202: goes on; `toolSwitch`, then `toolSwitchFailed`)
  *   POST /api/conversations/<name>/chat-name     {name}: the name the chat gives its tool ('' : the neutral word of the dictionary)
  *   POST /api/conversations/<name>/tasks-binder  {binder}: the binder shown beside its chat ('' automatic, '-' none, else an id)
  *   POST /api/conversations/<name>/voice-mark    {on}: what is dictated into its terminal starts with a microphone sign (AI tools only)
@@ -1043,6 +1044,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (linkOf && conversations.signinHelp) return send(200, conversations.signinHelp.showLink(decodeURIComponent(linkOf[1]))), true;
         const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
+        const changingAi = /^\/api\/conversations\/([^/]+)\/tool$/.exec(pathname);
+        if (changingAi) return send(202, await conversations.switchTool(decodeURIComponent(changingAi[1]), body.tool)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);
         if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
         const beside = /^\/api\/conversations\/([^/]+)\/tasks-binder$/.exec(pathname);

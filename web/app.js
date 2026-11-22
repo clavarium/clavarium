@@ -3155,6 +3155,7 @@
         paintWatchdog(here);
         /* Whether its tool asks before acting -- for a tool that can be given every right in its machine. */
         $('rights-box').hidden = DEVICE || !here?.rights;
+        paintAi(here);
         for (const b of $('ask-first').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.askFirst === true)));
         void paintConvHand(here);
         paintConvStates(here);
@@ -3211,6 +3212,53 @@
         chapterNow('health', here.asleep ? uiSaid('set-asleep', 'Asleep') : !hl ? uiSaid('set-not-looked', 'Not looked at yet') : join(wrong.length ? wrong[0].text : hl.state === 'Running' ? uiSaid('set-running-well', 'Running · nothing wrong') : hl.state, hl.at ? agoSaid(hl.at) : ''));
         chapterNow('advanced', uiSaid('set-conv-advanced', 'Archive · reset · delete'));
     }
+    /* ITS AI (#404): one list, the one before offered to go back, a confirmation before anything changes. */
+    function paintAi(here) {
+        const box = $('ai-box');
+        box.hidden = DEVICE || here?.switches !== true;
+        if (box.hidden) { box.wanted = ''; $('ai-sure').hidden = true; return; }
+        if (!box.tools && !box.asking) {
+            box.asking = true;
+            void fetch(`${API}/tools`).then((r) => (r.ok ? r.json() : null)).catch(() => null).then((list) => {
+                box.asking = false;
+                if (!Array.isArray(list)) return;
+                box.tools = list.filter((t) => t.switches);
+                paintAi(conversations.find((x) => x.name === current));
+            });
+        }
+        const tools = box.tools ?? [{ id: here.tool, label: here.toolLabel ?? here.tool }];
+        const choice = $('ai-choice');
+        const of = `${here.name}/${here.tool}/${tools.map((t) => t.id).join()}`;
+        if (choice.dataset.of !== of && document.activeElement !== choice) {
+            choice.dataset.of = of;
+            choice.replaceChildren(...tools.map((t) => { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; return o; }));
+            box.wanted = '';
+        }
+        /* Nothing being chosen: it shows the AI it runs (a change that failed included). */
+        if (!box.wanted && document.activeElement !== choice) choice.value = here.tool;
+        const busy = Boolean(here.toolSwitch) || here.phase !== 'ready';
+        choice.disabled = busy;
+        const back = tools.find((t) => t.id === here.previousTool && t.id !== here.tool);
+        $('ai-back').hidden = !back || busy;
+        if (back) { $('ai-back').dataset.to = back.id; $('ai-back').textContent = uiSaid('set-ai-back', 'Back to {name}', { name: back.label }); }
+        const asked = !busy && tools.find((t) => t.id === box.wanted);
+        $('ai-sure').hidden = !asked;
+        if (asked) $('ai-ask').textContent = uiSaid('set-ai-ask', 'Change to {name}? It will read this chat.', { name: asked.label });
+        else box.wanted = '';
+        const said = here.toolSwitch?.step ?? here.toolSwitchFailed ?? '';
+        $('ai-said').textContent = said; $('ai-said').hidden = !said;
+    }
+    const aiHere = () => conversations.find((x) => x.name === current);
+    $('ai-choice').addEventListener('change', () => { const here = aiHere(); $('ai-box').wanted = $('ai-choice').value === here?.tool ? '' : $('ai-choice').value; paintAi(here); });
+    $('ai-back').addEventListener('click', () => { $('ai-box').wanted = $('ai-back').dataset.to; $('ai-choice').value = $('ai-back').dataset.to; paintAi(aiHere()); });
+    $('ai-no').addEventListener('click', () => { const here = aiHere(); $('ai-box').wanted = ''; $('ai-choice').value = here?.tool ?? ''; paintAi(here); });
+    $('ai-go').addEventListener('click', async () => {
+        const to = $('ai-box').wanted; if (!to) return;
+        $('panel-error').hidden = true; $('ai-box').wanted = '';
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/tool`, { tool: to }); await refresh(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; $('ai-choice').value = aiHere()?.tool ?? ''; }
+        paintMachine(aiHere());
+    });
     for (const b of $('ask-first').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;

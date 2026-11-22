@@ -619,6 +619,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         if (!dockets.on(name)) return false;
         try { dockets.post(name, { kind: 'restarted', text: `Your machine was restarted${why ? ` (${String(why).replace(/\.$/, '')})` : ''}. What ran in the background stopped with it: pick up where you were.` }); return true; } catch { return false; }
     };
+    /* ITS AI CHANGED (#404), or not: said in its chat and the journal. The new AI is told through its docket, once
+       free; without one, the line that makes it reread the thread goes with the person's next message. */
+    all.toolChanged = (name, said, line, ok) => {
+        events.add({ kind: 'conversation', text: `${name}: ${said}`, conversation: name });
+        try { talk.event(name, ok ? { kind: 'restarted', text: said, topic: 'Restarted' } : { kind: 'machine-problem', text: said, tone: 'bad', topic: 'Machine' }); } catch { /* its chat is off */ }
+        if (!ok) return;
+        try { if (dockets.on(name)) { dockets.post(name, { kind: 'ai-changed', text: line }); return; } } catch { /* the other way */ }
+        talk.renewed(name, '', true);
+    };
     /* What an owner did to a machine (start, stop, sleep, force, restart): in the journal, and a line in its chat. */
     all.machineSaid = (name, text, ok, chat) => {
         /* What runs changed (a start, a stop, a sleep): the rules follow at once, not at the next watch. */
@@ -1039,7 +1048,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        shown in it first (after a rebuild there are some), and its health is
        looked at (folders that did not come back are put back): both on the
        way, as steps of its start (`mounted` above, conversations.mjs). */
-    all.ready = (name) => { toolbox.forget(name); void bridge.warm(name); };
+    /* Resolves once its terminal is open (a change of AI waits for it); `warm` never rejects. */
+    all.ready = (name) => { toolbox.forget(name); return bridge.warm(name); };
     /* Their health too: after a restart of the host, a folder may not have come back. */
     /* The tools are shown in them first: a machine made before /tools existed gets it now, not as "a folder that came loose". */
     /* After the quiet start, one machine after another (QUIET_STEP_MS apart). */

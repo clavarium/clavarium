@@ -20,6 +20,12 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 
 export const SESSION = 'main';
+/* A disk just made holds no session of any tool: neither the one it runs nor one it ran before (#404). */
+const NEW_DISK = Object.freeze({ toolStarted: false, toolsStarted: undefined });
+/* An AI a conversation can change to or from (#404): it reads instructions, says where its state is, and can take it up. */
+const canSwitch = (t) => Boolean(t?.instructions && t?.state && t?.resume);
+/* How long a tool just started must stay up to be said started. */
+const SWITCH_SETTLE_MS = 5000;
 export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
 /* A copy reading its original's memory: nothing for this long, and it is ended (and why said). */
@@ -82,7 +88,7 @@ const DOWN = ['polite', 'force', 'term', 'kill', 'check'];
 const NEXT = Object.freeze({ polite: 'force', force: 'term', term: 'kill' });
 /* Each step in words, for the journal and the chat (the page has its own, web/app.js). */
 const STEP_WORDS = Object.freeze({ polite: 'polite stop', force: 'forced stop', term: 'SIGTERM', kill: 'SIGKILL', check: 'check', start: 'start', suspend: 'sleep', resleep: 'wake and sleep again', stop: 'clean stop' });
-const KIND_DOING = Object.freeze({ start: 'starting', stop: 'stopping', restart: 'restarting', sleep: 'going to sleep', force: 'being forced off', resize: 'being resized', move: 'moving to a shared machine' });
+const KIND_DOING = Object.freeze({ start: 'starting', stop: 'stopping', restart: 'restarting', sleep: 'going to sleep', force: 'being forced off', resize: 'being resized', move: 'moving to a shared machine', tool: 'changing its AI' });
 /* THE WATCHDOG of a machine (watchdog.mjs), as its owner set it: on, with how long it may stay mute or
    full before it is forced off and started again. The defaults, and what may be chosen (minutes). */
 export const WATCHDOG_DELAY_MIN = 60;
@@ -185,6 +191,8 @@ export class Conversations {
             if (c.phase === 'building' && c.movingTo) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, sharedMachine: undefined, machineMb: undefined, machineUser: undefined, ...(c.movingFromMb ? { memoryMb: c.movingFromMb } : {}), movingTo: undefined, movingFromMb: undefined, stopped: true, moved: `The server restarted while it was moving to the shared machine ${c.movingTo}: it stays in its own machine, as it was. Move it again when you like.` });
             else if (c.phase === 'building' && c.movingOutOf) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, ...c.movingOutOf, movingOutOf: undefined, stopped: true, moved: `The server restarted while it was moving out of the shared machine ${c.movingOutOf.sharedMachine}: it stays there. Move it again when you like.` });
             else if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
+            /* A change of AI cut short before its switch: it kept its AI (the record changes in one write). */
+            if (c.toolSwitch) store.patch(c.name, { toolSwitch: undefined, toolSwitchFailed: 'The server restarted during the change: it keeps its AI.' });
             if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restartingSince: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
             /* An action cut short: said as such, never left running on the page. */
             if (store.get(c.name)?.machine) store.patch(c.name, { machine: undefined, machineReport: { kind: c.machine.kind, ok: false, cut: true, at: new Date().toISOString(), steps: (c.machine.steps ?? []).filter((x) => x.state !== 'todo').map(({ id, state, s }) => ({ id, result: state === 'run' ? 'cut' : state, ...(s !== undefined ? { s } : {}) })), advice: 'look', said: 'The server restarted during this action: look at its state.' } });
@@ -266,7 +274,8 @@ export class Conversations {
     /* `resumes`: the tool can take up its last session when it starts (`resume` in config/tools.json). */
     /* `rights`: it can be started with every right in its machine (`rights` in config/tools.json). */
     /* `ai`: an agent that reads instructions (`instructions`), not a bare terminal. */
-    tools() { return this.#tools.map(({ id, label, memoryMb, resume, rights, instructions }) => ({ id, label, memoryMb, resumes: Boolean(resume), rights: Boolean(rights), ai: Boolean(instructions) })); }
+    /* `switches`: an existing conversation can change to it, or from it (#404). */
+    tools() { return this.#tools.map((t) => ({ id: t.id, label: t.label, memoryMb: t.memoryMb, resumes: Boolean(t.resume), rights: Boolean(t.rights), ai: Boolean(t.instructions), switches: canSwitch(t) })); }
 
     /* The sign-in rules of a conversation's tool, or undefined. */
     signinRules(name) { return this.#tools.find((t) => t.id === this.#store.get(name)?.tool)?.signin; }
@@ -294,7 +303,7 @@ export class Conversations {
         return this.#store.all().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
             /* An AI tool has an instruction file; a shell has none: what is dictated there is never marked. */
-            return { ...c, ...(c.lentTo && !this.#borrowed.has(c.name) ? { lentTo: undefined } : {}), rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
+            return { ...c, ...(c.lentTo && !this.#borrowed.has(c.name) ? { lentTo: undefined } : {}), rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), switches: canSwitch(tool), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
         });
     }
 
@@ -454,8 +463,8 @@ export class Conversations {
         /* A new disk holds no session of the tool: its first start is a plain
            one (`false`: known, as opposed to a record made before this was kept). */
         /* A copy being made (copy): built, but not usable until its work and its state are in. */
-        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', toolStarted: false }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
-        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
+        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', ...NEW_DISK }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, ...NEW_DISK });
         this.#reach(name, 'folders');
         /* A machine that has just been built holds nothing of what was put
            in the one before it: the next opening prepares it from nothing.
@@ -521,8 +530,8 @@ export class Conversations {
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
-        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', toolStarted: false }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
-        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
+        if (this.#holding.has(name)) { this.#store.patch(name, { step: 'Copying', ...NEW_DISK }); this.#fresh.add(name); this.#mountAgain.add(name); return undefined; }
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, ...NEW_DISK });
         this.#reach(name, 'folders');
         this.#fresh.add(name);
         this.#mountAgain.add(name);
@@ -542,6 +551,7 @@ export class Conversations {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase === 'building' && !reset) throw new Refusal(409, 'This conversation is still being built.');
+        this.#notChangingAi(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
         if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
         const state = await this.#vms.state(name, { fresh: true });
@@ -950,6 +960,121 @@ export class Conversations {
         return true;
     }
 
+    /* ---------- CHANGING ITS AI (#404) ---------- */
+    /* Set by the server: said in its chat; `line`, on success, told to the new AI. (name, said, line, ok) */
+    toolChanged = () => {};
+    /* How long a tool just started must stay up (a test shortens it). */
+    switchSettleMs = SWITCH_SETTLE_MS;
+
+    #notChangingAi(name) { if (this.#acts.get(name)?.kind === 'tool') throw this.#busy(name); }
+
+    /* THE SAME CONVERSATION, ANOTHER AI. Its thread, files, accesses and reminders do not depend on its tool; each
+       tool keeps its state in its own folders, so the one left can be gone back to. In order, the old AI working
+       until the switch itself: installed if missing (a failure leaves it untouched); then, in one write, the record
+       changed, the old session ended, the new one started; a new AI that does not stay up: back to the old one, and
+       why said. One at a time, through the one lock of its machine. -> the record, at once; `this.switched`: its end. */
+    async switchTool(name, to) {
+        const c = this.#busyCheck(name);
+        const from = this.#tools.find((t) => t.id === c.tool);
+        const target = this.#tools.find((t) => t.id === to);
+        if (typeof to !== 'string' || !target) throw new Refusal(400, 'This AI is not offered here.');
+        if (to === c.tool) throw new Refusal(409, `It already runs ${target.label}.`);
+        if (!canSwitch(from)) throw new Refusal(409, `${from?.label ?? c.tool} cannot be changed for another AI.`);
+        if (!canSwitch(target)) throw new Refusal(400, `A conversation cannot change to ${target.label}.`);
+        if (c.lentTo || this.#store.all().some((x) => x.copyOf === name && x.phase === 'building')) throw new Refusal(409, 'It is being copied: change its AI after.', { retry: true });
+        if ((Number(c.memoryMb) || 0) < target.memoryMb) throw new Refusal(409, `${target.label} needs ${target.memoryMb} MB of memory: give its machine more first.`);
+        /* Taken before anything is awaited: a second request sees it. */
+        const act = this.#take(name, 'tool');
+        try {
+            if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
+        } catch (error) { this.#give(name, act); throw error; }
+        this.#cancelStop(name);
+        this.#store.patch(name, { toolSwitch: { to, label: target.label, step: `Installing ${target.label}` }, toolSwitchFailed: undefined });
+        this.switched = this.#switching(name, from, target, act).finally(() => this.#give(name, act));
+        return this.#store.get(name);
+    }
+
+    async #switching(name, from, target, act) {
+        const failed = (why) => {
+            if (!this.#store.get(name)) return false;
+            const said = `Its AI stays ${from.label}: ${String(why).replace(/\.?$/, '.')}`;
+            this.#store.patch(name, { toolSwitch: undefined, toolSwitchFailed: said });
+            try { this.toolChanged(name, said, '', false); } catch { /* told, nothing more */ }
+            return false;
+        };
+        try {
+            const missing = await this.#installFor(name, target, act);
+            if (missing) return failed(missing);
+            const now = this.#store.get(name);
+            if (!now) return false; /* archived meanwhile */
+            if (now.phase !== 'ready') return failed('it is busy.');
+            /* What each tool has done on this disk. A record from before this was kept says nothing of the one it
+               leaves: it has run there, and a tool told to resume where it has no session starts a new one. */
+            const started = { ...now.toolsStarted };
+            if (now.toolStarted !== false) started[from.id] = true;
+            const back = started[target.id] === true;
+            delete started[target.id];
+            const was = { tool: now.tool, toolStarted: now.toolStarted, toolsStarted: now.toolsStarted, previousTool: now.previousTool };
+            /* The record first: a screen that reopens meanwhile starts the new AI, never the old. */
+            this.#store.patch(name, { tool: target.id, toolStarted: back, toolsStarted: Object.keys(started).length ? started : undefined, previousTool: from.id, toolSwitch: undefined });
+            /* Its next opening prepares it from nothing: the guide's pointer goes in the new AI's own file. */
+            this.#fresh.add(name);
+            await this.#endTurn(name);
+            await this.ready(name);
+            if (await this.#staysUp(name)) {
+                const said = `Its AI is now ${target.label} (was ${from.label}).`;
+                const line = `You now run this conversation, in place of ${from.label}: read its thread first (parley read --last 100), then carry on.`;
+                try { this.toolChanged(name, said, line, true); } catch { /* told, nothing more */ }
+                return true;
+            }
+            if (!this.#store.get(name)) return false;
+            this.#store.patch(name, was);
+            this.#fresh.add(name);
+            await this.#endTurn(name);
+            await this.ready(name);
+            return failed(`${target.label} did not start.`);
+        } catch (error) { return failed(error?.message ?? error); }
+    }
+
+    /* The tool stopped, and the turn it was in said ended: stopped mid-turn, its « working » would stay for ever
+       under an AI that does not say it (not every tool has a pulse). */
+    async #endTurn(name) {
+        await this.#stopTool(name);
+        await this.#vms.exec(name, ['sh', '-c', 'if [ -f /work/.parley/server.mjs ] && command -v parley >/dev/null 2>&1; then parley pulse --end --dir /work/.parley >/dev/null 2>&1; fi; true'], { timeoutMs: 10_000 }).catch(() => {});
+    }
+
+    /* Its session is still there a moment after it started (a tool that exits ends its session: tmux.mjs). */
+    async #staysUp(name) {
+        await new Promise((r) => { setTimeout(r, this.switchSettleMs).unref?.(); });
+        return (await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`], { timeoutMs: 10_000 }).catch(() => ({ code: 1 }))).code === 0;
+    }
+
+    /* ITS RECIPE, the one a build runs (`tool.steps`), for what is missing. On the machine already (another
+       conversation of a shared machine, an earlier change): only its own settings steps, and only when it has no
+       state here -- they write its settings, and what it has is never overwritten. -> what went wrong, or undefined. */
+    async #installFor(name, tool, act) {
+        act.ctl = new AbortController();
+        const run = (argv, options = {}) => this.#vms.exec(name, argv, { ...options, signal: act.ctl.signal });
+        const present = async () => (await run(['sh', '-c', 'command -v "$1"', 'probe', tool.command[0]])).code === 0;
+        let steps = tool.steps;
+        if (tool.steps.length === 0 || await present()) {
+            const r = await run(['sh', '-c', 'for p in "$@"; do [ -e "$HOME/$p" ] && exit 0; done; exit 3', 'probe', ...tool.state.keep]);
+            if (r.code !== 0 && r.code !== 3) return `its machine could not be read (${firstLine(r.stderr) || `exit ${r.code}`})`;
+            steps = r.code === 0 ? [] : tool.steps.filter((s) => s.argv[0] !== 'sudo');
+        }
+        for (const [i, step] of steps.entries()) {
+            if (!this.#store.get(name)) return 'it was archived';
+            if (act.preempted) return 'its machine was forced off';
+            this.#store.patch(name, { toolSwitch: { to: tool.id, label: tool.label, step: `Installing ${tool.label} (${i + 1}/${steps.length})` } });
+            const r = await run(step.argv, { input: step.input, timeoutMs: STEP_MS });
+            if (act.preempted) return 'its machine was forced off';
+            if (r.code !== 0) return `installing ${tool.label} failed at step ${i + 1}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
+        }
+        if (act.preempted) return 'its machine was forced off';
+        if (steps.length > 0 && !(await present())) return `${tool.label} is not there after its install`;
+        return undefined;
+    }
+
     /* CARRIED ELSEWHERE (11-11, #351): what the conversation is beyond /work -- its tool's state, where its
        entry in config/tools.json says it is (`state.keep`, without `state.skip`) -- as one .tar.gz streamed
        from its machine, a manifest first (clavarium-conversation.json: its tool, its name, its size). Nothing
@@ -958,9 +1083,11 @@ export class Conversations {
     /* `toWork` (14-11): the archive written into its own work folder (/work/.clavarium-carry/<toWork>.tgz), that
        the server reads on its side, rather than sent out through the VM manager's output -- which stalled for good
        past ~36 KB on the owner's server. Its output is then empty. */
-    async exportState(name, { toWork } = {}) {
+    /* `others` (#404): a copy or a move carries the state of the AIs it ran before too, so that the way back still holds. */
+    async exportState(name, { toWork, others = false } = {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
+        this.#notChangingAi(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
         if (!tool?.state) throw new Refusal(409, `${tool?.label ?? c.tool} does not say where it keeps its state: it cannot be exported.`);
         if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
@@ -977,7 +1104,8 @@ export class Conversations {
                archive is whole all the same -- what was there, read; only a real error (2) fails. */
             + '[ "$rc" -le 1 ]';
         const id = typeof toWork === 'string' && /^[a-z0-9-]{1,64}$/.test(toWork) ? toWork : '';
-        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, tool.state.skip.join(' '), tool.state.keep.join(' '), id]);
+        const carried = [tool, ...(others ? Object.keys(c.toolsStarted ?? {}).map((id) => this.#tools.find((t) => t.id === id)).filter((t) => t?.state) : [])];
+        const argv = this.#vms.execArgv(name, ['sh', '-c', script, 'export', manifest, carried.flatMap((t) => t.state.skip).join(' '), [...new Set(carried.flatMap((t) => t.state.keep))].join(' '), id]);
         const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
         /* What it said when it failed: kept short, for the message that says why (a copy, a move). */
         child.said = '';
@@ -992,6 +1120,7 @@ export class Conversations {
     async exportWhole(name) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
+        this.#notChangingAi(name);
         const workDir = c.work === 'kept' && typeof this.workFolder === 'function' ? this.workFolder(name) : '';
         if (!workDir) throw new Refusal(409, 'Its work is on its own machine\'s disk: keep it here first (Its files), then export it.');
         if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.', { retry: false });
@@ -1120,6 +1249,7 @@ export class Conversations {
     async copy(name, { title, machine, machineMb, reminders = false } = {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
+        this.#notChangingAi(name);
         if (c.phase !== 'ready') throw new Refusal(409, 'It is busy: copy it once it is ready.');
         if (c.work !== 'kept') throw new Refusal(409, 'Its work is on its own machine\'s disk: it cannot be copied from here. Keep it here first (Its files), then copy it.');
         const tool = this.#tools.find((t) => t.id === c.tool);
@@ -1185,7 +1315,7 @@ export class Conversations {
                     const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
                     if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(from, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
                     if (inWork && !(await this.#workShown(from, workDir))) throw new Error('its original\'s work folder is not shown in its machine: open the original once, then copy it again');
-                    const out = await this.exportState(from, inWork ? { toWork: carryId } : {});
+                    const out = await this.exportState(from, { others: true, ...(inWork ? { toWork: carryId } : {}) });
                     child = out.child;
                     let read = 0; let lastAt = Date.now(); let stalled = false;
                     const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); say(`Copying ${tool.label}'s memory: ${sizeWords(read)} read`); };
@@ -1254,7 +1384,8 @@ export class Conversations {
             if (reminders && typeof this.copyReminders === 'function') await Promise.resolve().then(() => this.copyReminders(from, to)).catch(() => {});
             this.#holding.delete(to);
             if (!this.#store.get(to)) return undefined;
-            this.#store.patch(to, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined });
+            /* The AIs its original ran before came with its state (#404): the way back is the copy's too. */
+            this.#store.patch(to, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, ...(tool.state ? { toolsStarted: c.toolsStarted, previousTool: c.previousTool } : {}) });
             this.ready(to);
             return undefined;
         } catch (error) {
@@ -1328,7 +1459,7 @@ export class Conversations {
         const inWork = carryId ? join(workDir, '.clavarium-carry', `${carryId}.tgz`) : '';
         if (inWork) await Promise.race([Promise.resolve().then(() => this.mounted(name, true)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
         if (inWork && !(await this.#workShown(name, workDir))) return 'its work folder is not shown in its machine: open the conversation once, then move it again.';
-        const { stream, child } = await this.exportState(name, inWork ? { toWork: carryId } : {});
+        const { stream, child } = await this.exportState(name, { others: true, ...(inWork ? { toWork: carryId } : {}) });
         let read = 0; let lastAt = Date.now(); let stalled = false;
         const grew = (n) => { if (n <= read) return; read = n; lastAt = Date.now(); this.#store.patch(name, { step: `Taking ${tool.label}'s state along: ${sizeWords(read)}` }); };
         const sizing = setInterval(() => {
@@ -1352,7 +1483,7 @@ export class Conversations {
         const carried = join(dir, 'state.tar.gz');
         const back = (why) => {
             /* Back to its own machine, as it was (stopped: the next opening wakes it). */
-            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingTo: undefined, movingFromMb: undefined, moveFailed: `Not moved: ${why}` });
+            this.#store.patch(name, { toolsStarted: c.toolsStarted, sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingTo: undefined, movingFromMb: undefined, moveFailed: `Not moved: ${why}` });
             this.#fresh.add(name); this.#mountAgain.add(name);
             try { this.renewed(name, `Not moved to the shared machine ${machine}: ${why} It stays in its own machine, as it was.`, false); } catch { /* told, nothing more */ }
         };
@@ -1388,7 +1519,7 @@ export class Conversations {
                     this.renewed(name, `Moved to the shared machine ${machine}, but ${tool.label}'s state did not come along (${error.message}): it starts afresh. Its old machine is kept, stopped.`, true);
                     return undefined;
                 }
-                this.#store.patch(name, { phase: 'ready', step: undefined });
+                this.#store.patch(name, { phase: 'ready', step: undefined, toolsStarted: c.toolsStarted });
                 this.ready(name);
             }
             /* There for good: its own machine can go. */
@@ -1435,7 +1566,7 @@ export class Conversations {
         const back = async (why) => {
             /* Back in its shared machine, as it was: its own machine, if begun, removed; its work shown there again. */
             if (!this.#store.get(name)) return undefined;
-            this.#store.patch(name, { sharedMachine: undefined });
+            this.#store.patch(name, { sharedMachine: undefined, toolsStarted: c.toolsStarted });
             if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== undefined) await this.#vms.removeVm(vmName(name)).catch(() => {});
             this.#store.patch(name, { ...was, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingOutOf: undefined, moveFailed: `Not moved: ${why}` });
             if (left) await this.#vms.workMount(name, this.#uid, this.#gid).catch(() => {});
@@ -1471,7 +1602,7 @@ export class Conversations {
                 this.#store.patch(name, { step: `Putting ${tool.label}'s state back` });
                 try { await this.#unpack(name, c.tool, carried); } catch (error) { lost = error.message; }
             }
-            this.#store.patch(name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, toolStarted: false, movingOutOf: undefined });
+            this.#store.patch(name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, ...NEW_DISK, ...(tool.state && !lost ? { toolsStarted: c.toolsStarted } : {}), movingOutOf: undefined });
             this.ready(name);
             /* There for good: its place in the shared machine goes -- the whole machine with the last one in it. */
             const others = this.#store.all().filter((x) => x.name !== name && x.sharedMachine === shared);
