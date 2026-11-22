@@ -6,7 +6,7 @@
     ['Isolated agents', 'isolated-agents.html', 'One VM per agent, or several in one.', 'VMs', 'VMs'],
     ['Keys & assets', 'assets-and-keys.html', 'Keys, folders, accounts: given per agent, taken back.', 'secrets, folders'],
     ['Chat from anywhere', 'parley.html', 'Chat with your agents from your phone.', 'Parley', 'Parley'],
-    ['Connect your tools', 'tether.html', 'Mail, calendar, browser, files, MCP.', 'Tether', 'Tether'],
+    ['Your tools', 'tether.html', 'Mail, contacts, calendar, files, browser, MCP.', 'mail, contacts, calendar, files', 'mail, contacts, calendar, files'],
     ['Talk from any room', 'voice-boxes.html', 'Talk to your AI from any room.', 'Voice boxes', 'Voice boxes'],
     ['Agents work together', 'rooms.html', 'Several AIs in one room, hand-overs capped.', 'Rooms', 'Rooms']
   ];
