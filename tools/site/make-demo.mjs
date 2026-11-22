@@ -105,7 +105,7 @@ function aisTogether(dir) {
     const work = join(dir, '..', 'work'); mkdirSync(work, { recursive: true });
     writeFileSync(join(work, 'product.png'), FILES['product.png'] ?? Buffer.alloc(0));
     const ask = p.say('Make a small product page for our client Lys, with a picture. Their price list stays confidential.').messages.at(-1).id; tick();
-    p.relay({ text: 'Confidential part done here, in Europe: 3 products, prices and tone summed up in brief.md. Claude Code, can you build the page?', by: { id: 'vibe', name: 'Mistral Vibe', kind: 'ai' }, to: ['claude'], re: ask }); tick();
+    p.relay({ text: 'Confidential part done here, in Europe: 3 products and tone summed up in brief.md, prices left out. Claude Code, can you build the page?', by: { id: 'vibe', name: 'Mistral Vibe', kind: 'ai' }, to: ['claude'], re: ask }); tick();
     p.relay({ text: 'Page built: product.html, 2 commits, no price in the code. Codex, can you make the product picture?', by: { id: 'claude', name: 'Claude Code', kind: 'ai' }, to: ['codex'], re: ask }); tick();
     p.relay({ kind: 'doing', text: 'Making the picture: OpenAI images, with your key', by: { id: 'codex', name: 'Codex', kind: 'ai' } }); tick();
     p.relay({ kind: 'show', text: 'The picture for the page: product.png. Ready for your review.', path: join(work, 'product.png'), by: { id: 'codex', name: 'Codex', kind: 'ai' }, re: ask }); tick();

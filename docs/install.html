@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Self-host Claude Code and other AI agents: install · Clavarium</title>
-<meta name="description" content="One command on Ubuntu Server 24.04 or 26.04. Prerequisites: a machine that runs VMs, 1–2 GB RAM per agent, a domain, an AI provider.">
+<meta name="description" content="One command on Ubuntu Server 24.04 or 26.04. Prerequisites: an x86_64 machine that runs VMs, 1–2 GB RAM per agent, a domain, an AI provider.">
 <link rel="stylesheet" href="style.css">
 <script src="site.js" defer></script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, MIT. Clavarium brings no AI and charges nothing."}}, {"@type": "Question", "name": "No public address at home?", "acceptedAnswer": {"@type": "Answer", "text": "Your machine dials out to the relay. Home opens no port."}}, {"@type": "Question", "name": "How do I upgrade?", "acceptedAnswer": {"@type": "Answer", "text": "Run the same command again."}}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, MIT. Clavarium brings no AI and charges nothing."}}, {"@type": "Question", "name": "No public address at home?", "acceptedAnswer": {"@type": "Answer", "text": "Your machine dials out to the relay. Home opens no port."}}, {"@type": "Question", "name": "How do I upgrade?", "acceptedAnswer": {"@type": "Answer", "text": "It updates itself at night by default. Do not re-run this on an online server."}}]}</script>
 </head>
 <body>
 <div class="wrap">
@@ -20,7 +20,7 @@
   <main>
     <div class="page-hero">
       <h1>Install Clavarium on your server</h1>
-      <p class="lead">One command on Ubuntu. It asks nothing, and runs again to upgrade.</p>
+      <p class="lead">One command on Ubuntu. The local install asks nothing, and it updates itself at night.</p>
     </div>
 
     <section>
@@ -46,11 +46,11 @@ curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --domain "$DOMAIN"
     <section>
       <h2>What it needs</h2>
       <ul class="does">
-        <li>Ubuntu Server 24.04 or 26.04, on a CPU that runs VMs.</li>
+        <li>Ubuntu Server 24.04 or 26.04, on an x86_64 CPU that runs VMs.</li>
         <li>1–2 GB RAM per working agent. Tried on 4 cores, 6 GB.</li>
         <li>A domain, and your AI: a subscription or a provider key.</li>
       </ul>
-      <p class="note">Each download is a named release, checked against a checksum. <a href="https://clavarium.org/install.sh">Read the script</a></p>
+      <p class="note">Clavarium and its core programs are named releases, checked against a checksum. <a href="https://clavarium.org/install.sh">Read the script</a></p>
     </section>
 
     <section>
@@ -69,7 +69,7 @@ curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --domain "$DOMAIN"
       <h2>Questions</h2>
       <details><summary>Is it free?</summary><p>Yes, MIT. Clavarium brings no AI and charges nothing.</p></details>
       <details><summary>No public address at home?</summary><p>Your machine dials out to the relay. Home opens no port.</p></details>
-      <details><summary>How do I upgrade?</summary><p>Run the same command again.</p></details>
+      <details><summary>How do I upgrade?</summary><p>It updates itself at night by default. Do not re-run this on an online server.</p></details>
     </section>
   </main>
 
