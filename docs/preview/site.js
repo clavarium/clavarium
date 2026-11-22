@@ -49,7 +49,7 @@
     var srv = el('div', 'srv');
     srv.appendChild(el('b', '', 'Your server'));
     var ag = el('div', 'agents');
-    ['Claude Code', 'Codex', 'OpenCode'].forEach(function (n) { ag.appendChild(el('span', '', n)); });
+    ['Claude Code', 'Codex', 'Mistral Vibe', 'OpenCode'].forEach(function (n) { ag.appendChild(el('span', '', n)); });
     srv.appendChild(ag);
     hub.appendChild(srv);
     m.appendChild(hub);
@@ -101,21 +101,26 @@ document.querySelectorAll('.play').forEach(function (box) {
   b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
 
-  /* The rotating word of the home title: one word at a time; stays still for people who ask for less motion. */
+  /* The rotating word of the home title: ONE pass (3 s on the first word, 2 s on the others), then it stays on the
+     last word, which is also what shows without script or for people who ask for less motion. It can be stopped. */
   document.querySelectorAll('[data-rotate]').forEach(function (box) {
-    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { box.style.width = box.children[0].getBoundingClientRect().width + 'px'; return; }
-    var words = box.children, at = 0;
-    /* The box takes the width of the word shown, smoothly: the line stays centred. */
+    var words = box.children, last = words.length - 1, at = last, timer = null;
+    var stop = box.closest('h1') && box.closest('h1').querySelector('[data-rotate-stop]');
     var fit = function () { box.style.width = words[at].getBoundingClientRect().width + 'px'; };
+    var show = function (i) { words[at].classList.remove('on'); at = i; words[at].classList.add('on'); fit(); };
+    var end = function () { clearTimeout(timer); show(last); if (stop) stop.hidden = true; };
     fit();
     window.addEventListener('resize', fit);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
-    setInterval(function () {
-      if (document.hidden) return;
-      words[at].classList.remove('on');
-      at = (at + 1) % words.length;
-      words[at].classList.add('on');
-      fit();
-    }, 2400);
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var next = function () {
+      if (at === last) { end(); return; }
+      show(at + 1);
+      if (at === last) { end(); return; }
+      timer = setTimeout(next, 2000);
+    };
+    show(0);
+    if (stop) { stop.hidden = false; stop.addEventListener('click', end); }
+    timer = setTimeout(next, 3000);
   });
 });
