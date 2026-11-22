@@ -103,10 +103,13 @@ test('what is installed: an exact version from npm, checked, or a working tree f
     assert.match(npm.out, /release\s+clavarium@0\.2\.0-next\.1 from npm, checked \(integrity, provenance from github\.com\/clavarium\/clavarium, npm audit signatures\)/);
     assert.match(npm.out, /updates\s+automatic, between 02:00 and 05:00, channel next/, 'a pre-release follows "next" unless told');
     assert.match(install('--local', '--dry-run').out, /release\s+the working tree .*\(development: not checked\)/, 'from a working tree: that tree');
+    /* The three channels (22-11, #52): a -beta.N follows beta unless told; beta can be asked for. */
+    assert.match(install('--local', '--version', '1.0.0-beta.1', '--dry-run').out, /channel beta/);
+    assert.match(install('--local', '--version', '1.0.0', '--channel', 'beta', '--dry-run').out, /channel beta/);
     const asked = install('--local', '--version', '1.0.0', '--updates', 'ask', '--channel', 'latest', '--dry-run');
     assert.match(asked.out, /updates\s+said in Settings, done when you say, channel latest/);
     assert.match(install('--local', '--updates', 'auto', '--update-window', '23:30-01:00', '--dry-run').out, /automatic, between 23:30 and 01:00/);
-    for (const bad of [['--version', '1.0'], ['--version', 'latest'], ['--version', '1.0.0', '--from-dir', '.'], ['--from-dir', '/nonexistent'], ['--updates', 'always'], ['--update-window', '2-5'], ['--update-window', '02:00-02:00'], ['--channel', 'beta']]) {
+    for (const bad of [['--version', '1.0'], ['--version', 'latest'], ['--version', '1.0.0', '--from-dir', '.'], ['--from-dir', '/nonexistent'], ['--updates', 'always'], ['--update-window', '2-5'], ['--update-window', '02:00-02:00'], ['--channel', 'stable']]) {
         const r = install('--local', ...bad, '--dry-run');
         assert.equal(r.code, 64, bad.join(' ')); assert.equal(r.out, '');
     }
@@ -195,7 +198,7 @@ test('install.sh of the site: the same pinned Node.js, local mode first, options
         }
     }
     assert.match(text, /exec \/usr\/local\/bin\/clavarium online "\$\{ONLINE\[@\]\}" <\/dev\/tty/);
-    for (const bad of [['--channel', 'beta'], ['--domain'], ['--relay'], ['--version', 'latest'], ['--operator', 'x@example.com']]) {
+    for (const bad of [['--channel', 'stable'], ['--domain'], ['--relay'], ['--version', 'latest'], ['--operator', 'x@example.com']]) {
         const r = boot(...bad);
         assert.equal(r.code, 64, bad.join(' '));
     }

@@ -19,7 +19,7 @@
 # installs that exact version again from npm, checked (integrity, provenance
 # from github.com/clavarium/clavarium).
 #
-#   --channel latest|next   which versions (default latest)
+#   --channel latest|beta|next   which versions (default latest)
 #   --version X.Y.Z         exactly this version
 #   any other option goes to deploy/install.sh (--port, --updates, ...)
 #
@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
         *) PASS+=("$1"); shift ;;
     esac
 done
-[[ "$CHANNEL" =~ ^(latest|next)$ ]] || bad "--channel is latest or next"
+[[ "$CHANNEL" =~ ^(latest|beta|next)$ ]] || bad "--channel is latest, beta or next"
 [ -z "$VERSION" ] || [[ "$VERSION" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || bad "--version is an exact version, like 1.2.3"
 
 [ "$(id -u)" -eq 0 ] || refuse "run it as root: curl -fsSL https://clavarium.org/install.sh | sudo bash"
