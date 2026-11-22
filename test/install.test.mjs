@@ -204,6 +204,23 @@ test('install.sh of the site: the same pinned Node.js, local mode first, options
     }
 });
 
+test('install.sh of the site refuses an online Clavarium: local mode would drop its operators (#409)', () => {
+    const text = readFileSync(BOOT, 'utf8');
+    const start = text.indexOf('# ALREADY ONLINE'); const end = text.indexOf('export DEBIAN_FRONTEND', start);
+    assert.ok(start > 0 && start < text.indexOf('bash "$work/package/deploy/install.sh"') && end > start);
+    const dir = mkdtempSync(join(tmpdir(), 'clv-online-')); const unit = join(dir, 'clavarium.service');
+    const guard = `refuse() { echo "$1" >&2; exit 78; }\n${text.slice(start, end).replace('/etc/systemd/system/clavarium.service', unit)}echo went on\n`;
+    const run = () => spawnSync('/bin/bash', ['-c', guard], { encoding: 'utf8' });
+    try {
+        assert.equal(run().status, 0, 'a first install goes on');
+        writeFileSync(unit, 'ExecStart=node server/main.mjs --port 7717\n');
+        assert.equal(run().status, 0, 'a local install goes on');
+        writeFileSync(unit, 'ExecStart=node server/main.mjs --port 7717 --operators a@example.com --public-origin https://x.example.com\n');
+        const r = run();
+        assert.equal(r.status, 78); assert.match(r.stderr, /is online/); assert.ok(!r.stdout.includes('went on'));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('install.sh of the site will not go further unless it is root', { skip: process.getuid() === 0 }, () => {
     const r = boot('--channel', 'next');
     assert.equal(r.code, 78);

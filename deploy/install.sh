@@ -203,6 +203,11 @@ NODE_VERSION="$(sed -n "s/^export const NODE_VERSION = '\(v[0-9.]*\)';$/\1/p" "$
 NODE_SHA256="$(sed -n "s/^export const NODE_SHA256 = '\([0-9a-f]\{64\}\)';$/\1/p" "$HERE/server/tools.mjs")"
 [ -n "$NODE_VERSION" ] && [ -n "$NODE_SHA256" ] || refuse "the pinned Node.js version was not found in $HERE/server/tools.mjs"
 
+# ALREADY ONLINE (22-11, #409): local mode would rewrite the service without its operators.
+if [ "$LOCAL" = "yes" ] && [ "$DRY" != "yes" ] && grep -q -- ' --operators ' "$UNIT" 2>/dev/null; then
+    refuse "this Clavarium is online: it updates itself. Installing in local mode would remove its sign-in. Nothing was changed."
+fi
+
 if [ "$DRY" = "yes" ]; then
     cat <<PLAN
 would install Clavarium:

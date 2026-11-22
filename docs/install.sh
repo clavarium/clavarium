@@ -98,6 +98,12 @@ OS="$(. /etc/os-release 2>/dev/null; printf '%s %s' "${ID:-}" "${VERSION_ID:-}")
 case "$OS" in "ubuntu 24.04"|"ubuntu 26.04") : ;; *) refuse "this is ${OS:-an unknown system}; Clavarium installs on Ubuntu Server 24.04 or 26.04" ;; esac
 [ "$(uname -m)" = "x86_64" ] || refuse "this machine is $(uname -m); only x86_64 is supported"
 
+# ALREADY ONLINE (22-11, #409): this script installs in local mode, which would rewrite the service without its
+# operators, so that it would accept whatever reaches it. An online Clavarium updates itself: nothing to run.
+if grep -q -- ' --operators ' /etc/systemd/system/clavarium.service 2>/dev/null; then
+    refuse "this Clavarium is online: it updates itself. Running this again would remove its sign-in. Nothing was changed."
+fi
+
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
 for tool in curl xz sha256sum; do
     command -v "$tool" >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y -qq curl ca-certificates xz-utils >/dev/null; break; }
