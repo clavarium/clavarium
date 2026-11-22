@@ -200,10 +200,11 @@ export class SigninHelp {
             /* STILL AT ITS PROMPT (22-11, a wrong code on a real machine): the ask stays, so that the field can be used
                again and nothing else is typed into that prompt meanwhile. */
             const end = Date.now() + this.codeSettleMs;
-            let waiting = await this.atCodePrompt(name, exec).catch(() => false);
+            const still = () => this.atCodePrompt(name, exec, { last: 3 }).catch(() => false);
+            let waiting = await still();
             while (waiting && Date.now() < end) {
                 await new Promise((r) => { setTimeout(r, 1000).unref?.(); });
-                waiting = await this.atCodePrompt(name, exec).catch(() => false);
+                waiting = await still();
             }
             if (waiting) throw new Refusal(422, 'The tool did not accept this code.');
             /* Accepted: the ask is over, whatever comes next is not this code. */
@@ -227,7 +228,7 @@ export class SigninHelp {
     }
     /* ITS TOOL IS AT ITS « PASTE THE CODE » PROMPT (22-11, seen on a real machine): a line typed now goes into that field
        and the sign-in fails. Asked of its screen, only while a sign-in is open and its tool has such a prompt. */
-    async atCodePrompt(name, exec) {
+    async atCodePrompt(name, exec, { last = 0 } = {}) {
         const ask = this.#readAsk(name); if (!ask) return false;
         const at = Date.parse(ask.at); if (!Number.isFinite(at) || this.#now() - at > CODE_WAIT_MS) return false;
         const rules = (this.#tool(name)?.signin?.screen ?? []).filter((r) => String(r).startsWith('code:')).map((r) => String(r).slice(5));
@@ -236,7 +237,9 @@ export class SigninHelp {
         if (r.code !== 0) return false;
         /* As screen-watch reads it: the bottom of the screen, whatever the case. A prompt left higher up is over, and a
            code typed then would go to the AI as a message. */
-        const bottom = String(r.stdout).replace(/\s+$/u, '').split('\n').slice(-SCREEN_LINES).join('\n');
+        const lines = String(r.stdout).replace(/\s+$/u, '').split('\n');
+        /* `last`: only its last written lines: a prompt the tool has answered and moved on from stays higher up. */
+        const bottom = (last ? lines.filter((l) => l.trim()).slice(-last) : lines.slice(-SCREEN_LINES)).join('\n');
         return rules.some((p) => { try { return new RegExp(p, 'i').test(bottom); } catch { return false; } });
     }
     #readRoute(name) { try { return JSON.parse(readFileSync(join(this.#chat(name), ROUTE), 'utf8')); } catch { return null; } }

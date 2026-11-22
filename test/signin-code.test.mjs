@@ -130,3 +130,16 @@ test('a code the tool does not accept: said, the ask stays, the field works agai
     assert.equal(w.typed.length, 2);
     assert.equal(existsSync(join(w.chat, 'signin-ask.json')), false, 'accepted: the ask is over');
 });
+
+test('a prompt the tool has moved on from, still higher on its screen, is not a refused code', async (t) => {
+    const w = world(t);
+    w.ask();
+    w.help.codeSettleMs = 0;
+    const type = w.typed;
+    w.accepts = false; const before = w.screen;
+    w.screen = `${before}`;
+    const done = w.post({ code: CODE });
+    w.screen = `${PROMPT}\n${CODE.length}\nok\nready>`;
+    assert.equal((await done).status, 200);
+    assert.equal(type.length, 1);
+});
