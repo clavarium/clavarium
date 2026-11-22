@@ -13,10 +13,10 @@
   var U = [
     ['Help the whole family', 'family.html', 'Marcel, 82, talks to a box at home.'],
     ['Fix bugs, review code', 'coding-agents.html', 'Several agents in parallel, you review.'],
-    ['Share access, not logins', 'data-sovereignty.html', 'Your server, a European AI provider.'],
+    ['Use AI hosted in Europe', 'data-sovereignty.html', 'Your server, a European AI provider.'],
     ['Ask aloud at home', 'home-and-voice.html', 'A voice assistant that runs at home.'],
-    ['Sort mail, plan meetings', 'mail-and-calendar.html', 'It drafts; you approve what goes out.'],
-    ['Separate work, home, club', 'work-home-club.html', 'One assistant per life, nothing crosses over.']
+    ['Sort mail, plan meetings', 'mail-and-calendar.html', 'It drafts; you choose what needs your OK.'],
+    ['Separate work, home, club', 'work-home-club.html', 'One assistant per life, each with its own accounts.']
   ];
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -100,6 +100,7 @@ document.querySelectorAll('.play').forEach(function (box) {
   if (!v || !b) return;
   b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
+});
 
   /* Every film says what it is: invented data, scripted agents. */
   document.querySelectorAll('video.demo').forEach(function (v) {
@@ -120,4 +121,3 @@ document.querySelectorAll('.play').forEach(function (box) {
     show(0);
     for (var i = 1; i <= last; i++) (function (n) { setTimeout(function () { show(n); }, n * 1600); })(i);
   });
-});
