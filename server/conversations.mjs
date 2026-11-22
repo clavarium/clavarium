@@ -1418,6 +1418,7 @@ export class Conversations {
        own disk is refused (its files would stay behind): kept first (its settings, Its files).
        -> the record, at once; `this.built`: the end of it. */
     async moveToShared(name, { machine, machineMb } = {}) {
+        if (this.#store.get(name)?.offline === true) throw new Refusal(409, 'It is offline, which needs its own machine: put it online first.');
         const c = this.#busyCheck(name);
         if (c.sharedMachine) throw new Refusal(409, `It lives in the shared machine ${c.sharedMachine} already.`);
         if (typeof machine !== 'string' || !isConversationName(machine)) throw new Refusal(400, 'A machine name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter.');
@@ -2377,7 +2378,10 @@ export class Conversations {
 
     /* Online or offline: remembered here, enforced by network.mjs. */
     setOffline(name, offline) {
-        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        /* A shared machine has one network for all its agents: the rules, by machine, could not cut this one (#410). */
+        if (offline === true && c.sharedMachine) throw new Refusal(409, 'Offline needs its own machine.');
         this.#store.patch(name, { offline: offline === true });
     }
 

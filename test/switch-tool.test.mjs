@@ -185,3 +185,14 @@ test('a tools folder that came loose is said, with what to do', async (t) => {
     await go(plain, 'beta');
     assert.doesNotMatch(plain.store.get('demo').toolSwitchFailed, /came loose/);
 });
+
+test('offline needs its own machine: refused in a shared one, and a conversation offline does not move into one (#410)', async (t) => {
+    const shared = bench(t); shared.put({ sharedMachine: 'common' });
+    assert.throws(() => shared.all.setOffline('demo', true), /needs its own machine/);
+    assert.notEqual(shared.store.get('demo').offline, true);
+    shared.all.setOffline('demo', false);
+    const own = bench(t); own.put();
+    own.all.setOffline('demo', true);
+    assert.equal(own.store.get('demo').offline, true);
+    await assert.rejects(own.all.moveToShared('demo', { machine: 'common', machineMb: 4096 }), /needs its own machine/);
+});

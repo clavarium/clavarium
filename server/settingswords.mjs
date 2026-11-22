@@ -272,7 +272,7 @@ export const SETTINGS_WORDS_FR = {
     'set-files-read-only': 'Lecture seule : rien ne peut y être changé.',
     'set-ai': 'IA', 'set-ai-back': 'Revenir à {name}', 'set-ai-ask': 'Passer à {name} ? Elle relira ce fil.', 'set-ai-go': 'Changer', 'set-ai-no': 'Annuler',
     'set-this-conv': 'Cette conversation · {name}', 'set-ask-first': 'Demander avant d\'agir',
-    'set-online': 'En ligne', 'set-offline-btn': 'Hors ligne', 'set-sleep': 'Endormir',
+    'set-online': 'En ligne', 'set-offline-btn': 'Hors ligne', 'set-offline-shared': 'Demande sa propre machine', 'set-sleep': 'Endormir',
     'set-room-name': 'Nom', 'set-room-welcomes': 'Accueille', 'set-room-ais': 'Ses IA',
     'set-room-find': 'Chercher une conversation', 'set-room-boxes': 'Boîtiers vocaux',
     'set-room-remove': 'Supprimer le salon', 'set-room-remove-what': 'Le fil part · les IA et boîtiers restent',

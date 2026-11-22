@@ -2769,6 +2769,10 @@
         void paintGuide(here);
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
+        /* A shared machine has one network: Offline could not cut this agent alone (#410). */
+        const oneNetwork = Boolean(here?.sharedMachine);
+        $('network').querySelector('[data-online="false"]').disabled = oneNetwork;
+        $('network-shared').hidden = !oneNetwork;
         void paintCompanionHere();
         await paintSignIn();
     }
