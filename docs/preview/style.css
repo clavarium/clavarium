@@ -232,17 +232,14 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 @media (max-width:760px){.only-desk,video.only-desk{display:none}.only-phone,video.only-phone{display:block}}
 @media (min-width:761px){.demo-grid{grid-template-columns:minmax(0,2.4fr) minmax(0,1fr);align-items:center}}
 
-/* The rotating word of the home title: all words in one cell, so the line never moves. */
-.rot{display:inline-grid;justify-items:start;color:var(--f);text-align:left;transition:width .35s ease}
-.rot{overflow-x:clip}
-.rot>span{white-space:nowrap}
-.rot>span{grid-area:1/1;opacity:0;transform:translateY(.28em);transition:opacity .35s ease,transform .35s ease}
-.rot>span.on{opacity:1;transform:none}
-@media (prefers-reduced-motion:reduce){.rot>span{transition:none}}
-@media (prefers-reduced-motion:reduce){.rot{transition:none}}
 /* Narrow two-column map: one box per line, so that no label overflows. */
 @media (min-width:761px) and (max-width:1080px){.map .col{grid-template-columns:1fr}.map .col a{min-height:46px}}
-.hero h1{position:relative}
-.rot-stop{position:absolute;right:0;bottom:-2px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--mute);font-size:.7rem;line-height:1.2;cursor:pointer}
-.rot-stop[hidden]{display:none}
 @media (max-width:380px){.hero h1{font-size:1.5rem}}
+/* The four AIs of the home: each on its job, with its level of access. */
+.ais{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-width:760px;margin:18px auto 16px}
+.ai{display:flex;flex-direction:column;gap:2px;padding:10px 8px;background:var(--card);border:1px solid var(--line);border-radius:12px;transition:border-color .3s ease,transform .3s ease}
+.ai b{font-size:1.02rem}.ai span{color:var(--mute);font-size:.88rem}
+.ai .lv{margin-top:4px;font-weight:650;font-size:.76rem;color:var(--f)}
+.ai.spot{border-color:var(--f);transform:translateY(-2px)}
+@media (max-width:560px){.ais{grid-template-columns:1fr 1fr}}
+@media (prefers-reduced-motion:reduce){.ai{transition:none}}
