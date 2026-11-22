@@ -3,12 +3,12 @@
    Green = feature, orange = use case. "#soon" = page not built yet. */
 (function () {
   var F = [
-    ['Isolated agents', 'isolated-agents.html', 'One VM per agent, or several in one.', 'VMs', 'VMs'],
-    ['Keys & assets', 'assets-and-keys.html', 'Keys, folders, accounts: given per agent, taken back.', 'secrets, folders'],
-    ['Chat from anywhere', 'parley.html', 'Chat with your agents from your phone.', 'Parley', 'Parley'],
-    ['Your tools', 'tether.html', 'Mail, contacts, calendar, files, browser, MCP.', 'mail, contacts, calendar, files', 'mail, contacts, calendar, files'],
-    ['Talk from any room', 'voice-boxes.html', 'Talk to your AI from any room.', 'Voice boxes', 'Voice boxes'],
-    ['Agents work together', 'rooms.html', 'Several AIs in one room, hand-overs capped.', 'Rooms', 'Rooms']
+    ['One machine per agent', 'isolated-agents.html', 'One VM per agent, or several in one.', 'isolated', 'isolated'],
+    ['Keys and folders', 'assets-and-keys.html', 'Keys, folders, accounts: given per agent, taken back.', 'given per agent', 'given per agent'],
+    ['Chat from your phone', 'parley.html', 'Chat with your agents from your phone or computer.', 'or computer', 'or computer'],
+    ['Mail, contacts, calendar', 'tether.html', 'Mail, contacts, calendar, files, browser, MCP.', 'files, browser, MCP', 'files, browser, MCP'],
+    ['Talk to it at home', 'voice-boxes.html', 'Talk to your AI from any room.', 'voice boxes', 'voice boxes'],
+    ['AIs work together', 'rooms.html', 'Several AIs in one room, hand-overs capped.', 'Claude, Codex, Mistral', 'Claude, Codex, Mistral']
   ];
   var U = [
     ['Family', 'family.html', 'Marcel, 82, talks to a box at home.'],
