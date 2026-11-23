@@ -21,6 +21,9 @@ export const EVERY_MS = 60_000;
    has said nothing at all for this long: mute (30 s each) on three looks in a row. */
 export const STUCK_MS = 2 * 60_000;
 export const REVIVE_EVERY_MS = 6 * 3600_000;
+/* After a cut, how long a machine is given to answer before it is restarted: 2 min. */
+export const ANSWER_TRIES = 5;
+export const ANSWER_EVERY_MS = 30_000;
 export const MANAGER_MODES = Object.freeze(['night', 'always', 'ask']);
 export const NIGHT_FROM = 0;
 export const NIGHT_UNTIL = 7;
@@ -29,11 +32,19 @@ const PING_MS = 40_000;
 
 const said = (r) => String(r?.stderr || r?.stdout || '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) || `exit ${r?.code}`;
 
+/* Name -> state, from `multipass list --format csv`. */
+export function statesOf(csv) {
+    const out = new Map();
+    for (const line of String(csv ?? '').split('\n').slice(1)) { const [name, state] = line.split(','); if (/^clv-[a-z0-9-]+$/.test(name ?? '') && state) out.set(name, state); }
+    return out;
+}
+
 export class VmWatch {
-    #run; #store; #now; #hour; #log; #alert; #stuckMs; #reviveEveryMs; #downSince = null; #reviving = null;
+    #run; #store; #now; #hour; #log; #alert; #stuckMs; #reviveEveryMs; #downSince = null; #reviving = null; #running = new Set(); #wait;
     ok = true;
     /* `hour()`: this server's local hour, 0-23 (injected for tests). */
-    constructor({ run, store, now = () => Date.now(), hour = () => new Date().getHours(), log = (line) => console.error(line), alert = () => {}, stuckMs = STUCK_MS, reviveEveryMs = REVIVE_EVERY_MS }) {
+    constructor({ run, store, now = () => Date.now(), hour = () => new Date().getHours(), log = (line) => console.error(line), alert = () => {}, stuckMs = STUCK_MS, reviveEveryMs = REVIVE_EVERY_MS, wait = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); }) }) {
+        this.#wait = wait;
         this.#run = run; this.#store = store; this.#now = now; this.#hour = hour; this.#log = log; this.#alert = alert; this.#stuckMs = stuckMs; this.#reviveEveryMs = reviveEveryMs;
     }
 
@@ -61,9 +72,13 @@ export class VmWatch {
     async look() {
         const r = await this.#run(['vm', 'ping'], { timeoutMs: PING_MS }).catch((e) => ({ code: 1, stderr: e.message }));
         if (r.code === 0) {
-            if (!this.ok) this.#log('vm manager: it answers again');
+            const was = !this.ok;
+            if (was) this.#log('vm manager: it answers again');
             this.ok = true; this.#downSince = null;
             this.#store.remove?.('asked');
+            const states = statesOf(r.stdout);
+            if (was) await this.#bringBack(states);
+            else this.#running = new Set([...states].filter(([, s]) => s === 'Running').map(([n]) => n));
             return 'ok';
         }
         if (this.ok) this.#log(`vm manager: it does not answer (${said(r)})`);
@@ -88,6 +103,38 @@ export class VmWatch {
         const result = await this.#revive(why, 'server');
         this.#alert({ title: 'The machines could not be reached', body: `${why}: it was restarted (${result}).`, url: '/?open=settings&at=machines' });
         return result === 'done' ? 'revived' : 'revive failed';
+    }
+
+    /* BACK AFTER A CUT (23-11, on real machines: Multipass updated by snap left every machine suspended, and a machine
+       suspended reads as a conversation asleep; and Multipass can say « Running » of a machine whose process is gone,
+       which nothing can reach). Only those that ran at the last look before it: the suspended started again, then each
+       asked if it answers, for a while; one that never does is stopped for sure and started. */
+    async #bringBack(states) {
+        const ran = [...this.#running].filter((n) => states.has(n));
+        this.#running = new Set(ran);
+        if (!ran.length) return;
+        const failed = [];
+        const start = async (name) => {
+            const done = await this.#run(['vm', 'start', name], { timeoutMs: 300_000 }).catch((e) => ({ code: 1, stderr: e.message }));
+            if (done.code !== 0) { failed.push(name); this.#log(`vm manager: ${name} could not be started again (${said(done)})`); }
+            return done.code === 0;
+        };
+        const asleep = ran.filter((n) => states.get(n) === 'Suspended');
+        if (asleep.length) this.#log(`vm manager: ${asleep.length} machine(s) left suspended by the cut: started again`);
+        for (const name of asleep) await start(name);
+        let silent = ran.filter((n) => !failed.includes(n));
+        for (let i = 0; i < ANSWER_TRIES && silent.length; i += 1) {
+            if (i) await this.#wait(ANSWER_EVERY_MS);
+            const said_ = await Promise.all(silent.map(async (n) => (await this.#run(['vm', 'exec', n, '--', 'true'], { timeoutMs: 20_000 }).catch(() => ({ code: 1 }))).code === 0));
+            silent = silent.filter((_, k) => !said_[k]);
+        }
+        for (const name of silent) {
+            this.#log(`vm manager: ${name} does not answer after the cut: stopped for sure and started`);
+            await this.#run(['vm', 'halt', name, 'force', 'kill'], { timeoutMs: 180_000 }).catch(() => {});
+            await start(name);
+        }
+        for (const n of failed) this.#running.delete(n);
+        if (failed.length) this.#alert({ title: 'Machines still down', body: `After the machine manager was cut, ${failed.length} could not be started again: open them.`, url: '/?open=settings&at=machines' });
     }
 
     /* RESTARTED BY ITS OWNER (Settings, Machines; confirmed there): now, whatever the hour or the last one.
