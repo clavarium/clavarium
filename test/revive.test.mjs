@@ -96,3 +96,23 @@ test('a work folder the VM manager cannot mount again: its MACHINE is restarted,
     await revive.tick();
     assert.equal(machines.length, 1, 'not again within AGAIN_MS');
 });
+
+test('its tool just restarted does not hold back the restart of its machine when its folders stay stuck', async () => {
+    let now = 1_000_000; const tools = []; const machines = [];
+    const revive = new Revive({
+        restart: async (name) => { tools.push(name); return true; },
+        restartMachine: async (name) => { machines.push(name); return true; },
+        now: () => now,
+    });
+    revive.judged('demo', { ...well, stale: true });
+    await revive.tick();
+    assert.deepEqual(tools, ['demo']);
+    now += 60_000;
+    revive.judged('demo', { ...well, stuckWork: true });
+    await revive.tick();
+    assert.deepEqual(machines, ['demo'], 'its machine restarted at once');
+    now += 60_000;
+    revive.judged('demo', { ...well, stuckWork: true });
+    await revive.tick();
+    assert.equal(machines.length, 1, 'and its machine not again within AGAIN_MS');
+});

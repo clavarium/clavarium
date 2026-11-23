@@ -374,7 +374,7 @@ test('its watchdog in its Machine chapter; Settings, Machines: each machine, For
     await me.page.goto(`${b.origin}/?open=settings&at=machines`);
     await me.until('the list', async () => (await me.page.locator('#machines-rows .machine-item').count()) === 2);
     const row = (name) => me.page.locator(`#machines-rows .machine-item[data-name="${name}"]`);
-    assert.match(await row('watched').locator('small').innerText(), /^Running · 0\.9 GB · since \d/);
+    assert.match(await row('watched').locator('small').innerText(), /^Running · 0\.9 GB · since (\d|[A-Z][a-z]{2} \d)/); /* an hour, or immediately after midnight its day */
     assert.equal(await me.page.locator('#manager-mode button[aria-pressed="true"]').innerText(), 'At night');
     assert.equal(await me.page.locator('#pressure-way button[aria-pressed="true"]').innerText(), 'Force stop');
     assert.match(await me.page.locator('#manager-line').innerText(), /^Answers/);
