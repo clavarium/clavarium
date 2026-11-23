@@ -189,7 +189,7 @@ export async function handleDoor(request, response, { devices, conversations, re
                 if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An attachment is a file.' });
                 return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
             }
-            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); if (part.terminal && signinCode && conversations.signinHelp?.codeInChat(name, body.text, body.files)) return send(201, { ...(await signinCode(name, body.text)), told: 'signin' }); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
         }
         /* A sign-in code (#405): a device given its terminal could type it there; no other. Named twice, never guessed. */
         const codeFor = /^\/conversations\/([^/]+)\/signin-code$/.exec(route);

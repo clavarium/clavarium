@@ -224,4 +224,11 @@ test('claude code: signed out on the way, its sign-in started as at its start', 
         assert.deepEqual(actionsOn(said, rules, new Set()).map((a) => [a.kind, a.value]), [['type', '/login']], said);
     }
     assert.deepEqual(actionsOn('I ran /login yesterday', rules, new Set()), [], 'its words only');
+    /* Any reason Claude Code gives, on a line of its own that ends with it (23-11: « Login reached its time limit »). */
+    for (const said of ['\u25cf Login reached its time limit \u00b7 Please run /login', 'work\n  \u23bf  Some new reason \u00b7 Please run /login  \nmore']) {
+        assert.deepEqual(actionsOn(said, rules, new Set()).map((a) => a.kind), ['type'], said);
+    }
+    for (const quoted of ['It says \u00ab Session over \u00b7 Please run /login \u00bb on that screen', 'Please run /login when you can', 'Then \u00b7 Please run /login to go on']) {
+        assert.deepEqual(actionsOn(quoted, rules, new Set()), [], quoted);
+    }
 });
