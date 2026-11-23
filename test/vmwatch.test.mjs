@@ -13,10 +13,12 @@ function bench({ answers = true, hour = 3, mode } = {}) {
         calls.push(argv.join(' '));
         if (argv[1] === 'ping') return host.answers ? { code: 0, stdout: host.csv ?? '' } : { code: 124, stderr: 'timed out' };
         if (argv[1] === 'start') return { code: host.noStart ? 1 : 0, stderr: 'no' };
+        if (argv[1] === 'exec') { host.asked = (host.asked ?? 0) + 1; return { code: host.ghost?.includes(argv[2]) ? 1 : 0, stderr: 'no route' }; }
+        if (argv[1] === 'halt') { host.ghost = (host.ghost ?? []).filter((n) => n !== argv[2]); return { code: 0 }; }
         if (argv[1] === 'revive') { host.revive += 1; host.answers = true; return { code: 0 }; }
         return { code: 64 };
     };
-    const w = new VmWatch({ run, store, now: () => clock, hour: () => host.hour, log: () => {}, alert: (p) => told.push(p) });
+    const w = new VmWatch({ wait: async () => {}, run, store, now: () => clock, hour: () => host.hour, log: () => {}, alert: (p) => told.push(p) });
     if (mode) w.setMode(mode);
     return { w, calls, host, told, later: (min) => { clock += min * 60_000; } };
 }
@@ -112,5 +114,24 @@ test('one that cannot be started again: its owner is told', async () => {
     b.host.answers = false; await b.w.look();
     b.host.answers = true; b.host.noStart = true; b.host.csv = CSV('Suspended', 'Running', 'Running');
     await b.w.look();
-    assert.ok(b.told.some((p) => /still asleep/i.test(p.title)));
+    assert.ok(b.told.some((p) => /still down/i.test(p.title)));
+});
+
+test('« Running » but its process is gone, after a cut: asked for a while, then stopped for sure and started; one that answers is left alone', async () => {
+    const b = bench();
+    b.host.csv = CSV('Running', 'Running', 'Suspended'); await b.w.look();
+    b.host.answers = false; await b.w.look();
+    b.host.answers = true; b.host.ghost = ['clv-a'];
+    await b.w.look();
+    assert.ok(b.calls.includes('vm halt clv-a force kill'));
+    assert.ok(b.calls.indexOf('vm halt clv-a force kill') < b.calls.indexOf('vm start clv-a'));
+    assert.ok(!b.calls.some((c) => c.includes('halt clv-b') || c.includes('start clv-b')), 'it answers');
+    assert.ok(!b.calls.some((c) => c.includes('clv-c')), 'asleep before: not touched');
+    assert.equal(b.calls.filter((c) => c === 'vm exec clv-a -- true').length, 5);
+});
+
+test('no cut: a machine is never asked, stopped or started by this', async () => {
+    const b = bench();
+    b.host.csv = CSV('Running', 'Running', 'Running'); await b.w.look(); await b.w.look();
+    assert.deepEqual([...new Set(b.calls)], ['vm ping']);
 });
