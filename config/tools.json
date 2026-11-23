@@ -78,7 +78,8 @@
         "keys:Select login method:=Enter",
         "link:https://(claude\\.ai|claude\\.com|console\\.anthropic\\.com)/\\S*oauth\\S*",
         "code:Paste code here"
-      ]
+      ],
+      "refused": "OAuth error"
     }
   },
   {
@@ -298,6 +299,7 @@
         "install",
         "-q",
         "--disable-pip-version-check",
+        "--force-reinstall",
         "mistral-vibe"
       ],
       [

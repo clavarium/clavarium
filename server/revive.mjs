@@ -45,7 +45,7 @@ export class Revive {
     }
 
     wanted(name) { return this.#wanted.get(name)?.why ?? null; }
-    forget(name) { this.#wanted.delete(name); this.#lastAt.delete(name); }
+    forget(name) { this.#wanted.delete(name); this.#lastAt.delete(name); this.#lastAt.delete(`${name}\0machine`); }
 
     /* One pass: each one wanted, restarted when it may be. Resolves with the names restarted. */
     async tick() {
@@ -55,8 +55,11 @@ export class Revive {
             const busy = (() => { try { return this.#busy(name); } catch { return false; } })();
             if (busy && !(why !== 'asked' && this.#now() - since >= WAIT_MS)) continue;
             this.#wanted.delete(name);
-            if (this.#now() - (this.#lastAt.get(name) ?? -Infinity) < AGAIN_MS) continue;
-            this.#lastAt.set(name, this.#now());
+            /* Its tool and its machine each have their own « not again » (23-11, on a real machine: a restart of its tool
+               held back for 30 min the restart of its machine, the only thing that could bring its folders back). */
+            const key = why === 'stuck' ? `${name}\0machine` : name;
+            if (this.#now() - (this.#lastAt.get(key) ?? -Infinity) < AGAIN_MS) continue;
+            this.#lastAt.set(key, this.#now());
             this.#going.add(name);
             try {
                 try { this.#tell(name, why, 'before'); } catch { /* told, nothing more */ }

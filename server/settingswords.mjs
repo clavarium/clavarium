@@ -11,6 +11,11 @@ export const SETTINGS_WORDS_FR = {
     'set-ch-s-words': 'Écran du chat', 'set-ch-s-dictation': 'Dictée', 'set-ch-s-shortcuts': 'Raccourcis', 'set-ch-s-thread': 'Événements du chat',
     'set-ch-s-updates': 'Mises à jour', 'set-ch-s-binders': 'Classeurs', 'set-ch-s-events': 'Activité', 'set-ch-s-jobs': 'Tâches', 'set-ch-s-logs': 'Journaux',
     'set-ch-s-usage': 'Usage', 'set-ch-s-backup': 'Sauvegarde', 'set-ch-s-advanced': 'Avancé',
+    /* The sign-in of a tool: its code pasted in a field, kept nowhere; the companion, its user's choice (#405). */
+    'set-signin-code-line': 'Une fois connecté, collez le code.', 'set-signin-code-sent': 'Code envoyé à l\'outil.', 'set-signin-code-act': 'Coller le code',
+    'set-signin-code-title': 'Code de connexion', 'set-signin-code-send': 'Envoyer', 'set-signin-code-bad': 'Ce n\'est pas un code.',
+    'set-signin-code-late': 'L\'outil n\'attend plus de code.', 'set-signin-code-failed': 'Non envoyé. Réessayez.', 'set-signin-code-rejected': 'Code refusé. Collez-le à nouveau.',
+    'set-companion-yours': 'Votre choix, votre responsabilité',
     /* Chat › when its thread is archived (talk.mjs setSplit). */
     'set-chat-split': 'Archiver son fil', 'set-split-2000': 'Tous les 2 000 messages', 'set-split-5000': 'Tous les 5 000',
     'set-split-week': 'Chaque semaine', 'set-split-day': 'Chaque jour', 'set-split-never': 'Jamais',
@@ -265,8 +270,9 @@ export const SETTINGS_WORDS_FR = {
     'set-secret-next-on': '{name} : remis à son outil au prochain démarrage', 'set-secret-next-off': '{name} : plus remis dès son prochain démarrage',
     'set-files-list': 'Liste', 'set-files-icons': 'Icônes', 'set-files-empty': 'Ce dossier est vide.',
     'set-files-read-only': 'Lecture seule : rien ne peut y être changé.',
+    'set-ai': 'IA', 'set-ai-back': 'Revenir à {name}', 'set-ai-ask': 'Passer à {name} ? Elle relira ce fil.', 'set-ai-go': 'Changer', 'set-ai-no': 'Annuler',
     'set-this-conv': 'Cette conversation · {name}', 'set-ask-first': 'Demander avant d\'agir',
-    'set-online': 'En ligne', 'set-offline-btn': 'Hors ligne', 'set-sleep': 'Endormir',
+    'set-online': 'En ligne', 'set-offline-btn': 'Hors ligne', 'set-offline-shared': 'Demande sa propre machine', 'set-sleep': 'Endormir',
     'set-room-name': 'Nom', 'set-room-welcomes': 'Accueille', 'set-room-ais': 'Ses IA',
     'set-room-find': 'Chercher une conversation', 'set-room-boxes': 'Boîtiers vocaux',
     'set-room-remove': 'Supprimer le salon', 'set-room-remove-what': 'Le fil part · les IA et boîtiers restent',

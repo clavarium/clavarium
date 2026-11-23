@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keys and assets for AI agents · Clavarium</title>
+<meta name="description" content="Give each AI agent only the keys, folders, repositories and accounts it needs, with a right. Take them back with one tap.">
+<link rel="stylesheet" href="style.css">
+<script src="site.js" defer></script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Can two agents share a folder?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, each with its own right. That is how agents hand work to each other."}}, {"@type": "Question", "name": "Does the agent see my Google password?", "acceptedAnswer": {"@type": "Answer", "text": "No. The token stays sealed on the host; the connector acts for the agent."}}, {"@type": "Question", "name": "I changed a key. Do I restart?", "acceptedAnswer": {"@type": "Answer", "text": "No. The agent's file follows within a minute; a running tool keeps its old value until restarted."}}]}</script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="index.html">&gt;_ clavarium</a>
+    <button class="menu" data-open-map>☰ Menu</button>
+    <a class="gh" href="https://github.com/clavarium/clavarium">GitHub</a>
+  </header>
+  <main>
+    <div class="page-hero">
+      <span class="kind f">Feature</span>
+      <h1>Keys &amp; assets: give an agent only what it needs</h1>
+      <p class="lead">Secrets, folders, accounts: each to one agent, with a right. Taken back with one tap.</p>
+    </div>
+<section><h2>Keys and secrets</h2><div class="keys">
+  <div><b>A key you give one agent</b><span>In that agent's machine, in memory, only while it runs. Detach it: removed at once. A copy it already made stays.</span><em class="in">in its machine</em></div>
+  <div><b>The key that pushes code</b><span>Sealed on your server. Used when you press Send.</span><em class="out">never in a machine</em></div>
+  <div><b>Mail and account passwords</b><span>Sealed on your server. The connector acts for the agent.</span><em class="out">never in a machine</em></div>
+</div></section><section><h2>Then everything else</h2><ul class="grid">
+<li><b>Folders</b><small>Read or write. Read-only enforced outside.</small></li>
+<li><b>Git repositories</b><small>Sent after your review, or automatically if you allow it.</small></li>
+<li><b>Mailboxes</b><small>Google, Microsoft, IMAP.</small></li>
+<li><b>Calendars, contacts</b><small>Google, Microsoft, CalDAV.</small></li>
+<li><b>MCP servers</b><small>Their key stays with <a href="tether.html">Tether</a>.</small></li>
+</ul></section><section><h2>How</h2><ol class="steps"><li>Add the asset once.</li><li>Attach it to a conversation: read, write or use.</li><li>Detach it when done.</li></ol><div style="margin-top:18px"><video class="demo wide" muted playsinline controls preload="none" poster="shots/desktop-assets-poster.png" aria-label="Giving an agent a folder, a mailbox and a key, then taking the key back"><source src="shots/desktop-assets.webm" type="video/webm"></video></div></section><section><h2>Limits</h2><ul class="limits"><li>A key given to an agent can be read by that agent.</li><li>A folder given to write, it can change.</li></ul><div class="btns"><a class="btn" href="security.html">Security</a><a class="btn" href="tether.html">Connect your tools</a><a class="btn" href="isolated-agents.html">Isolated agents</a></div></section><section><h2>Questions</h2><details><summary>Can two agents share a folder?</summary><p>Yes, each with its own right. That is how agents hand work to each other.</p></details><details><summary>Does the agent see my Google password?</summary><p>No. The token stays sealed on the host; the connector acts for the agent.</p></details><details><summary>I changed a key. Do I restart?</summary><p>No. The agent's file follows within a minute; a running tool keeps its old value until restarted.</p></details></section>
+  </main>
+  <footer>
+    <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
+    <div class="meta"><span>Free and open source, MIT.</span><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><span>Not affiliated with the AI vendors named.</span></div>
+  </footer>
+</div>
+</body>
+</html>

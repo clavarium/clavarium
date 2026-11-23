@@ -32,6 +32,7 @@
  *   POST /api/signin-companion                   {companion}: the conversation that signs the others' tools in with its browser ('' none; 15-11); {clicks}: it clicks Authorize itself
  *   POST /api/conversations/<name>/signin-companion  {companion}: its own (a conversation, "none"), or null for the general one; never itself
  *   POST /api/conversations/<name>/signin-link   its sign-in handed to a companion: shown to the person instead
+ *   POST /api/conversations/<name>/signin-code   {code}: typed into its tool at its code prompt; kept nowhere (#405)
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
@@ -40,6 +41,7 @@
  *   POST /api/conversations/<name>/talk/pin      {to, on}: the owner pins a message of the chat (on: false unpins); 5 at most
  *   POST /api/conversations/<name>/talk/split    {messages: 500..100000} | {days: 0.5..365} | {off: true}: when its thread is
  *                                                archived into volumes (nothing deleted) -> {split}; read back as `split` in GET .../talk
+ *   POST /api/conversations/<name>/tool          {tool}: changes its AI, in the same conversation (202: goes on; `toolSwitch`, then `toolSwitchFailed`)
  *   POST /api/conversations/<name>/chat-name     {name}: the name the chat gives its tool ('' : the neutral word of the dictionary)
  *   POST /api/conversations/<name>/tasks-binder  {binder}: the binder shown beside its chat ('' automatic, '-' none, else an id)
  *   POST /api/conversations/<name>/voice-mark    {on}: what is dictated into its terminal starts with a microphone sign (AI tools only)
@@ -589,6 +591,9 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
+        /* A SIGN-IN CODE (#405): answered before anything below can see this body (the journal, say). */
+        const codeOf = /^\/api\/conversations\/([^/]+)\/signin-code$/.exec(pathname);
+        if (codeOf && conversations.signinHelp) return send(200, await conversations.signinHelp.enterCode(decodeURIComponent(codeOf[1]), body?.code)), true;
         /* What was done, once it was done: said in What happened (events.mjs), for those worth saying. */
         if (events) { const answer = send; send = (status, out) => { if (status < 300) { try { events.fromRequest(pathname, body, identity, out); } catch { /* never in the way */ } } answer(status, out); }; }
         if (rooms && pathname.startsWith('/api/rooms')) {
@@ -1043,6 +1048,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (linkOf && conversations.signinHelp) return send(200, conversations.signinHelp.showLink(decodeURIComponent(linkOf[1]))), true;
         const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
+        const changingAi = /^\/api\/conversations\/([^/]+)\/tool$/.exec(pathname);
+        if (changingAi) return send(202, await conversations.switchTool(decodeURIComponent(changingAi[1]), body.tool)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);
         if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
         const beside = /^\/api\/conversations\/([^/]+)\/tasks-binder$/.exec(pathname);

@@ -3446,3 +3446,12 @@ span.tile-spark { display: block; height: 22px; }
 
 /* An MCP server's new tools (#392): its label and the three choices, wrapping on a phone. */
 .mcp-new-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+
+/* The field of a tool's sign-in code (#405). 16px: a phone does not zoom on it. */
+#signin-code { width: min(360px, calc(100vw - 32px)); padding: 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+#signin-code form { display: flex; flex-direction: column; gap: 10px; }
+#signin-code label { font-weight: 700; }
+#signin-code input { width: 100%; min-height: 40px; box-sizing: border-box; padding: 0 10px; font: 1rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+#signin-code .error { margin: 0; }
+#signin-code button { align-self: flex-end; min-height: 40px; }
+.companion-yours { margin: 2px 0 8px; font-size: .75rem; color: var(--ink2); }

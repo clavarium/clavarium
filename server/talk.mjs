@@ -237,7 +237,7 @@ const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #spoke; #inRoom; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #ticking = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
-    #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret; #log;
+    #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret; #log; #holdLine;
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
@@ -247,8 +247,8 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null, log = (line) => console.log(line) }) {
-        this.#log = log;
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null, holdLine = null, log = (line) => console.log(line) }) {
+        this.#log = log; this.#holdLine = holdLine;
         this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen; this.#dropSecret = dropSecret;
         this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#spoke = spoke; this.#inRoom = inRoom; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
@@ -827,6 +827,8 @@ export class Talk {
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return waits('typing', TYPING_QUIET_MS - quiet + 100);
         if (!(await this.#runs(name))) return waits('asleep', RETRY_MS);
+        /* At its sign-in code prompt: a line typed now would go into that field (signinhelp.mjs). It waits. */
+        if (await Promise.resolve(this.#holdLine?.(name)).catch(() => false)) return waits('signing-in', RETRY_MS);
         if (renudge) this.#log(`talk: ${name}: still unread ${Math.round((this.#now() - Date.parse(r.typedAt ?? '')) / 1000)} s after its line: typed again (${(r.renudged ?? 0) + 1})`);
         if (!(await this.#type(name, urgent ? URGENT : WAKE).catch((error) => { this.#log(`talk: ${name}: NOT typed: ${error?.message}`); return false; }))) return waits('failed', RETRY_MS);
         this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, renudge: false, typedAt: new Date(this.#now()).toISOString(), toldRead: this.#readCount(name), toldUnread: unread, renudged: renudge ? (r.renudged ?? 0) + 1 : 0 });

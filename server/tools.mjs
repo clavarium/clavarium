@@ -96,7 +96,9 @@ export function readTools(text) {
                 }
                 screen = Object.freeze([...rules]);
             }
-            signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]), ...(screen ? { screen } : {}) });
+            /* `refused`: the tool's own words when it turns a sign-in code down (signinhelp.mjs). */
+            if (t.signin.refused !== undefined && (typeof t.signin.refused !== 'string' || !t.signin.refused.trim() || t.signin.refused.length > 80)) throw new Error(`${t.id}: signin "refused" is a short text`);
+            signin = Object.freeze({ ...(t.signin.refused ? { refused: t.signin.refused } : {}), senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]), ...(screen ? { screen } : {}) });
         }
         /* Optional: the command that starts it taking up its last session
            ("claude --continue"); used instead of `command` once it has run on

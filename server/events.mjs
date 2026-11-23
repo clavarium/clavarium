@@ -28,6 +28,7 @@ const SAID = [
     [/^\/api\/conversations$/, 'conversation', (m, b, a) => `Conversation "${clip(a?.title ?? b.title ?? b.name)}" made (${clip(a?.tool ?? b.tool, 30)})`],
     [/^\/api\/conversations\/([^/]+)\/archive$/, 'conversation', (m) => `Conversation ${m[1]} archived`],
     [/^\/api\/conversations\/([^/]+)\/title$/, 'conversation', (m, b) => `Conversation ${m[1]} renamed "${clip(b.title)}"`],
+    [/^\/api\/conversations\/([^/]+)\/tool$/, 'conversation', (m, b) => `Conversation ${m[1]}: change of AI to ${clip(b.tool, 30)} asked`],
     [/^\/api\/conversations\/([^/]+)\/restart$/, 'machine', (m) => `Machine of ${m[1]} restarted`],
     [/^\/api\/conversations\/([^/]+)\/machine$/, 'machine', (m, b, a) => `Machine of ${m[1]} ${a?.sizeAtWake && a.phase === 'ready' ? 'to be resized as it wakes' : 'resized'}${b.memoryMb ? `: ${b.memoryMb} MB of memory` : ''}${b.diskGb ? `, ${b.diskGb} GB of disk` : ''}${b.cpus ? `, ${b.cpus} core${b.cpus > 1 ? 's' : ''}` : ''}`],
     [/^\/api\/conversations\/([^/]+)\/machine\/cancel$/, 'machine', (m) => `Machine of ${m[1]}: the size kept for its wake given up`],

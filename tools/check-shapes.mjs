@@ -41,7 +41,10 @@ const RULES = [
         why: 'example.com and example.org are for examples; a noreply form is '
             + 'what git should be carrying.',
         find: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
-        allow: (m) => /@(example\.(com|org|net)|users\.noreply\.github\.com)$/i.test(m),
+        /* example.com's own sub-domains are examples too (sam@work.example.com, 21-11). */
+        allow: (m) => /@(([a-z0-9-]+\.)*example\.(com|org|net)|users\.noreply\.github\.com)$/i.test(m),
+        /* A compressed film's random bytes make address shapes (21-11: an address shape found in a webm): no address is readable there. */
+        skip: (file) => /\.(webm|mp4)$/i.test(file),
     },
     {
         name: 'a machine address',
@@ -49,6 +52,8 @@ const RULES = [
             + 'somewhere real.',
         find: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
         allow: (m) => m === '127.0.0.1' || m === '0.0.0.0' || m === '255.255.255.255',
+        /* As for addresses above: a compressed film's bytes make these shapes by chance. */
+        skip: (file) => /\.(webm|mp4)$/i.test(file),
     },
 ];
 
@@ -57,6 +62,7 @@ for (const file of files) {
     let text;
     try { text = readFileSync(file, 'utf8'); } catch { continue; }
     for (const rule of RULES) {
+        if (rule.skip && rule.skip(file)) continue;
         for (const m of text.matchAll(rule.find)) {
             if (rule.allow && rule.allow(m[0])) continue;
             const line = text.slice(0, m.index).split('\n').length;

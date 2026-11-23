@@ -32,7 +32,7 @@
 #                      asap: as soon as a version is out; ask: says so in
 #                      Settings and waits; off. Changed later in Settings.
 #   --update-window HH:MM-HH:MM   when "auto" may update (default 02:00-05:00)
-#   --channel C        latest (default) or next (versions with a "-": tests)
+#   --channel C        latest (default), beta (proven by tests) or next (versions to try)
 #   --keep-release     keep the release that runs (change the settings only:
 #                      what `clavarium online` does to go from local mode to
 #                      server mode)
@@ -116,7 +116,7 @@ DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
 DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--name NAME] [--client-id ID] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|beta|next] [--name NAME] [--client-id ID] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
@@ -183,7 +183,7 @@ if [ -z "$VERSION" ] && [ -z "$FROM_DIR" ]; then
 fi
 [ -z "$UPDATES" ] || [[ "$UPDATES" =~ ^(auto|asap|ask|off)$ ]] || bad "--updates is auto, asap, ask or off"
 [ -z "$WINDOW" ] || { [[ "$WINDOW" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && [ "${WINDOW%-*}" != "${WINDOW#*-}" ]; } || bad "--update-window is two times, like 02:00-05:00"
-[ -z "$CHANNEL" ] || [[ "$CHANNEL" =~ ^(latest|next)$ ]] || bad "--channel is latest or next"
+[ -z "$CHANNEL" ] || [[ "$CHANNEL" =~ ^(latest|beta|next)$ ]] || bad "--channel is latest, beta or next"
 # It goes in the unit file, between quotes: plain characters only (any other is chosen in Settings).
 [ -z "$APP_NAME" ] || [[ "$APP_NAME" =~ ^[A-Za-z0-9]([A-Za-z0-9\ ._-]{0,28}[A-Za-z0-9.])?$ ]] || bad "--name is letters, digits, spaces, dots and hyphens, 30 at most, like \"Home lab\""
 # The OAuth client id, seen in the open when a browser is sent to sign in. Default:
@@ -194,7 +194,7 @@ fi
 had() { { sed -n "s/^$1=//p" "$UPDATE_CONF" 2>/dev/null || true; } | head -1; }
 SHOW_MODE="${UPDATES:-$(had MODE)}"; SHOW_MODE="${SHOW_MODE:-auto}"
 SHOW_WINDOW="${WINDOW:-$(had WINDOW)}"; SHOW_WINDOW="${SHOW_WINDOW:-02:00-05:00}"
-case "$VERSION" in *-*) default_channel="next" ;; *) default_channel="latest" ;; esac
+case "$VERSION" in *-beta.*) default_channel="beta" ;; *-*) default_channel="next" ;; *) default_channel="latest" ;; esac
 SHOW_CHANNEL="${CHANNEL:-$(had CHANNEL)}"; SHOW_CHANNEL="${SHOW_CHANNEL:-$default_channel}"
 
 # The Node.js the server runs on: the same pinned version, with the same
@@ -202,6 +202,11 @@ SHOW_CHANNEL="${CHANNEL:-$(had CHANNEL)}"; SHOW_CHANNEL="${SHOW_CHANNEL:-$defaul
 NODE_VERSION="$(sed -n "s/^export const NODE_VERSION = '\(v[0-9.]*\)';$/\1/p" "$HERE/server/tools.mjs")"
 NODE_SHA256="$(sed -n "s/^export const NODE_SHA256 = '\([0-9a-f]\{64\}\)';$/\1/p" "$HERE/server/tools.mjs")"
 [ -n "$NODE_VERSION" ] && [ -n "$NODE_SHA256" ] || refuse "the pinned Node.js version was not found in $HERE/server/tools.mjs"
+
+# ALREADY ONLINE (22-11, #409): local mode would rewrite the service without its operators.
+if [ "$LOCAL" = "yes" ] && [ "$DRY" != "yes" ] && grep -q -- ' --operators ' "$UNIT" 2>/dev/null; then
+    refuse "this Clavarium is online: it updates itself. Installing in local mode would remove its sign-in. Nothing was changed."
+fi
 
 if [ "$DRY" = "yes" ]; then
     cat <<PLAN

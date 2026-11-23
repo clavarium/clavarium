@@ -103,10 +103,13 @@ test('what is installed: an exact version from npm, checked, or a working tree f
     assert.match(npm.out, /release\s+clavarium@0\.2\.0-next\.1 from npm, checked \(integrity, provenance from github\.com\/clavarium\/clavarium, npm audit signatures\)/);
     assert.match(npm.out, /updates\s+automatic, between 02:00 and 05:00, channel next/, 'a pre-release follows "next" unless told');
     assert.match(install('--local', '--dry-run').out, /release\s+the working tree .*\(development: not checked\)/, 'from a working tree: that tree');
+    /* The three channels (22-11, #52): a -beta.N follows beta unless told; beta can be asked for. */
+    assert.match(install('--local', '--version', '1.0.0-beta.1', '--dry-run').out, /channel beta/);
+    assert.match(install('--local', '--version', '1.0.0', '--channel', 'beta', '--dry-run').out, /channel beta/);
     const asked = install('--local', '--version', '1.0.0', '--updates', 'ask', '--channel', 'latest', '--dry-run');
     assert.match(asked.out, /updates\s+said in Settings, done when you say, channel latest/);
     assert.match(install('--local', '--updates', 'auto', '--update-window', '23:30-01:00', '--dry-run').out, /automatic, between 23:30 and 01:00/);
-    for (const bad of [['--version', '1.0'], ['--version', 'latest'], ['--version', '1.0.0', '--from-dir', '.'], ['--from-dir', '/nonexistent'], ['--updates', 'always'], ['--update-window', '2-5'], ['--update-window', '02:00-02:00'], ['--channel', 'beta']]) {
+    for (const bad of [['--version', '1.0'], ['--version', 'latest'], ['--version', '1.0.0', '--from-dir', '.'], ['--from-dir', '/nonexistent'], ['--updates', 'always'], ['--update-window', '2-5'], ['--update-window', '02:00-02:00'], ['--channel', 'stable']]) {
         const r = install('--local', ...bad, '--dry-run');
         assert.equal(r.code, 64, bad.join(' ')); assert.equal(r.out, '');
     }
@@ -195,10 +198,27 @@ test('install.sh of the site: the same pinned Node.js, local mode first, options
         }
     }
     assert.match(text, /exec \/usr\/local\/bin\/clavarium online "\$\{ONLINE\[@\]\}" <\/dev\/tty/);
-    for (const bad of [['--channel', 'beta'], ['--domain'], ['--relay'], ['--version', 'latest'], ['--operator', 'x@example.com']]) {
+    for (const bad of [['--channel', 'stable'], ['--domain'], ['--relay'], ['--version', 'latest'], ['--operator', 'x@example.com']]) {
         const r = boot(...bad);
         assert.equal(r.code, 64, bad.join(' '));
     }
+});
+
+test('install.sh of the site refuses an online Clavarium: local mode would drop its operators (#409)', () => {
+    const text = readFileSync(BOOT, 'utf8');
+    const start = text.indexOf('# ALREADY ONLINE'); const end = text.indexOf('export DEBIAN_FRONTEND', start);
+    assert.ok(start > 0 && start < text.indexOf('bash "$work/package/deploy/install.sh"') && end > start);
+    const dir = mkdtempSync(join(tmpdir(), 'clv-online-')); const unit = join(dir, 'clavarium.service');
+    const guard = `refuse() { echo "$1" >&2; exit 78; }\n${text.slice(start, end).replace('/etc/systemd/system/clavarium.service', unit)}echo went on\n`;
+    const run = () => spawnSync('/bin/bash', ['-c', guard], { encoding: 'utf8' });
+    try {
+        assert.equal(run().status, 0, 'a first install goes on');
+        writeFileSync(unit, 'ExecStart=node server/main.mjs --port 7717\n');
+        assert.equal(run().status, 0, 'a local install goes on');
+        writeFileSync(unit, 'ExecStart=node server/main.mjs --port 7717 --operators a@example.com --public-origin https://x.example.com\n');
+        const r = run();
+        assert.equal(r.status, 78); assert.match(r.stderr, /is online/); assert.ok(!r.stdout.includes('went on'));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('install.sh of the site will not go further unless it is root', { skip: process.getuid() === 0 }, () => {

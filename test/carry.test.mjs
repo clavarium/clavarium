@@ -42,7 +42,7 @@ function bench(t) {
         store.put({ name, tool, memoryMb: 1024, cpus: 1, diskGb: 8, phase: 'ready', work: 'kept' });
         return homes[name];
     };
-    return { dir, all, conversation, calls };
+    return { dir, all, conversation, calls, store };
 }
 
 const save = async (exported, file) => { await pipeline(exported.stream, createWriteStream(file)); return file; };
@@ -94,4 +94,16 @@ test('refused: another tool\'s export, a file that is not one, a tool that does 
     await assert.rejects(b.all.importState('delta', createReadStream(plain)), (e) => e instanceof Refusal && /not an exported conversation/.test(e.message));
     b.conversation('epsilon', 'bare');
     await assert.rejects(b.all.exportState('epsilon'), (e) => e instanceof Refusal && /does not say where it keeps its state/.test(e.message));
+});
+
+test('a conversation that changed its AI: a copy or a move carries the state of the one before too, an export only its own (#404)', async (t) => {
+    const b = bench(t);
+    const home = b.conversation('alpha', 'tool');
+    b.store.patch('alpha', { toolsStarted: { other: true }, previousTool: 'other' });
+    mkdirSync(join(home, '.tool')); writeFileSync(join(home, '.tool', 'now.md'), 'its AI now');
+    mkdirSync(join(home, '.other')); writeFileSync(join(home, '.other', 'before.md'), 'the AI before');
+    const carried = listed(await save(await b.all.exportState('alpha', { others: true }), join(b.dir, 'both.tar.gz')));
+    assert.ok(carried.includes('./.tool/now.md') && carried.includes('./.other/before.md'), carried.join(' '));
+    const alone = listed(await save(await b.all.exportState('alpha'), join(b.dir, 'one.tar.gz')));
+    assert.ok(alone.includes('./.tool/now.md') && !alone.some((n) => n.includes('.other')), alone.join(' '));
 });

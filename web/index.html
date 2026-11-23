@@ -129,7 +129,7 @@
             <div id="rights-box" hidden>
             <div class="set-row"><div class="set-what"><b data-said="set-ask-first">Ask before acting</b><small id="rights-hint" class="tip" hidden>Off: <b>the tool acts without asking you</b>, inside its own machine. At its next start</small></div><div class="set-control"><div class="levels" id="ask-first" role="group" aria-label="Ask before acting"><button type="button" data-on="false" data-said="set-off">Off</button><button type="button" data-on="true" data-said="set-on">On</button></div></div></div>
             </div>
-            <div class="set-row" id="network-row"><div class="set-what"><b data-said="set-online">Online</b><small class="tip" hidden>Offline: its machine reaches nothing outside. The tool cannot undo it.</small></div><div class="set-control"><div class="levels" id="network" role="group" aria-label="Network of this conversation"><button type="button" data-online="true" data-said="set-online">Online</button><button type="button" data-online="false" data-said="set-offline-btn">Offline</button></div></div></div>
+            <div class="set-row" id="network-row"><div class="set-what"><b data-said="set-online">Online</b><small class="tip" hidden>Offline: its machine reaches nothing outside. The tool cannot undo it.</small><small id="network-shared" data-said="set-offline-shared" hidden>Needs its own machine</small></div><div class="set-control"><div class="levels" id="network" role="group" aria-label="Network of this conversation"><button type="button" data-online="true" data-said="set-online">Online</button><button type="button" data-online="false" data-said="set-offline-btn">Offline</button></div></div></div>
           </div>
           <div class="hand-acts" id="panel-actions">
             <button type="button" id="quick-wake" class="primary" hidden>Wake it</button>
@@ -167,6 +167,12 @@
           <summary><span class="chapter-title" data-said="set-ch-general">General</span><span class="chapter-about">Name, group, chat.</span></summary>
           <div class="chapter-body">
             <dl id="general-facts" class="facts"></dl>
+            <!-- ITS AI, changed in the same conversation (#404), the one before offered to go back. -->
+            <div id="ai-box" hidden>
+              <div class="set-row"><div class="set-what"><label for="ai-choice" data-said="set-ai">AI</label></div><div class="set-control"><select id="ai-choice"></select><button type="button" id="ai-back" hidden></button></div></div>
+              <div class="set-row" id="ai-sure" hidden><div class="set-what"><span id="ai-ask"></span></div><div class="set-control"><button type="button" id="ai-go" class="primary" data-said="set-ai-go">Change</button><button type="button" id="ai-no" data-said="set-ai-no">Cancel</button></div></div>
+              <p class="hint" id="ai-said" role="status" hidden></p>
+            </div>
             <div id="title-box" hidden>
             <form id="title-form" class="set-row" autocomplete="off"><div class="set-what"><label for="title-name">Name</label></div><div class="set-control"><input id="title-name" maxlength="60" spellcheck="false"><button type="submit">Save</button></div></form>
             </div>
@@ -270,7 +276,7 @@
             <!-- ITS ASSETS (07-11, assets step 4): one line; what it was given lives in its Assets tab (Give…, its rights). -->
             <div class="row access-assets"><button type="button" id="access-assets" class="as-link"></button></div>
             <!-- ITS SIGN-IN COMPANION (15-11, #362): the conversation that signs its tool in, if not the general one. -->
-            <div class="set-row" id="companion-here-row"><div class="set-what"><label for="companion-here">Sign-in companion</label><small id="companion-here-hint">Signs its tool in with its browser</small></div><div class="set-control"><select id="companion-here"></select></div></div>
+            <div class="set-row" id="companion-here-row"><div class="set-what"><label for="companion-here">Sign-in companion</label><small id="companion-here-hint">Signs its tool in with its browser</small><small data-said="set-companion-yours">Your choice, your responsibility</small></div><div class="set-control"><select id="companion-here"></select></div></div>
             <div id="signin-setup" hidden>
             <div class="panel-top"><b>Sign-in mailbox</b></div>
             <p class="hint">Its sign-in links, beside the terminal</p><p class="hint tip" hidden>A mailbox for this tool's account, read only; its password never enters the machine.</p>
@@ -1050,6 +1056,7 @@
         <!-- SIGN-IN COMPANION (15-11, #362): the conversation whose browser signs the others' tools in. -->
         <div class="set-row"><div class="set-what"><label for="companion-general">Sign-in companion</label><small id="companion-general-hint">Signs the tools in with its browser</small></div><div class="set-control"><select id="companion-general"></select></div></div>
         <div class="set-row"><div class="set-what"><label for="companion-clicks">It clicks Authorize itself</label><small>You have nothing to do</small></div><div class="set-control"><input type="checkbox" id="companion-clicks"></div></div>
+        <p class="companion-yours" data-said="set-companion-yours">Your choice, your responsibility</p>
         <p class="error" id="companion-general-error" role="alert" hidden></p>
           </div>
         </details>

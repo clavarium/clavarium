@@ -1,81 +1,8 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta name="robots" content="noindex, nofollow">
-<meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Self-host Claude Code and other AI agents: install · Clavarium</title>
-<meta name="description" content="One command on Ubuntu Server 24.04 or 26.04. Prerequisites: a machine that runs VMs, 1–2 GB RAM per agent, a domain, an AI provider.">
-<link rel="stylesheet" href="style.css">
-<script src="site.js" defer></script>
-</head>
-<body>
-<div class="wrap">
-  <header class="top">
-    <a class="logo" href="index.html">&gt;_ clavarium</a>
-    <button class="menu" data-open-map>☰ Menu</button>
-    <a class="gh" href="https://github.com/clavarium/clavarium">GitHub</a>
-  </header>
-
-  <main>
-    <div class="page-hero">
-      <h1>Install Clavarium on your server</h1>
-      <p class="lead">One command on Ubuntu. It asks nothing, and runs again to upgrade.</p>
-    </div>
-
-    <section>
-      <h2>Try it first</h2>
-      <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
-      <p class="note"><a class="rs" href="https://clavarium.org/install.sh">Read the script</a> · This machine only, no sign-in. From your computer:</p>
-      <div class="cmd"><code>ssh -L 7717:127.0.0.1:7717 you@that-machine</code><button type="button">Copy</button></div>
-      <p class="note">Then open http://127.0.0.1:7717</p>
-    </section>
-
-    <section>
-      <h2>Online, with your domain</h2>
-      <div class="cmd"><code>DOMAIN=&lt;your-domain&gt; EMAIL=&lt;your-email&gt;
-curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --domain "$DOMAIN" --admin "$EMAIL" --relay-user ubuntu</code><button type="button">Copy</button></div>
-      <ol class="steps">
-        <li>It shows a key. Give it to a small relay machine.</li>
-        <li>Point your domain to the relay.</li>
-        <li>Open your address. Sign in.</li>
-      </ol>
-      <p class="note">Ports 80 and 443 open? Use <code>--direct</code>, no relay.</p>
-    </section>
-
-    <section>
-      <h2>What it needs</h2>
-      <ul class="does">
-        <li>Ubuntu Server 24.04 or 26.04, on a CPU that runs VMs.</li>
-        <li>1–2 GB RAM per working agent. Tried on 4 cores, 6 GB.</li>
-        <li>A domain, and your AI: a subscription or a provider key.</li>
-      </ul>
-      <p class="note">Each download is a named release, checked against a checksum. <a href="https://clavarium.org/install.sh">Read the script</a></p>
-    </section>
-
-    <section>
-      <h2>Limits</h2>
-      <ul class="limits">
-        <li>Ubuntu Server only, for now.</li>
-        <li>What an agent reads goes to its AI provider.</li>
-      </ul>
-      <div class="btns">
-        <a class="btn" href="isolated-agents.html">Isolated agents</a>
-        <a class="btn u" href="family.html">Family</a>
-      </div>
-    </section>
-
-    <section>
-      <h2>Questions</h2>
-      <details><summary>Is it free?</summary><p>Yes, MIT. Clavarium brings no AI and charges nothing.</p></details>
-      <details><summary>No public address at home?</summary><p>Your machine dials out to the relay. Home opens no port.</p></details>
-      <details><summary>How do I upgrade?</summary><p>Run the same command again.</p></details>
-    </section>
-  </main>
-
-  <footer>
-    <div class="meta"><span>Free and open source, MIT.</span><a href="index.html">Home</a><a href="https://github.com/clavarium/clavarium">GitHub</a></div>
-  </footer>
-</div>
-</body>
-</html>
+<meta name="robots" content="noindex">
+<title>This page moved · Clavarium</title>
+<link rel="canonical" href="https://clavarium.org/install.html">
+<meta http-equiv="refresh" content="0; url=../install.html">
+</head><body><p>This page moved: <a href="../install.html">continue</a>.</p></body></html>

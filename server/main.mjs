@@ -502,8 +502,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A wake-up typed is said in its chat (talk, made below: called only once a wake-up fires). */
     /* Where its chat is on, what wakes a tool is an event it acknowledges: see dockets.mjs. */
     let signinHelp = null;
+    const atCodePrompt = async (name) => { try { return (await signinHelp?.atCodePrompt(name, (argv, options) => vms.exec(name, argv, options))) === true; } catch { return false; } };
     const dockets = new Dockets({ store: new Store(`${dataDir}/dockets.json`), resources: folders,
-        say: (name, line) => wakeups.say(name, line),
+        /* Not while its tool waits for a sign-in code: the line would go into that field; the docket tries again. */
+        say: async (name, line) => ((await atCodePrompt(name)) ? false : wakeups.say(name, line)),
         event: (name, line) => talk.event(name, line),
         alert: (message) => { void alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }); },
         /* Not in a turn: its pulse ended, or is old (Parley's own measure). */
@@ -579,7 +581,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
     let boxes; let rooms; let machineList;
-    const talk = new Talk({ spoke: (name, text, to, how) => { void boxes?.agentSaid(name, text, to, how); }, inRoom: (name, entry, kind) => rooms?.answered(name, entry, kind), store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+    const talk = new Talk({ holdLine: atCodePrompt, spoke: (name, text, to, how) => { void boxes?.agentSaid(name, text, to, how); }, inRoom: (name, entry, kind) => rooms?.answered(name, entry, kind), store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
            what is already known of a machine used instead of asking (talk.mjs). */
@@ -592,15 +594,17 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
            the chat shows as stars; the value reaches the machine as
            /run/secrets/<name>, and is swept after a few minutes. */
         screen: async (conversation, text) => {
-            /* A sign-in code its tool waits for (#394): left whole, screen-watch types it in. */
-            if (signinHelp?.awaitsCode(conversation, text)) return text;
-            const hits = scan(text);
+            /* A chat message is never a sign-in code (#405). A tool still run by an older screen-watch would type this
+               one: lifted whole, so that only a marker reaches its inbox. */
+            const armed = signinHelp?.oldWatcherArmed(conversation, text) === true;
+            const whole = String(text).trim();
+            const hits = armed ? [{ start: text.indexOf(whole), end: text.indexOf(whole) + whole.length, value: whole }] : scan(text);
             if (!hits.length) return text;
             let out = ''; let last = 0; let any = false;
             for (const h of hits) {
                 out += text.slice(last, h.start);
                 try { const { name, expiresAt } = secrets.stash(conversation, h.value); out += secretRef(name, Date.parse(expiresAt)); any = true; }
-                catch { out += text.slice(h.start, h.end); }      /* cannot be stashed (too large): left as it is */
+                catch { out += armed ? '(not kept)' : text.slice(h.start, h.end); }      /* cannot be stashed (too large): left as it is, but never for an older screen-watch to type */
                 last = h.end;
             }
             out += text.slice(last);
@@ -619,6 +623,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         if (!dockets.on(name)) return false;
         try { dockets.post(name, { kind: 'restarted', text: `Your machine was restarted${why ? ` (${String(why).replace(/\.$/, '')})` : ''}. What ran in the background stopped with it: pick up where you were.` }); return true; } catch { return false; }
     };
+    /* ITS AI CHANGED (#404), or not: said in its chat and the journal. The new AI is told through its docket, once
+       free; without one, the line that makes it reread the thread goes with the person's next message. */
+    all.toolChanged = (name, said, line, ok) => {
+        events.add({ kind: 'conversation', text: `${name}: ${said}`, conversation: name });
+        try { talk.event(name, ok ? { kind: 'restarted', text: said, topic: 'Restarted' } : { kind: 'machine-problem', text: said, tone: 'bad', topic: 'Machine' }); } catch { /* its chat is off */ }
+        if (!ok) return;
+        try { if (dockets.on(name)) { dockets.post(name, { kind: 'ai-changed', text: line }); return; } } catch { /* the other way */ }
+        talk.renewed(name, '', true);
+    };
     /* What an owner did to a machine (start, stop, sleep, force, restart): in the journal, and a line in its chat. */
     all.machineSaid = (name, text, ok, chat) => {
         /* What runs changed (a start, a stop, a sleep): the rules follow at once, not at the next watch. */
@@ -635,9 +648,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         workFolder: (name) => folders.workFolder(name),
         browsers: (name) => { try { return tethers.store().targets().filter((t) => t.kind === 'browser').map((t) => ({ id: t.id, level: t.grants?.[`conversation:${name}`]?.level ?? '' })).filter((b) => b.level); } catch { return []; } },
         post: (name, event) => dockets.post(name, event), type: (name, text) => typeInto(vms, name, text),
+        exec: (name, argv, options) => vms.exec(name, argv, options),
         event: (name, line) => talk.event(name, line) });
     const stopSigninHelp = signinHelp.start();
     all.signinHelp = signinHelp;
+    door.signinCode = (name, code) => signinHelp.enterCode(name, code);
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
     /* A mail cited by its reference, opened on a device that may read its mailbox (mailref.mjs). */
@@ -1039,7 +1054,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        shown in it first (after a rebuild there are some), and its health is
        looked at (folders that did not come back are put back): both on the
        way, as steps of its start (`mounted` above, conversations.mjs). */
-    all.ready = (name) => { toolbox.forget(name); void bridge.warm(name); };
+    /* Resolves once its terminal is open (a change of AI waits for it); `warm` never rejects. */
+    all.ready = (name) => { toolbox.forget(name); return bridge.warm(name); };
     /* Their health too: after a restart of the host, a folder may not have come back. */
     /* The tools are shown in them first: a machine made before /tools existed gets it now, not as "a folder that came loose". */
     /* After the quiet start, one machine after another (QUIET_STEP_MS apart). */

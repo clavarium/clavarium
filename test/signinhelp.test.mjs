@@ -39,7 +39,8 @@ function bench(t, { names = ['alpha', 'beta', 'gamma'] } = {}) {
         awake: () => world.awake, chatOn: (n) => world.chat.has(n), workFolder: work,
         browsers: (n) => (world.browsers[n] ? [{ id: 'browser-test', level: world.browsers[n] }] : []),
         post: (n, e) => dockets.post(n, e), type: async (n, text) => { typed.push([n, text]); return world.types; },
-        event: (n, line) => lines.push([n, line.kind, line.text, line.actions]), now: () => world.now });
+        event: (n, line) => lines.push([n, line.kind, line.text, line.actions]), now: () => world.now,
+        exec: async (n) => ({ code: 0, stdout: world.screen?.[n] ?? '', stderr: '' }) });
     /* What screen-watch writes in the asking machine, and reads back. */
     const ask = (name, extra = {}) => { const id = `${Math.random().toString(16).slice(2, 10)}-0000-4000-8000-000000000000`; writeFileSync(join(work(name), '.parley', 'signin-ask.json'), JSON.stringify({ id, at: new Date(world.now).toISOString(), link: LINK, around: '', ...extra })); return id; };
     const route = (name) => { try { return JSON.parse(readFileSync(join(work(name), '.parley', 'signin-route.json'), 'utf8')); } catch { return null; } };
@@ -75,12 +76,11 @@ test('screen-watch: a link handed over is not told; told to the person when the 
     const relay = new Relay({ route: () => route, now: () => now, id: () => 'id-1' });
     const link = { match: LINK, around: '' };
     assert.deepEqual(relay.link(link).map((e) => e.do), ['ask'], 'asked, not told');
-    assert.deepEqual(relay.code(), [], 'the person is not asked to paste');
     route = { id: 'id-1', route: 'companion', companion: 'beta' };
     assert.deepEqual(relay.step(), []);
     route = { id: 'id-1', route: 'person' };
     const back = relay.step();
-    assert.deepEqual(back.map((e) => e.do), ['ask', 'tell-link', 'arm', 'tell-paste'], 'given back: the link told, the code awaited from the chat');
+    assert.deepEqual(back.map((e) => e.do), ['ask', 'tell-link'], 'given back: the link told, nothing read from the chat');
     assert.equal(back[0].ask.told, true, 'the ask says it was told, so that a late server hands it to nobody');
     assert.deepEqual(relay.step(), [], 'once');
     /* A server that never answers (older): the person, after HAND_MS. */
@@ -88,11 +88,9 @@ test('screen-watch: a link handed over is not told; told to the person when the 
     silent.link(link);
     now += HAND_MS - 1; assert.deepEqual(silent.step(), []);
     now += 2; assert.deepEqual(silent.step().map((e) => e.do), ['ask', 'tell-link']);
-    assert.deepEqual(silent.code().map((e) => e.do), ['arm', 'tell-paste']);
     /* Done: the code was typed by the server; nothing more. */
     const done = new Relay({ route: () => ({ id: 'id-3', route: 'done' }), id: () => 'id-3' });
     done.link(link); assert.deepEqual(done.step(), []);
-    assert.deepEqual(done.code().map((e) => e.do), ['arm', 'tell-paste'], 'a new screen asking for a code after it: the person, as before');
     /* No chat folder: told at once, as before. */
     assert.deepEqual(new Relay({ chat: () => false }).link(link).map((e) => e.do), ['tell-link']);
 });
@@ -218,20 +216,46 @@ test('the companion clicks Authorize itself only when its owner allowed it', asy
     assert.equal(b.help.view().clicks, true);
 });
 
-test("a code the person pastes while their tool waits for it is that code, not a secret; else, a secret as before (20-11, #394)", async (t) => {
+test('a chat message is never a code: only a tool still run by an older screen-watch has it lifted whole (#405)', async (t) => {
     const b = bench(t);
-    assert.equal(b.help.awaitsCode('alpha', CODE), false, 'no ask: nothing awaited');
+    assert.equal(b.help.oldWatcherArmed('alpha', CODE), false, 'no ask');
+    b.ask('alpha', { told: true, field: true });
+    assert.equal(b.help.oldWatcherArmed('alpha', CODE), false, 'this screen-watch reads no code from the chat');
     b.ask('alpha', { told: true });
-    assert.equal(b.help.awaitsCode('alpha', CODE), true, 'told to the person: the code awaited');
-    assert.equal(b.help.awaitsCode('alpha', `${CODE} and more words`), false, 'a message with more than a code');
-    assert.equal(b.help.awaitsCode('beta', CODE), false, 'another conversation');
+    assert.equal(b.help.oldWatcherArmed('alpha', CODE), true, 'an older one would type it');
+    assert.equal(b.help.oldWatcherArmed('alpha', `${CODE} and more words`), false, 'a sentence it would not type');
+    assert.equal(b.help.oldWatcherArmed('beta', CODE), false, 'another conversation');
     b.world.now += 31 * 60_000;
-    assert.equal(b.help.awaitsCode('alpha', CODE), false, 'asked too long ago');
-    /* Routed to the person by the server (no companion): awaited too; handed to a companion: not the person's. */
-    b.ask('alpha'); await b.help.tick();
-    assert.equal(b.route('alpha').route, 'person');
-    assert.equal(b.help.awaitsCode('alpha', CODE), true);
-    b.help.setGeneral('beta'); b.ask('alpha'); await b.help.tick();
-    assert.equal(b.route('alpha').route, 'companion');
-    assert.equal(b.help.awaitsCode('alpha', CODE), false);
+    assert.equal(b.help.oldWatcherArmed('alpha', CODE), false, 'after its time');
+    const source = readFileSync(new URL('../config/launch/screen-watch.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /to-agent\.jsonl/, 'screen-watch no longer reads the chat inbox');
+});
+
+test('the field is offered once, when the link was told and its tool shows its prompt', async (t) => {
+    const b = bench(t);
+    const offers = () => b.lines.filter((l) => (l[3] ?? []).includes('signincode')).length;
+    b.world.screen = { alpha: 'Paste code here if prompted >' };
+    b.ask('alpha', { field: true }); await b.help.tick();
+    assert.equal(offers(), 0, 'the link not told yet');
+    b.ask('alpha', { told: true, field: true }); b.world.now += 10_000; await b.help.tick();
+    assert.equal(offers(), 1);
+    b.world.now += 10_000; await b.help.tick();
+    assert.equal(offers(), 1, 'once');
+});
+
+test('at its code prompt nothing may be typed: asked of its screen, only while a sign-in is open and its tool has such a prompt', async (t) => {
+    const b = bench(t);
+    const screen = (text, code = 0) => async () => ({ code, stdout: text, stderr: '' });
+    const prompt = 'Paste code here if prompted >';
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt)), false, 'no sign-in open');
+    b.ask('alpha');
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt)), true);
+    assert.equal(await b.help.atCodePrompt('alpha', screen('> ready')), false, 'signed in: its screen moved on');
+    assert.equal(await b.help.atCodePrompt('alpha', screen(`${prompt}\n${'work\n'.repeat(12)}> ready\n\n`)), false, 'a prompt left higher up is over');
+    assert.equal(await b.help.atCodePrompt('alpha', screen(`paste CODE here >\n\n\n`)), true, 'whatever the case, blank lines under it');
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt, 1)), false, 'its screen could not be read');
+    b.ask('gamma');
+    assert.equal(await b.help.atCodePrompt('gamma', screen(prompt)), false, 'a tool without a code prompt');
+    b.world.now += 31 * 60_000;
+    assert.equal(await b.help.atCodePrompt('alpha', screen(prompt)), false, 'after its time: never held for ever');
 });

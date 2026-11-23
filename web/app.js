@@ -2769,6 +2769,10 @@
         void paintGuide(here);
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
+        /* A shared machine has one network: Offline could not cut this agent alone (#410). */
+        const oneNetwork = Boolean(here?.sharedMachine);
+        $('network').querySelector('[data-online="false"]').disabled = oneNetwork;
+        $('network-shared').hidden = !oneNetwork;
         void paintCompanionHere();
         await paintSignIn();
     }
@@ -3155,6 +3159,7 @@
         paintWatchdog(here);
         /* Whether its tool asks before acting -- for a tool that can be given every right in its machine. */
         $('rights-box').hidden = DEVICE || !here?.rights;
+        paintAi(here);
         for (const b of $('ask-first').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.askFirst === true)));
         void paintConvHand(here);
         paintConvStates(here);
@@ -3211,6 +3216,53 @@
         chapterNow('health', here.asleep ? uiSaid('set-asleep', 'Asleep') : !hl ? uiSaid('set-not-looked', 'Not looked at yet') : join(wrong.length ? wrong[0].text : hl.state === 'Running' ? uiSaid('set-running-well', 'Running · nothing wrong') : hl.state, hl.at ? agoSaid(hl.at) : ''));
         chapterNow('advanced', uiSaid('set-conv-advanced', 'Archive · reset · delete'));
     }
+    /* ITS AI (#404): one list, the one before offered to go back, a confirmation before anything changes. */
+    function paintAi(here) {
+        const box = $('ai-box');
+        box.hidden = DEVICE || here?.switches !== true;
+        if (box.hidden) { box.wanted = ''; $('ai-sure').hidden = true; return; }
+        if (!box.tools && !box.asking) {
+            box.asking = true;
+            void fetch(`${API}/tools`).then((r) => (r.ok ? r.json() : null)).catch(() => null).then((list) => {
+                box.asking = false;
+                if (!Array.isArray(list)) return;
+                box.tools = list.filter((t) => t.switches);
+                paintAi(conversations.find((x) => x.name === current));
+            });
+        }
+        const tools = box.tools ?? [{ id: here.tool, label: here.toolLabel ?? here.tool }];
+        const choice = $('ai-choice');
+        const of = `${here.name}/${here.tool}/${tools.map((t) => t.id).join()}`;
+        if (choice.dataset.of !== of && document.activeElement !== choice) {
+            choice.dataset.of = of;
+            choice.replaceChildren(...tools.map((t) => { const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; return o; }));
+            box.wanted = '';
+        }
+        /* Nothing being chosen: it shows the AI it runs (a change that failed included). */
+        if (!box.wanted && document.activeElement !== choice) choice.value = here.tool;
+        const busy = Boolean(here.toolSwitch) || here.phase !== 'ready';
+        choice.disabled = busy;
+        const back = tools.find((t) => t.id === here.previousTool && t.id !== here.tool);
+        $('ai-back').hidden = !back || busy;
+        if (back) { $('ai-back').dataset.to = back.id; $('ai-back').textContent = uiSaid('set-ai-back', 'Back to {name}', { name: back.label }); }
+        const asked = !busy && tools.find((t) => t.id === box.wanted);
+        $('ai-sure').hidden = !asked;
+        if (asked) $('ai-ask').textContent = uiSaid('set-ai-ask', 'Change to {name}? It will read this chat.', { name: asked.label });
+        else box.wanted = '';
+        const said = here.toolSwitch?.step ?? here.toolSwitchFailed ?? '';
+        $('ai-said').textContent = said; $('ai-said').hidden = !said;
+    }
+    const aiHere = () => conversations.find((x) => x.name === current);
+    $('ai-choice').addEventListener('change', () => { const here = aiHere(); $('ai-box').wanted = $('ai-choice').value === here?.tool ? '' : $('ai-choice').value; paintAi(here); });
+    $('ai-back').addEventListener('click', () => { $('ai-box').wanted = $('ai-back').dataset.to; $('ai-choice').value = $('ai-back').dataset.to; paintAi(aiHere()); });
+    $('ai-no').addEventListener('click', () => { const here = aiHere(); $('ai-box').wanted = ''; $('ai-choice').value = here?.tool ?? ''; paintAi(here); });
+    $('ai-go').addEventListener('click', async () => {
+        const to = $('ai-box').wanted; if (!to) return;
+        $('panel-error').hidden = true; $('ai-box').wanted = '';
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/tool`, { tool: to }); await refresh(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; $('ai-choice').value = aiHere()?.tool ?? ''; }
+        paintMachine(aiHere());
+    });
     for (const b of $('ask-first').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
@@ -3786,7 +3838,7 @@
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id === 'signinlink') void signinLinkToMe(); else if (tetherAct(id, () => thread?.refresh?.())) return; else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id === 'signinlink') void signinLinkToMe(); else if (id === 'signincode') openSigninCode(); else if (tetherAct(id, () => thread?.refresh?.())) return; else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -3921,7 +3973,7 @@
     /* "commits:<repository>.<to>.<from>.<n>": those commits, in the review ("See the 3 commits"). A commit a
        line names (7 to 40 hexadecimal characters, a digit among them) is a link to its review, on a line about
        a repository; the agent's own messages are never read for this. */
-    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', signinlink: 'Show me the link', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse', flash: 'Plug it in and start' };
+    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', signinlink: 'Show me the link', signincode: 'Paste the code', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse', flash: 'Plug it in and start' };
     const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
     /* A Tether call an agent asked the owner to allow, offered right in the thread: allow:<id> / deny:<id>. */
     const DEMANDE = /^(allow|deny|always|flash):[0-9a-f-]{36}$/;
@@ -3935,11 +3987,12 @@
         if (many) void openGit(many[1], { commit: many[2], base: many[3], tab: Number(many[4]) > 1 ? 'commits' : 'changes' });
         else if (one) void openGit(one[1], { commit: one[2] });
     }
+    const SIGNIN_SAID = { 'Once signed in, paste the code.': 'set-signin-code-line', 'Code sent to the tool.': 'set-signin-code-sent', 'Code refused. Paste it again.': 'set-signin-code-rejected' };
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
-        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || id === 'seen-done' || id === 'signinlink' || DEMANDE.test(id) || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
-        const label = (id) => { const n = Number(COMMITS.exec(id)?.[4] ?? 0); return n ? (n === 1 ? 'See the commit' : `See the ${n} commits`) : ACTIONS[kindOf(id)]; };
+        const may = (id) => (id === 'terminal' || id === 'room' || id === 'signincode' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || id === 'seen-done' || id === 'signinlink' || DEMANDE.test(id) || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
+        const label = (id) => { const n = Number(COMMITS.exec(id)?.[4] ?? 0); return n ? (n === 1 ? 'See the commit' : `See the ${n} commits`) : id === 'signincode' ? uiSaid('set-signin-code-act', ACTIONS.signincode) : ACTIONS[kindOf(id)]; };
         const linksOf = (m) => {
             const repo = DEVICE ? null : (m.actions ?? []).map((id) => /^review:([a-z0-9][a-z0-9-]*)$/.exec(id)?.[1]).find(Boolean);
             if (!repo) return [];
@@ -3968,9 +4021,9 @@
             if (!may(String(r.yes?.id ?? ''))) { const { yes: _y, no: _n, others: _o, ...shown } = r; return shown; }
             return r;
         };
-        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1)))).filter((id) => !(id === 'signinlink' && String(m.at ?? '') < signinAt))
+        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1)))).filter((id) => !((id === 'signinlink' || id === 'signincode') && String(m.at ?? '') < signinAt))
             .map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
-        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m), ...(m.request && typeof m.request === 'object' ? { request: requestOf(m) } : {}) } : m)) };
+        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, ...(m.event === 'signin-help' && SIGNIN_SAID[m.text] ? { text: uiSaid(SIGNIN_SAID[m.text], m.text) } : {}), actions: actionsOf(m), links: linksOf(m), ...(m.request && typeof m.request === 'object' ? { request: requestOf(m) } : {}) } : m)) };
     }
     /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */
     function withMachine(data, name) {
@@ -9037,6 +9090,42 @@
     async function signinLinkToMe() {
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin-link`, {}); } catch { /* already over: the thread says how */ }
         void thread?.refresh?.();
+    }
+
+    /* The button of the line "Once signed in, paste the code" (#405): a field of its own, so that the code is never a
+       message. Its value goes to the server, is typed into the tool, and is wiped here whatever the answer. */
+    function openSigninCode() {
+        const name = current;
+        let box = document.getElementById('signin-code');
+        if (!box) {
+            box = document.createElement('dialog'); box.id = 'signin-code';
+            const form = document.createElement('form');
+            const label = document.createElement('label'); label.htmlFor = 'signin-code-value'; label.id = 'signin-code-title';
+            const input = document.createElement('input'); input.id = 'signin-code-value'; input.type = 'password'; input.autocomplete = 'off'; input.spellcheck = false; input.setAttribute('autocapitalize', 'off'); input.maxLength = 300;
+            const why = document.createElement('p'); why.id = 'signin-code-why'; why.className = 'error'; why.setAttribute('role', 'alert'); why.hidden = true;
+            const send = document.createElement('button'); send.type = 'submit'; send.id = 'signin-code-send'; send.className = 'primary';
+            form.append(label, input, why, send); box.append(form); document.body.append(box);
+            box.addEventListener('click', (event) => { if (event.target === box) box.close(); });
+            box.addEventListener('close', () => { input.value = ''; why.hidden = true; });
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const code = input.value.trim();
+                if (!code || send.disabled) return;
+                input.value = ''; send.disabled = true; why.hidden = true;
+                const to = box.dataset.conversation;
+                let status = 0;
+                try { status = (await fetch(`${API}/conversations/${encodeURIComponent(to)}/signin-code?c=${encodeURIComponent(to)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) })).status; } catch { /* said below */ }
+                send.disabled = false;
+                if (status === 200) { box.close(); void thread?.refresh?.(); return; }
+                why.textContent = status === 400 ? uiSaid('set-signin-code-bad', 'This is not a code.') : status === 409 ? uiSaid('set-signin-code-late', 'The tool is no longer waiting for a code.') : uiSaid('set-signin-code-failed', 'Not sent. Try again.');
+                why.hidden = false; input.focus();
+            });
+        }
+        box.dataset.conversation = name;
+        $('signin-code-title').textContent = uiSaid('set-signin-code-title', 'Sign-in code');
+        $('signin-code-send').textContent = uiSaid('set-signin-code-send', 'Send');
+        if (!box.open) box.showModal();
+        $('signin-code-value').focus();
     }
 
     /* ---------- Updates: what runs, what is out, how it updates itself (server/updates.mjs) ---------- */
