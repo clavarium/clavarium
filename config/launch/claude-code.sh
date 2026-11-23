@@ -61,7 +61,7 @@ fi
 # below are the fallback of an older server, and its notice. The link may go to another conversation (screen-watch.mjs).
 node "$(dirname "$0")/screen-watch.mjs" \
     --tool claude-code \
-    'type:(Not logged in|Login expired|OAuth token (has )?expired|Invalid API key)[^\n]{0,24}/login=/login' \
+    'type:((^|\n)[ ●⎿]*[^\n]{0,60} · Please run(?= /login *(\n|$))|Not logged in|Login expired|OAuth token (has )?expired|Invalid API key)[^\n]{0,24}/login=/login' \
     'keys:Select login method:=Enter' \
     'link:https://(claude\.ai|claude\.com|console\.anthropic\.com)/\S*oauth\S*' \
     'code:Paste code here' \
