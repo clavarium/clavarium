@@ -164,3 +164,13 @@ test('its tool answers « refused » after the prompt has gone: said, Enter pres
 test('the words of a refused code reach the server from config/tools.json', () => {
     assert.equal(loadTools().find((x) => x.id === 'claude-code').signin.refused, 'OAuth error');
 });
+
+test('in the plain chat, while its sign-in waits: only what has the shape of a code is taken for one', (t) => {
+    const w = world(t);
+    const code = 'abcDEF123456ghiJKL#stateXYZ789';
+    assert.equal(w.help.codeInChat('alpha', code), false, 'nothing waits');
+    w.ask();
+    assert.equal(w.help.codeInChat('alpha', `  ${code}\n`), true);
+    assert.equal(w.help.codeInChat('alpha', code, [{ path: 'a' }]), false, 'with a file: a message');
+    for (const said of ['Probablement', 'anticonstitutionnellement', 'bonjour tout le monde', 'see#this', 'https://example.com/a#b']) assert.equal(w.help.codeInChat('alpha', said), false, said);
+});

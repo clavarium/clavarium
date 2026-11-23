@@ -185,6 +185,15 @@ export class SigninHelp {
         const ask = this.#personsAsk(name);
         return ask !== null && ask.field !== true;
     }
+    /* PASTED IN THE CHAT ITSELF (23-11, its owner: « I just want to paste the code », no terminal, no other field): while
+       its sign-in waits, a message that is nothing but a code is that code. It goes to enterCode, never into the thread. */
+    codeInChat(name, text, files) {
+        if (Array.isArray(files) && files.length) return false;
+        const code = String(text ?? '').trim();
+        /* One long word is not a code: « Probablement » stays a message. Its two halves (#), or long with letters and digits. */
+        const shaped = code.includes('#') ? code.length >= 20 : code.length >= 32 && /[0-9]/.test(code) && /[A-Za-z]/.test(code);
+        return shaped && CODE.test(code) && this.#personsAsk(name) !== null;
+    }
     /* THE CODE PASTED IN ITS FIELD (#405). Typed once, only while its tool shows its prompt; the value is in no answer,
        no error, no log, no file. */
     async enterCode(name, value) {
