@@ -135,3 +135,18 @@ test('no cut: a machine is never asked, stopped or started by this', async () =>
     b.host.csv = CSV('Running', 'Running', 'Running'); await b.w.look(); await b.w.look();
     assert.deepEqual([...new Set(b.calls)], ['vm ping']);
 });
+
+test('while Multipass is updated on purpose: not asked, not restarted, nothing brought back; after, as before', async () => {
+    let paused = false; const calls = [];
+    const items = new Map();
+    const store = { get: (n) => items.get(n), put: (x) => items.set(x.name, x), remove: (n) => items.delete(n) };
+    const run = async (argv) => { calls.push(argv.join(' ')); return { code: 124, stderr: 'timed out' }; };
+    let clock = Date.parse('2026-11-24T02:00:00Z');
+    const w = new VmWatch({ run, store, now: () => clock, hour: () => 2, log: () => {}, alert: () => {}, wait: async () => {}, paused: () => paused });
+    paused = true;
+    for (let i = 0; i < 8; i += 1) { assert.equal(await w.look(), 'paused'); clock += 60_000; }
+    assert.deepEqual(calls, []);
+    paused = false;
+    assert.equal(await w.look(), 'down', 'its time starts when the update is over');
+    assert.ok(!calls.includes('vm revive'));
+});

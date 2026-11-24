@@ -40,11 +40,11 @@ export function statesOf(csv) {
 }
 
 export class VmWatch {
-    #run; #store; #now; #hour; #log; #alert; #stuckMs; #reviveEveryMs; #downSince = null; #reviving = null; #running = new Set(); #wait;
+    #run; #store; #now; #hour; #log; #alert; #stuckMs; #reviveEveryMs; #downSince = null; #reviving = null; #running = new Set(); #wait; #paused;
     ok = true;
     /* `hour()`: this server's local hour, 0-23 (injected for tests). */
-    constructor({ run, store, now = () => Date.now(), hour = () => new Date().getHours(), log = (line) => console.error(line), alert = () => {}, stuckMs = STUCK_MS, reviveEveryMs = REVIVE_EVERY_MS, wait = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); }) }) {
-        this.#wait = wait;
+    constructor({ run, store, now = () => Date.now(), hour = () => new Date().getHours(), log = (line) => console.error(line), alert = () => {}, stuckMs = STUCK_MS, reviveEveryMs = REVIVE_EVERY_MS, wait = (ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); }), paused = () => false }) {
+        this.#wait = wait; this.#paused = paused;
         this.#run = run; this.#store = store; this.#now = now; this.#hour = hour; this.#log = log; this.#alert = alert; this.#stuckMs = stuckMs; this.#reviveEveryMs = reviveEveryMs;
     }
 
@@ -70,6 +70,8 @@ export class VmWatch {
 
     /* One look: 'ok', 'down', 'down; restarted already', 'asked', 'down; asked already', 'revived' or 'revive failed'. */
     async look() {
+        /* Its update runs, in the update window (deploy/multipass-refresh.mjs): busy on purpose, it brings its machines back itself. */
+        if (this.#paused()) { this.#downSince = null; return 'paused'; }
         const r = await this.#run(['vm', 'ping'], { timeoutMs: PING_MS }).catch((e) => ({ code: 1, stderr: e.message }));
         if (r.code === 0) {
             const was = !this.ok;

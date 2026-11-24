@@ -14,7 +14,7 @@ import { Catalogue } from './catalog.mjs';
  *   node server/main.mjs --command "your-tool" --cwd /path/to/work
  *       no VM: one tool on this machine, at /?c=<name>. For development.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -767,7 +767,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        may say otherwise: set by hand, or by an earlier version). Not waited for. */
     void all.reconcileAll?.().catch(() => {});
     /* The VM manager, watched: said to the pages when it does not answer, restarted once when stuck (vmwatch.mjs). */
-    const vmWatch = new VmWatch({ run: asHost, store: new Store(`${dataDir}/vm-manager.json`), alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
+    const vmWatch = new VmWatch({ paused: () => { try { return Date.now() - statSync(`${dataDir}/multipass-updating`).mtimeMs < 45 * 60_000; } catch { return false; } }, run: asHost, store: new Store(`${dataDir}/vm-manager.json`), alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
     const stopVmWatch = vmWatch.start(vmWatchEveryMs);
     const platform = { get machines() { return vmWatch.ok; }, answerer: answerer.about(), get operators() { return team ? team.allowed() : [...operators]; }, address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, get dictation() { return voice.current() ? (voice.model ?? 'set') : null; } };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
