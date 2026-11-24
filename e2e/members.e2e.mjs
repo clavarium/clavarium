@@ -38,12 +38,13 @@ test('an administrator gives a member one conversation; the member sees that one
     await until('the accounts listed', async () => (await kidRow.count()) === 1);
     assert.equal(await kidRow.locator('select.op-role').inputValue(), 'admin', 'as before: every account an administrator');
     await kidRow.locator('select.op-role').selectOption('member');
-    await until('made a member, given nothing yet', async () => /Given nothing yet/.test(await admin.page.locator('#operators-rows').innerText()));
+    await until('made a member, given nothing yet', async () => /Nothing shared yet/.test(await admin.page.locator('#operators-rows').innerText()));
     await admin.page.locator('#operators-rows select.op-give-add').selectOption('family');
     await until('given Family', async () => (await admin.page.locator('#operators-rows .op-given-line').count()) === 1);
     assert.match(await admin.page.locator('#operators-rows .op-given-line').innerText(), /Family/);
     assert.equal(await admin.page.locator('#operators-rows .op-given-line select').inputValue(), 'rw');
     assert.equal(await admin.page.locator('#operators-role').inputValue(), 'member', 'a new account comes as a member');
+    await until('the head counts the member', async () => /1 administrator · 1 member/.test(await admin.page.locator('#settings-ch-operators summary').innerText()));
     if (SHOTS) await admin.page.locator('#settings-ch-operators').screenshot({ path: join(SHOTS, 'accounts-admin.png') });
     assert.deepEqual(admin.errors, []);
 

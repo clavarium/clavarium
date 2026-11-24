@@ -46,7 +46,10 @@ export class Operators {
         const r = await this.#host(['operator', 'list']);
         if (r.code !== 0) throw new Refusal(502, `Who may sign in could not be read: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         const read = String(r.stdout).split('\n').map((l) => l.split('\t')).filter(([e, s]) => EMAIL.test(e ?? '') && ['enabled', 'disabled'].includes(s));
+        const before = JSON.stringify(this.#list);
         if (read.length) this.#list = read.map(([email, state]) => ({ email, enabled: state === 'enabled' }));
+        /* Changed outside the page (the host program): whoever lost their place loses their terminals at once (#419). */
+        if (JSON.stringify(this.#list) !== before) { try { this.onChanged?.(); } catch { /* the minute's recheck sees it */ } }
         return this.list();
     }
     async #do(argv, input) {

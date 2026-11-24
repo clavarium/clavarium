@@ -59,7 +59,7 @@ export const SETTINGS_WORDS_FR = {
     'set-lang-device': 'La langue de chaque appareil', 'set-res-now': 'Mémoire {m} % · disque {d} %',
     'set-share-memory': 'Mémoire par machine', 'set-share-disk': 'Disque par machine', 'set-share-others': 'Autres',
     'set-share-rest': 'Système et autres', 'set-share-else': 'Tout le reste', 'set-share-free': 'Libre', 'set-share-used': 'Utilisé', 'set-share-of': 'sur {total}',
-    'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs', 'set-member-1': '1 membre', 'set-members': '{n} membres',
+    'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs', 'set-member-1': '1 membre', 'set-members': '{n} membres', 'set-member-gone': 'Plus rien n\'est partagé avec vous.', 'set-give-read': 'Lecture seule', 'set-give-chat': 'Chat', 'set-give-both': 'Chat + terminal', 'set-give-terminal': 'Terminal', 'set-give-none': 'Retirer l\'accès', 'set-given-none': 'Rien de partagé pour l\'instant.', 'set-given-ai': 'Chat et terminal : tout ce que son IA atteint.', 'set-give-add': 'Partager une conversation…', 'set-role-admin': 'Administrateur', 'set-role-member': 'Membre', 'set-add-account': 'Ajouter un compte', 'set-ch-s-operators-about': 'Qui se connecte, et ce qu\'il voit.',
     'set-backup-now': 'Exporter · importer', 'set-git-key': '1 clé git', 'set-git-keys': '{n} clés git', 'set-restart': 'redémarrer',
     'set-logs-now': 'Clavarium, machines, système',
     /* Diagnostics › Charge (vm.mjs HostTally): les commandes à l'hôte, par fenêtre de 5 minutes. */

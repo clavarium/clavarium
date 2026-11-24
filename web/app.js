@@ -1353,7 +1353,7 @@
         return j;
     };
     /* The name a person reads; a conversation made before free names is read by its identifier. */
-    const shownName = (c) => (c && typeof c.title === 'string' && c.title ? c.title : c?.name ?? '');
+    const shownName = (c) => (c && typeof c.title === 'string' && c.title ? c.title : DEVICE && c && typeof c.chatName === 'string' && c.chatName ? c.chatName : c?.name ?? '');
     /* It needs its owner: it asks or waits, its answerer asks, it failed, its machine is unwell. Said even when it is hidden. */
     /* Its tool asks or waits for its owner, and the owner has not written since (talk.mjs, brief). */
     const talkNeeds = (c) => Boolean(c.talk && (c.talk.needs ?? (c.talk.waiting > 0 || c.talk.state === 'waiting')));
@@ -1996,6 +1996,8 @@
                 const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
                 let r = await fetch(mePath());
                 if (leaving(r)) return;
+                /* A member whose account was changed or removed (#419): said plainly, nothing more tried. */
+                if (MEMBER && r.status === 403) { shut(uiSaid('set-member-gone', 'Nothing is shared with you now.')); return; }
                 if (r.status === 401) {
                     /* The session ended: the device signs again, quietly. */
                     const door = await window.clavariumDoor();
@@ -8331,7 +8333,7 @@
 
     /* ---------- Settings: this device, and the platform ---------- */
     /* What a member may use, conversation by conversation (#419): Chat to read, Chat, Chat and terminal, Terminal. */
-    const GIVE_LEVELS = [['', 'Nothing'], ['r', 'Read the chat'], ['rw', 'Chat'], ['rwx', 'Chat and terminal'], ['x', 'Terminal']];
+    const GIVE_LEVELS = () => [['r', uiSaid('set-give-read', 'Read only')], ['rw', uiSaid('set-give-chat', 'Chat')], ['rwx', uiSaid('set-give-both', 'Chat + terminal')], ['x', uiSaid('set-give-terminal', 'Terminal')], ['', uiSaid('set-give-none', 'Remove access')]];
     function memberGiven(o) {
         const box = el('div', 'op-given');
         const given = new Map((o.given ?? []).map((g) => [g.name, g.rights]));
@@ -8345,17 +8347,19 @@
         };
         const level = (name, rights) => {
             const sel = el('select'); sel.setAttribute('aria-label', `What ${o.email} may use in ${label(name)}`);
-            for (const [v, l] of GIVE_LEVELS) { const opt = el('option', '', l); opt.value = v; sel.append(opt); }
-            sel.value = GIVE_LEVELS.some(([v]) => v === rights) ? rights : 'rw';
+            for (const [v, l] of GIVE_LEVELS()) { const opt = el('option', '', l); opt.value = v; sel.append(opt); }
+            sel.value = GIVE_LEVELS().some(([v]) => v === rights) ? rights : 'rw';
             sel.addEventListener('change', () => void set(name, sel.value));
             return sel;
         };
-        if (given.size === 0) box.append(el('small', '', 'Given nothing yet.'));
+        if (given.size === 0) box.append(el('small', '', uiSaid('set-given-none', 'Nothing shared yet.')));
+        /* What a chat or a terminal really gives (audit 24-11): what its AI can reach -- its folders, mail, keys. */
+        else box.append(el('small', 'hint', uiSaid('set-given-ai', 'Chat and terminal: all its AI can reach.')));
         for (const [name, rights] of given) { const line = el('div', 'op-given-line'); line.append(el('span', '', label(name)), level(name, rights)); box.append(line); }
         const rest = conversations.filter((c) => !given.has(c.name));
         if (rest.length) {
             const add = el('select', 'op-give-add'); add.setAttribute('aria-label', `Give ${o.email} a conversation`);
-            const first = el('option', '', 'Give a conversation...'); first.value = ''; add.append(first);
+            const first = el('option', '', uiSaid('set-give-add', 'Share a conversation…')); first.value = ''; add.append(first);
             for (const c of rest) { const opt = el('option', '', label(c.name)); opt.value = c.name; add.append(opt); }
             add.addEventListener('change', () => { if (add.value) void set(add.value, 'rw'); });
             box.append(add);
@@ -8368,6 +8372,7 @@
         $('settings-ch-operators').hidden = !got || got.local === true;
         if (!got || got.local) return;
         if (got.defaultRole && !$('operators-role').dataset.touched) $('operators-role').value = got.defaultRole;
+        $('operators-role').onchange = () => { $('operators-role').dataset.touched = '1'; };
         const rows = $('operators-rows'); rows.replaceChildren();
         const act = async (path) => {
             $('operators-error').hidden = true;
@@ -8386,7 +8391,7 @@
             /* ITS ROLE (#419): an administrator does everything; a member sees only what it is given. Never one's own. */
             if (o.email !== got.me) {
                 const role = el('select', 'op-role'); role.setAttribute('aria-label', `Role of ${o.email}`);
-                for (const [v, l] of [['admin', 'Administrator'], ['member', 'Member']]) { const opt = el('option', '', l); opt.value = v; role.append(opt); }
+                for (const [v, l] of [['admin', uiSaid('set-role-admin', 'Administrator')], ['member', uiSaid('set-role-member', 'Member')]]) { const opt = el('option', '', l); opt.value = v; role.append(opt); }
                 role.value = o.role ?? 'admin';
                 role.addEventListener('change', async () => {
                     $('operators-error').hidden = true;
@@ -8395,13 +8400,15 @@
                     await paintOperators();
                 });
                 acts.append(role);
-            } else name.append(el('small', '', o.role === 'member' ? 'Member' : 'Administrator'));
+            } else name.append(el('small', '', o.role === 'member' ? uiSaid('set-role-member', 'Member') : uiSaid('set-role-admin', 'Administrator')));
             acts.append(...buttons.map(([verb, label]) => { const b = el('button', verb === 'remove' ? 'danger' : '', label); b.type = 'button'; b.dataset.act = verb; b.addEventListener('click', () => void act([o.email, verb])); return b; }));
             row.append(name, acts);
             rows.append(row);
             /* WHAT A MEMBER WAS GIVEN (#419): each conversation, its chat and/or its terminal; one more added from a list. */
             if (o.role === 'member') rows.append(memberGiven(o));
         }
+        /* Its line in the chapter's head: counted once the rows are there (#419). */
+        void paintSettingsStates().catch(() => {});
     }
     /* API KEYS (server/apikeys.mjs): what a program or an AI elsewhere may read with a key. Made with no
        scope until one is ticked; its secret shown this once, then never; revoked at once, confirmed in place.
@@ -13875,7 +13882,7 @@
     /* A device may have been given several conversations, each by a code of
        its own. One is shown at a time; the others are a tap away. */
     function offerOthers(others) {
-        $('others').hidden = false;
+        $('others').hidden = MEMBER && others.length === 0;
         $('others').textContent = others.length > 0 ? `Conversations (${others.length + 1})` : MEMBER ? 'Conversations' : 'This device';
         $('others').onclick = () => {
             const rows = $('others-rows');

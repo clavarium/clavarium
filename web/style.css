@@ -195,8 +195,8 @@ footer#keys { border-top: 0; }
 .device { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .device b { flex: 1; min-width: 120px; } .device small { color: var(--ink2); }
 button.danger { border-color: var(--danger); color: var(--danger); }
-html[data-door="device"] #app { display: block; }
-html[data-door="device"] #room { height: 100%; }
+html:is([data-door="device"],[data-door="member"]) #app { display: block; }
+html:is([data-door="device"],[data-door="member"]) #room { height: 100%; }
 #secret-rows { display: flex; flex-direction: column; }
 #secret-new { display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
 #secret-new label { font-size: .75rem; color: var(--ink2); }
@@ -1148,9 +1148,9 @@ button.inline:hover { color: var(--brass-ink); }
 .item[data-hidden="true"] { opacity: .7; }
 
 /* ---------- THE BAR (G): « · state dot + name · [Chat | Terminal | Assets N] · settings ---------- */
-html:not([data-door="device"]) #room > header { flex-wrap: nowrap; }
-html:not([data-door="device"]) #room > header #state { flex: 0 0 auto; width: 10px; height: 10px; overflow: hidden; font-size: 0; color: transparent; }
-html:not([data-door="device"]) #room > header #state::before { width: 10px; height: 10px; margin: 0; vertical-align: top; }
+html:not([data-door="device"]):not([data-door="member"]) #room > header { flex-wrap: nowrap; }
+html:not([data-door="device"]):not([data-door="member"]) #room > header #state { flex: 0 0 auto; width: 10px; height: 10px; overflow: hidden; font-size: 0; color: transparent; }
+html:not([data-door="device"]):not([data-door="member"]) #room > header #state::before { width: 10px; height: 10px; margin: 0; vertical-align: top; }
 .views { display: inline-flex; flex: 0 0 auto; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .views button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--ink2); border-radius: 7px; padding: 5px 11px; }
 .views button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
@@ -1159,7 +1159,7 @@ html:not([data-door="device"]) #room > header #state::before { width: 10px; heig
 header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
 #folders { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 @media (max-width: 900px) { .views button span, #folders span { display: none; } .views button { padding: 6px 10px; } }
-@media (max-width: 700px) { html:not([data-door="device"]) #room > header #menu { display: none; } }
+@media (max-width: 700px) { html:not([data-door="device"]):not([data-door="member"]) #room > header #menu { display: none; } }
 
 /* The chat's display settings: an eye, not sliders (Parley draws its own sign; it is masked here). */
 #simple-thread .parley-prefs-open svg, #salon-thread .parley-prefs-open svg { display: none; }
@@ -1490,7 +1490,7 @@ select.pill { appearance: auto; }
   .rv-tree { position: static; max-height: none; }
 }
 @media (max-width: 700px) {
-  html:not([data-door="device"]) #room > header .views button, html:not([data-door="device"]) #room > header #folders, html:not([data-door="device"]) #room > header .topbar-lead-back { min-height: 36px; height: 36px; }
+  html:not([data-door="device"]):not([data-door="member"]) #room > header .views button, html:not([data-door="device"]):not([data-door="member"]) #room > header #folders, html:not([data-door="device"]):not([data-door="member"]) #room > header .topbar-lead-back { min-height: 36px; height: 36px; }
   .views { padding: 2px; }
 }
 #copy-close, #files-close, #preview-close { font-size: 1.375rem; line-height: 1; min-width: 40px; padding: 4px 10px; }
@@ -2583,7 +2583,7 @@ header.topbar > :is(.topbar-fold, .topbar-lead-back):hover { color: var(--ink); 
 header.topbar > .topbar-lead-back[hidden] { display: none; }
 @media (max-width: 700px) { header.topbar > .topbar-fold { display: none; } }
 @media (min-width: 701px) { header.topbar > .topbar-lead-back { display: none; } }
-header.topbar .bar-state, html:not([data-door="device"]) header.topbar #state { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+header.topbar .bar-state, html:not([data-door="device"]):not([data-door="member"]) header.topbar #state { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 header.topbar .bar-state { background: var(--ok); }
 header.topbar .bar-state[hidden] { display: none; }
 /* A room one of whose AIs speaks now: its dot as a conversation's at work, the words under its name. */
@@ -2600,7 +2600,7 @@ header.topbar .views .icon-btn { width: auto; height: auto; }
 header.topbar .views button { height: 32px; min-height: 32px; padding-block: 0; }
 @media (max-width: 700px) { header.topbar { height: 48px; min-height: 48px; padding: 0 8px; gap: 6px; } }
 /* A device's page (/c/): the same bar, its own controls may take a second line on a narrow screen (its menu "..."). */
-html[data-door="device"] header.topbar { height: auto; }
+html:is([data-door="device"],[data-door="member"]) header.topbar { height: auto; }
 /* A place's top bar stays at the top while its page scrolls (05-11), edge to edge over the page's own margins.
    (A page with a bar starts at its bar: no margin above it, so it sticks where it rests.) */
 :is(.sheet, #newconv, #salon-new):has(> header.topbar) { padding-top: 0; }
@@ -3179,11 +3179,11 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 #machines-confirm { margin: 8px 16px; }
 /* A phone (13-11): the bar's five buttons tighter, so that all stay on the screen -- its name gives way, never the bar. */
 @media (max-width: 480px) {
-  html:not([data-door="device"]) #room > header #name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  html:not([data-door="device"]) #room > header :is(.bar-right, .views) { flex: none; }
-  html:not([data-door="device"]) #room > header .views { gap: 0; padding: 2px; }
-  html:not([data-door="device"]) #room > header .views button { gap: 4px; padding-inline: 7px; }
-  html:not([data-door="device"]) #room > header .views .count { min-width: 1.2em; padding: 1px 4px; }
+  html:not([data-door="device"]):not([data-door="member"]) #room > header #name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html:not([data-door="device"]):not([data-door="member"]) #room > header :is(.bar-right, .views) { flex: none; }
+  html:not([data-door="device"]):not([data-door="member"]) #room > header .views { gap: 0; padding: 2px; }
+  html:not([data-door="device"]):not([data-door="member"]) #room > header .views button { gap: 4px; padding-inline: 7px; }
+  html:not([data-door="device"]):not([data-door="member"]) #room > header .views .count { min-width: 1.2em; padding: 1px 4px; }
 }
 /* At hand (13-11): a switch's name never under its buttons -- the name keeps its width, the buttons wrap. */
 .hand-switches .set-row > .set-what { flex: none; }

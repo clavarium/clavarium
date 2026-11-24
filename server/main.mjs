@@ -353,9 +353,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* WHO IS WHAT (people.mjs, #419): the gate of everything there was admits ADMINISTRATORS only -- pages, API,
        terminals, the SSH console, all of it -- so a member is refused there by default; members come in through
        their own door alone (/m/, memberGate). With no member, everybody who may sign in passes, as before. */
-    const people = team ? new People({ path: `${dataDir}/people.json`, accounts: () => team.list(), tell: (title, body) => { try { void alerts?.tell?.({ title, body, url: '/?open=settings&at=operators' })?.catch?.(() => {}); } catch { /* said in the log */ } console.error(`people: ${title}: ${body}`); } }) : null;
+    const people = team ? new People({ path: `${dataDir}/people.json`, install: operators, accounts: () => team.list(), tell: (title, body) => { try { void alerts?.tell?.({ title, body, url: '/?open=settings&at=operators' })?.catch?.(() => {}); } catch { /* said in the log */ } console.error(`people: ${title}: ${body}`); } }) : null;
     team?.useLastAdmin((email) => people.roleOf(email) === 'admin' && people.isLastAdmin(email));
-    if (team) team.people = people;
+    if (team) { team.people = people; team.onChanged = () => people.changed(); }
     const gate = makeGate(team ? () => team.allowed().filter((e) => people.roleOf(e) === 'admin') : []);
     const memberGate = team ? makeGate(() => team.allowed().filter((e) => people.roleOf(e) === 'member')) : () => undefined;
     const originOk = makeOriginCheck(publicOrigin);
@@ -380,7 +380,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
     if (team) team.grants = grants;
     /* A MEMBER, as the door sees it (door.mjs, #419): what the table gives `person:<email>`, conversations only. */
-    const personOf = team ? (email) => {
+    const personOf = team ? (given) => {
+        const email = String(given).trim().toLowerCase();
         const subject = `person:${email}`;
         const mine = () => grants.of(subject, 'conversation').map((g) => g.name).filter((n) => all.list().some((c) => c.name === n));
         return {

@@ -795,8 +795,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/operators' && team) {
             /* Its role said at once (#419): an account removed and added again does not come back as it was. */
             const role = body.role === 'member' ? 'member' : body.role === 'admin' ? 'admin' : (team.people?.defaultRole?.() ?? 'admin');
+            team.people?.adding(String(body.email ?? '').trim().toLowerCase(), role);
             const made = await team.add(body.email);
-            team.people?.added(made.email, role);
             return send(201, { ...made, role: team.people?.roleOf(made.email) ?? 'admin' }), true;
         }
         /* An account made an administrator or a member (#419): never oneself, never the last administrator. */

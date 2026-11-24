@@ -100,6 +100,8 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
        back used to end only at the next connection -- an open terminal went on (found 19-10). */
     const deviceSeats = new Map();      /* viewer -> () => still allowed */
     const revoked = new WeakSet();
+    /* Who a screen is, for What happened: a paired device, a member (#419), else the page of an administrator. */
+    const fromDevice = new WeakSet(); const fromMember = new WeakSet();
     const allowed = (viewer) => {
         if (revoked.has(viewer)) return false;
         const still = deviceSeats.get(viewer);
@@ -141,6 +143,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         const resume = url.searchParams.get('resume') === '1';
         sockets.handleUpgrade(request, socket, head, (viewer) => {
             if (still) { deviceSeats.set(viewer, still); viewer.on('close', () => deviceSeats.delete(viewer)); }
+            if (url.pathname === DEVICE_PATH) fromDevice.add(viewer); else if (url.pathname === MEMBER_PATH) fromMember.add(viewer);
             seat(viewer, name, within(cols, COLS) ? cols : 80, within(rows, ROWS) ? rows : 24, resume);
         });
     });
@@ -197,7 +200,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
     }
     async function openNow(name, cols, rows, sink, say) {
         /* Who opens it, for What happened when it wakes a sleeper: a screen, or this server (warm). */
-        const who = sink ? (deviceSeats.has(sink) ? 'a paired device' : 'a page') : undefined;
+        const who = sink ? (fromDevice.has(sink) ? 'a paired device' : fromMember.has(sink) ? 'a member' : 'a page') : undefined;
         const terminal = await spawn(name, cols, rows, say, who);
         /* While it was being opened another one may have been: the newest wins. */
         if (live.has(name)) close(name);

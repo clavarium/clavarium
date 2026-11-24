@@ -22,8 +22,10 @@ import { join } from 'node:path';
 export const DATA_FORMAT = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).clavarium?.dataFormat ?? 1;
 export const FORMAT_FILE = 'data-format.json';
 
-/* None yet: format 1 is the only one. The next one adds its step here. */
-export const MIGRATIONS = {};
+/* 1 -> 2 (24-11, #419): nothing to change in the files. Its number is what matters: a release from before accounts
+   and rights reads format 1 only, and would take every member for an administrator (it does not know people.json);
+   the updater refuses to go back to it, by hand or by itself, and that release refuses to start on this data. */
+export const MIGRATIONS = { 1: () => {} };
 
 export function dataFormat(dataDir) {
     try { return JSON.parse(readFileSync(join(dataDir, FORMAT_FILE), 'utf8')).format; } catch { return undefined; }

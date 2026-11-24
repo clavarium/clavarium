@@ -48,10 +48,17 @@ export function attachConsole(server, { tethers, gate = () => 'local', originOk 
         const target = machineOf(tethers, url.searchParams.get('target'));
         if (!originOk(request.headers) || gate(request.headers) === undefined || !target) { socket.destroy(); return; }
         const cols = Number(url.searchParams.get('cols')); const rows = Number(url.searchParams.get('rows'));
-        sockets.handleUpgrade(request, socket, head, (ws) => { void seat(ws, target, whoOf(request.headers), { cols, rows }); });
+        sockets.handleUpgrade(request, socket, head, (ws) => {
+            /* Still an administrator (#419): made a member, disabled, removed -- the console ends at once. */
+            const still = () => gate(request.headers) !== undefined;
+            const watch = setInterval(() => { if (!still()) { try { ws.close(4403, 'not allowed any more'); } catch { /* gone */ } } }, 30_000); watch.unref?.();
+            ws.on('close', () => clearInterval(watch));
+            ws.on('message', () => { if (!still()) { try { ws.close(4403, 'not allowed any more'); } catch { /* gone */ } } });
+            void seat(ws, target, whoOf(request.headers), { cols, rows }, still);
+        });
     });
 
-    async function seat(ws, target, who, { cols, rows }) {
+    async function seat(ws, target, who, { cols, rows }, still = () => true) {
         const send = (data, binary = false) => { if (ws.readyState === 1) ws.send(data, { binary }); };
         let handle = null; let gone = false; const early = [];
         const onEvent = (e) => {
@@ -73,6 +80,7 @@ export function attachConsole(server, { tethers, gate = () => 'local', originOk 
         /* What came meanwhile is in the replay already: only the latest state is said again. */
         if (early.some((e) => e.type === 'closed')) { try { ws.close(CLOSE_ENDED, 'ended'); } catch { /* gone */ } return; }
         ws.on('message', (data, binary) => {
+            if (!still()) return;
             if (binary) { handle.write(Buffer.from(data).toString('utf8')); return; }
             let m; try { m = JSON.parse(String(data)); } catch { return; }
             if (m?.type === 'resize') handle.resize(Number(m.cols), Number(m.rows));
