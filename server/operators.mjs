@@ -71,9 +71,13 @@ export class Operators {
         await this.#do(['operator', 'password', e], `${password}\n`);
         return { email: e, password };
     }
-    async disable(email) { await this.#do(['operator', 'disable', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
+    /* The last administrator stays (people.mjs): `lastAdmin(email)` says whether it is that one. */
+    #lastAdmin = () => false;
+    useLastAdmin(fn) { this.#lastAdmin = fn; }
+    #keep(email) { if (this.#lastAdmin(email)) throw new Refusal(409, 'The last administrator cannot be disabled or removed.'); }
+    async disable(email) { this.#keep(this.#email(email)); await this.#do(['operator', 'disable', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
     async enable(email) { await this.#do(['operator', 'enable', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
-    async remove(email) { await this.#do(['operator', 'remove', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
+    async remove(email) { this.#keep(this.#email(email)); await this.#do(['operator', 'remove', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
     #unlock(email) { const locks = { ...(this.#store.get('locks') ?? {}) }; delete locks[email]; this.#store.put({ name: 'locks', ...locks }); }
 
     /* At each turn: too many failed sign-ins lock an address for a while; a lock that is over is lifted. */
@@ -91,7 +95,7 @@ export class Operators {
                 if (Number(n) < FAILS_MAX || locks[email]) continue;
                 const one = this.#list.find((o) => o.email === email && o.enabled);
                 if (!one) continue;
-                if (this.allowed().length === 1) {
+                if (this.allowed().length === 1 || this.#lastAdmin(email)) {
                     if (this.#said.get(email) !== 'last') { this.#said.set(email, 'last'); this.#tell(`${n} failed sign-ins as ${email}`, 'It is the last operator: not locked out. Change its password if this was not you.'); }
                     continue;
                 }

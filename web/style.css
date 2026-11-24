@@ -3455,3 +3455,9 @@ span.tile-spark { display: block; height: 22px; }
 #signin-code .error { margin: 0; }
 #signin-code button { align-self: flex-end; min-height: 40px; }
 .companion-yours { margin: 2px 0 8px; font-size: .75rem; color: var(--ink2); }
+
+/* What a member was given (#419): under its account, indented. */
+.op-given{display:flex;flex-direction:column;gap:6px;margin:-4px 0 10px 18px;padding-left:10px;border-left:2px solid var(--line, #ccc)}
+.op-given-line{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.op-given-line span{min-width:0;overflow-wrap:anywhere}
+.op-role{margin-right:6px}

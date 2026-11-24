@@ -87,13 +87,18 @@ export function devicePairing(devices, headers, pairing) {
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
-export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes, signinCode }) {
+export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes, signinCode, person }) {
     const url = new URL(request.url ?? '/', 'http://local');
-    if (!url.pathname.startsWith('/c/api/')) return false;
+    /* A MEMBER (people.mjs, #419) comes through the same door, at /m/api/, as the person the sign-in names: no
+       pairing, no code, no key, no session of its own -- who it is comes from the gate alone, never from the address.
+       What it was given is read from the same table as a device's, under `person:<email>`. */
+    const base = person ? '/m/api' : '/c/api';
+    if (!url.pathname.startsWith(`${base}/`)) return false;
     /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
-    const named = /^\/([0-9a-f-]{36})(\/.*)$/.exec(url.pathname.slice('/c/api'.length));
-    const pairing = named?.[1];
-    const route = named ? named[2] : url.pathname.slice('/c/api'.length);
+    const named = person ? null : /^\/([0-9a-f-]{36})(\/.*)$/.exec(url.pathname.slice(base.length));
+    const pairing = person ? person.key : named?.[1];
+    const route = named ? named[2] : url.pathname.slice(base.length);
+    const given_ = person ?? devices;
     const send = (status, body, extra = {}) => {
         response.writeHead(status, { ...headers, ...extra, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
         return true;
@@ -101,7 +106,8 @@ export async function handleDoor(request, response, { devices, conversations, re
     try {
         if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' });
 
-        /* ---- pairing: no session yet ---- */
+        /* ---- pairing: no session yet (never for a member: 404) ---- */
+        if (person && ['/pair', '/challenge', '/session', '/leave'].includes(route)) return send(404, { error: 'Not found.' });
         if (request.method === 'POST' && route === '/pair') return send(201, devices.pair(await readJson(request)));
         if (request.method === 'POST' && route === '/challenge') return send(200, devices.challenge(String((await readJson(request)).device ?? '')));
         if (request.method === 'POST' && route === '/session') {
@@ -111,16 +117,16 @@ export async function handleDoor(request, response, { devices, conversations, re
         }
 
         /* ---- everything else: a device session, and its one conversation ---- */
-        if (devicePairing(devices, request.headers, pairing) === undefined) return send(401, { error: 'This device has no open session.' });
+        if (!person && devicePairing(devices, request.headers, pairing) === undefined) return send(401, { error: 'This device has no open session.' });
         /* What this pairing was given: conversations to use, and things of its own to read or write. */
-        const given = devices.grantsOf(pairing);
+        const given = given_.grantsOf(pairing);
         const names = given.filter((g) => g.type === 'conversation').map((g) => g.name);
         const own = given.filter((g) => g.type !== 'conversation').filter((g) => resources.get(g.name))
             .map((g) => ({ name: g.name, type: g.type, access: g.rights.includes('w') ? 'write' : 'read' }));
-        const name = deviceConversation(devices, request.headers, pairing, url.searchParams.get('c') ?? undefined);
+        const name = person ? person.conversationOf(url.searchParams.get('c') ?? undefined) : deviceConversation(devices, request.headers, pairing, url.searchParams.get('c') ?? undefined);
         const mine = name === undefined ? undefined : conversations.list().find((c) => c.name === name);
         /* The parts of that conversation this pairing was given. */
-        const rights = name === undefined ? '' : devices.rightsOn(pairing, name);
+        const rights = name === undefined ? '' : given_.rightsOn(pairing, name);
         const part = { terminal: rights.includes('x'), chat: rights.includes('r') ? (rights.includes('w') ? 'write' : 'read') : null };
         const need = (ok, what) => { if (!ok) throw new Refusal(403, `This device was not given ${what} of this conversation.`); };
         /* Its chat alone: what is reached through the conversation is only what its chat holds. */
@@ -228,7 +234,7 @@ export async function handleDoor(request, response, { devices, conversations, re
         }
         /* A mail cited by its reference (mailref.mjs): only a mailbox this device was given to read. */
         if (request.method === 'GET' && (route === '/mail/open' || route === '/mail/page')) {
-            return await mailRoute(route, url.searchParams, response, { tethers, headers, who: { id: `pairing:${pairing}`, name: 'A device' }, may: (t) => deviceMayRead(t, own, mailboxes), offline: mine?.offline === true });
+            return await mailRoute(route, url.searchParams, response, { tethers, headers, who: person ? { id: `person:${person.email}`, name: person.email } : { id: `pairing:${pairing}`, name: 'A device' }, may: (t) => deviceMayRead(t, own, mailboxes), offline: mine?.offline === true });
         }
         if (request.method === 'GET' && route === '/files/download') {
             const file = await download(attached('read', 'open'), url.searchParams.get('p') ?? '');

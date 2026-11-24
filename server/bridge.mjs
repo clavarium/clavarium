@@ -90,7 +90,9 @@ export const sameOrigin = makeOriginCheck();
 const BY_ITSELF = /\x1b\[[IO]|\x1b\[\??[>=]?[\d;]*c|\x1b\[\d+;\d+R|\x1b\][\d;]*(?:rgb:[0-9a-fA-F/]+)?(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
 export const byHand = (typed) => String(typed ?? '').replace(BY_ITSELF, '').length > 0;
 
-export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {}, onTyped = () => {}, asleep = () => false }) {
+export const MEMBER_PATH = '/m/terminal';
+
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, memberName = () => undefined, onRejoin = () => {}, onTyped = () => {}, asleep = () => false }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
     /* THE DEVICES AT A TERMINAL, each with what lets it stay: asked again when the owner changes
@@ -120,9 +122,18 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             name = ask();
             if (!isConversationName(name) || !originOk(request.headers)) { socket.destroy(); return; }
             still = () => ask() === name;
+        } else if (url.pathname === MEMBER_PATH) {
+            /* A member (people.mjs, #419): the sign-in names it; the terminal of a conversation it was given, only. */
+            const wanted = url.searchParams.get('c') ?? '';
+            const ask = () => memberName(request.headers, wanted) ?? '';
+            name = ask();
+            if (!isConversationName(name) || !originOk(request.headers)) { socket.destroy(); return; }
+            still = () => ask() === name;
         } else if (url.pathname === PATH) {
             name = url.searchParams.get('c') ?? '';
             if (!isConversationName(name) || !originOk(request.headers) || gate(request.headers) === undefined) { socket.destroy(); return; }
+            /* An administrator made a member, or an account disabled: its open terminals end too (#419). */
+            still = () => gate(request.headers) !== undefined;
         } else return;
         const cols = Number(url.searchParams.get('cols'));
         const rows = Number(url.searchParams.get('rows'));
