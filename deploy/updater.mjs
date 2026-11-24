@@ -56,7 +56,7 @@ import { fileURLToPath } from 'node:url';
 import { fetchToolArchives, REGISTRY } from './parley-archive.mjs';
 import { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM } from './tunnel.mjs';
 import { ensureGenericClientId } from './oidc.mjs';
-import { multipassTurn } from './multipass-refresh.mjs';
+import { multipassTurn, MULTIPASS_UPDATING } from './multipass-refresh.mjs';
 /* The updater's run keeps the tunnel up to date: the same functions, from here too. */
 export { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM };
 
@@ -1128,7 +1128,7 @@ async function main(argv) {
                 const file = join(PATHS.stateDir, 'multipass-refresh.json');
                 const state = () => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return {}; } };
                 const save = (change) => { writeFileSync(`${file}.new`, `${JSON.stringify({ ...state(), ...change })}\n`); renameSync(`${file}.new`, file); };
-                await multipassTurn({ run: runCommand, mode: conf.MODE, inWindow: inWindow(conf.WINDOW, new Date()), busy: () => u.busy(), state, save, log: (line) => console.error(`updater: ${line}`) });
+                await multipassTurn({ run: runCommand, mode: conf.MODE, inWindow: inWindow(conf.WINDOW, new Date()), busy: () => u.busy(), state, save, log: (line) => console.error(`updater: ${line}`), mark: (on) => { const f = join(PATHS.data, MULTIPASS_UPDATING); if (on) writeFileSync(f, `${new Date().toISOString()}\n`, { mode: 0o644 }); else rmSync(f, { force: true }); } });
             } catch (error) { console.error(`updater: Multipass could not be looked at: ${error.message}`); }
             const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
         case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));

@@ -17,7 +17,7 @@ function bench({ held = true, installed = 19760, offered = 20750, fail = () => f
         if (c === 'mp list --format json') return { code: 0, stdout: MACHINES };
         return { code: 0, stdout: '' };
     };
-    const go = () => multipassTurn({ run, mode, inWindow, busy: async () => why, state: () => data, save: (x) => { data = { ...data, ...x }; }, sleep: async () => {}, now: () => Date.parse('2026-11-23T03:00:00Z') });
+    const go = () => multipassTurn({ mark: (on) => calls.push(`mark ${on}`), run, mode, inWindow, busy: async () => why, state: () => data, save: (x) => { data = { ...data, ...x }; }, sleep: async () => {}, now: () => Date.parse('2026-11-23T03:00:00Z') });
     return { calls, go, data: () => data };
 }
 
@@ -81,4 +81,14 @@ test('one that cannot be started stays written down for the next turn', async ()
     const b = bench({ fail: (c) => c === 'mp start clv-c' });
     await b.go();
     assert.deepEqual(b.data().multipassRefresh.machines, ['clv-c']);
+});
+
+test('the server is told before the first machine sleeps and after the last is back, even when it fails', async () => {
+    for (const fail of [() => false, (c) => c === 'mp suspend clv-c', (c) => c.startsWith('snap refresh multipass --')]) {
+        const b = bench({ fail }); await b.go();
+        assert.ok(b.calls.indexOf('mark true') < b.calls.indexOf('mp suspend clv-a'));
+        assert.equal(b.calls.at(-1), 'mark false');
+    }
+    const quiet = bench({ installed: 20750 }); await quiet.go();
+    assert.ok(!quiet.calls.includes('mark true'), 'nothing to update: nothing said');
 });
