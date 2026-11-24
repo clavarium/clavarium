@@ -240,4 +240,9 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 .rot>span{grid-area:1/1;white-space:nowrap;opacity:0;transform:translateY(.28em);transition:opacity .35s ease,transform .35s ease}
 .rot>span.on{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){.rot,.rot>span{transition:none}}
+.rot-pause{margin-left:.45em;padding:0 .45em;min-width:28px;min-height:28px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--mute);font:inherit;font-size:.62em;line-height:1.6;vertical-align:middle;cursor:pointer}
+.rot-pause:hover,.rot-pause:focus-visible{color:var(--f);border-color:var(--f)}
+.rot-pause{opacity:0;transition:opacity .2s ease}
+.lead:hover .rot-pause,.rot-pause:focus-visible,.rot-stopped .rot-pause{opacity:1}
+@media (hover:none){.rot-pause{display:none}.rot{cursor:pointer}}
 .film-note{margin:6px 0 0;color:var(--mute);font-size:.8rem;text-align:center}
