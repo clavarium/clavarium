@@ -147,6 +147,7 @@ summary{font-weight:650;cursor:pointer}
 details p{margin:8px 0 2px;color:var(--mute)}
 
 /* code + copy */
+.cmd-label{margin:14px 0 0;font-size:.88rem;font-weight:650;color:var(--mute)}
 .cmd{display:flex;align-items:stretch;background:var(--code);color:var(--code-ink);border-radius:10px;overflow:hidden;margin:10px 0}
 .cmd code{flex:1;min-width:0;font:14px/1.5 var(--mono);padding:12px 14px;overflow-x:auto;white-space:pre}
 .cmd button{flex:none;border:0;border-left:1px solid #333;background:#2a2d28;color:#e9ede6;font:600 .85rem var(--sans);padding:0 14px;cursor:pointer}
@@ -160,10 +161,10 @@ footer .meta a{color:var(--mute)}
 
 /* keys: where each kind of key lives */
 .keys{display:grid;gap:10px}
-.keys>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:10px 16px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.keys>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 7.5rem;gap:10px 16px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
 .keys b{font-weight:650}
 .keys span{color:var(--mute)}
-.keys em{font-style:normal;font-weight:700;font-size:.8rem;border-radius:99px;padding:2px 10px;white-space:nowrap}
+.keys em{justify-self:end;font-style:normal;font-weight:700;font-size:.8rem;border-radius:99px;padding:2px 10px;white-space:nowrap}
 .keys em.in{background:var(--u-bg);color:var(--u)}
 .keys em.out{background:var(--f-bg);color:var(--f)}
 @media (max-width:600px){.keys>div{grid-template-columns:1fr auto}.keys span{grid-column:1/-1;grid-row:2}}

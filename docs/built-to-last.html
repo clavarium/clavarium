@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Built to last · Clavarium</title>
+<meta name="description" content="Claude Code, Codex, Gemini CLI, Mistral Vibe or OpenCode in one place that stays. Switch AI in one setting and keep the same conversation.">
+<link rel="stylesheet" href="style.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="logo" href="index.html">&gt;_ clavarium</a>
+    <button class="menu" data-open-map>☰ Menu</button>
+    <a class="gh" href="https://github.com/clavarium/clavarium">GitHub</a>
+  </header>
+  <main>
+    <div class="page-hero">
+      <h1>Built to last</h1>
+      <p class="lead">Pick the best AI of the moment. Keep one place that stays. Switch in one setting.</p>
+    </div>
+
+<section><h2>One place that stays</h2><ul class="does">
+  <li>Your conversations, your files, your habits: all in one place, on your server.</li>
+  <li>Vendors renew their tools. Your place stays the same.</li>
+  <li>Write or speak. Clavarium types it into the AI's app for you.</li>
+</ul></section>
+
+<section><h2>Change AI in one setting</h2><p class="sub">No starting over with a new vendor's tools: you carry on where you are.</p><div class="keys">
+  <div><b>Same conversation</b><span>In its settings, pick another AI.</span><em class="out">one setting</em></div>
+  <div><b>Everything stays</b><span>The chat, the files, what it can access, the reminders.</span><em class="out">kept</em></div>
+  <div><b>Go back when you like</b><span>Each AI keeps its own memory. Return to the previous one any time.</span><em class="out">reversible</em></div>
+</div></section>
+
+<section><h2>The official apps, at home</h2><div class="keys">
+  <div><b>Official apps</b><span>Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode. Straight from their vendors, as they are.</span><em class="out">official</em></div>
+  <div><b>Your accounts</b><span>The vendor's own sign-in. Your plan, your quotas.</span><em class="out">yours</em></div>
+  <div><b>Your server</b><span>Each AI in its own virtual computer. Your files stay with you.</span><em class="out">at home</em></div>
+  <div><b>Open source</b><span>MIT. You are free.</span><em class="out">free</em></div>
+</div></section>
+
+<section><h2>The rules change, not your way of working</h2><p class="sub">Clavarium sits on top of each official app and uses it as a person would, at its keyboard.</p><ul class="does">
+  <li>A vendor changes its terms, prices or plans? You choose: stay, or move.</li>
+  <li>Moving is one setting, in the same conversation.</li>
+</ul></section>
+
+<section style="text-align:center"><p class="lead"><b>AI keeps changing. With Clavarium, changing is easy: you stay at the leading edge.</b></p><div class="btns" style="justify-content:center"><a class="btn p" href="install.html">Install</a><a class="btn" href="security.html">Security</a></div></section>
+
+<section><h2>You decide what goes out</h2><p class="sub">Whatever AI you pick, you stay master of your mail, your calendar, your files and what is sent.</p><ul class="does">
+  <li>The AI vendor gets no access of its own to them: no account link, no key.</li>
+  <li>It receives only what the AI reads for the task at hand, through Clavarium, as you allowed.</li>
+  <li>A mail or a code push goes out through Clavarium: you approve it, or a rule you set decides.</li>
+  <li>The key that pushes code and your mail passwords stay sealed on your server.</li>
+</ul></section>
+
+<section><h2>For the technical reader</h2>
+  <details><summary>What runs where</summary><p>Each assistant runs in its own ordinary Ubuntu virtual machine (Multipass), on your server. A plain shell too.</p></details>
+  <details><summary>What Clavarium sets up in the app</summary><p>What you would do by hand: first-launch answers, a trusted work folder, "act without asking" if you chose that mode, Clavarium's tools as MCP connectors, hooks so it knows when the app is working. The program itself is never modified.</p></details>
+  <details><summary>How it talks to the app</summary><p>It types into the app's terminal: what you write or dictate, and on its own to wake the app when a message arrives or re-send an unread line. It reads the screen to know the app's state, such as "Please run /login". Sign-in: it shows the vendor's link in the chat and types the code you paste.</p></details>
+</section>
+
+<section><h2>Questions</h2>
+  <details><summary>Which AIs can I use?</summary><p>Claude Code, Codex, Gemini CLI, Mistral Vibe and OpenCode, or a plain shell.</p></details>
+  <details><summary>Do I keep my plan?</summary><p>Yes. Your account, your plan and your quotas stay with the vendor.</p></details>
+  <details><summary>Is it open?</summary><p>Yes, MIT. Your machines are ordinary virtual machines, and your files are on your server.</p></details>
+</section>
+
+<section><h2>Good to know</h2><ul class="limits" style="border-left-color:var(--line)">
+  <li>Each vendor runs its own service and sets its own terms.</li>
+  <li>Your data: the AI reads only what you gave it access to, and usually only part of it. What it reads goes to its vendor, for the task at hand. The vendor has no access of its own, and nothing continuous.</li>
+  <li>What the AI reads for a task goes to its vendor. Most vendors keep it only for a limited time, and let you choose whether it may be used to train their models; on business and API plans, training is generally off.</li>
+  <li>When you switch AI, the conversation, its files and its accesses carry over. What the previous AI kept in its own working session stays with it, ready if you switch back.</li>
+  <li>Changing AI needs a computer of its own (not yet when several AIs share one).</li>
+  <li>An app that changes its screens may need a Clavarium update.</li>
+  <li>A key you give an AI is inside its computer while it runs.</li>
+</ul></section>
+  </main>
+  <footer>
+    <p class="cmd-label">Install on your server, in one line:</p>
+    <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
+    <div class="meta"><span>Free and open source, MIT.</span><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><span>Not affiliated with the AI vendors named.</span></div>
+  </footer>
+</div>
+</body>
+</html>

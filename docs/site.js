@@ -56,7 +56,7 @@
     m.appendChild(col('u', 'Use cases', U));
     var foot = el('nav', 'foot');
     foot.setAttribute('aria-label', 'Start here');
-    [['FAQ', 'faq.html'], ['Security', 'security.html']].forEach(function (l) { var a = el('a', '', l[0]); a.href = l[1]; foot.appendChild(a); });
+    [['FAQ', 'faq.html'], ['Security', 'security.html'], ['Built to last', 'built-to-last.html']].forEach(function (l) { var a = el('a', '', l[0]); a.href = l[1]; foot.appendChild(a); });
     m.appendChild(foot);
     return m;
   }
