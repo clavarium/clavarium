@@ -100,6 +100,9 @@ document.querySelectorAll('.play').forEach(function (box) {
   if (!v || !b) return;
   b.addEventListener('click', function () { box.classList.add('on'); v.controls = true; v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
+  /* Paused or ended: the big button comes back, so the state is plain; a tap on the film pauses it (phones hide their controls while it plays). */
+  v.addEventListener('pause', function () { box.classList.remove('on'); });
+  v.addEventListener('click', function (e) { if (!v.paused && box.classList.contains('explainer-play') && e.offsetY < v.clientHeight * 0.78) { e.preventDefault(); v.pause(); } });
 });
 
   /* Every film says what it is: invented data, scripted agents. */
