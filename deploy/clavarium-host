@@ -963,11 +963,9 @@ case "$AREA $VERB" in
         [ $# -le 1 ] || usage
         if [ $# -eq 1 ]; then
             [ "$1" = "hard" ] || refuse "vm revive [hard]"
-            if [ "$SAY" = "yes" ]; then echo "snap stop multipass.multipassd; pkill -KILL -x multipassd; snap start multipass.multipassd"; exit 0; fi
-            timeout 120 snap stop multipass.multipassd || true
-            pkill -KILL -x multipassd 2>/dev/null || true
-            sleep 2
-            run timeout 120 snap start multipass.multipassd
+            unstick="$CODE/current/app/deploy/multipass-unstick.sh"
+            if [ "$SAY" = "yes" ]; then echo "$unstick (daemon stopped, its old dnsmasq ended, failed starts reset, started)"; exit 0; fi
+            run timeout 300 bash "$unstick" 
         else
             run timeout 170 snap restart multipass.multipassd
         fi ;;

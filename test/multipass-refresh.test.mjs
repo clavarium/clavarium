@@ -95,22 +95,21 @@ test('the server is told before the first machine sleeps and after the last is b
 
 /* 25-11, on a real server: four machines started, then its daemon died and stayed mute for three hours. */
 test('mute after its update: its daemon restarted, then stopped and started for sure -- each said; its previous version never put back by itself', async () => {
-    for (const fixedBy of ['snap restart multipass.multipassd', 'snap start multipass.multipassd']) {
+    for (const fixedBy of ['snap restart multipass.multipassd', 'UNSTICK']) {
         let mute = false;
         const b = bench({ fail: (c) => {
             if (c === 'snap refresh multipass --ignore-running') { mute = true; return false; }
-            if (c === fixedBy) { mute = false; return false; }
+            if (c === fixedBy || (fixedBy === 'UNSTICK' && /multipass-unstick\.sh$/.test(c))) { mute = false; return false; }
             return mute && (c === 'mp list --format json' || c.startsWith('mp start'));
         } });
         assert.equal(await b.go(), 'updated');
         const at = (c) => b.calls.indexOf(c);
         assert.ok(at('snap restart multipass.multipassd') > at('snap refresh multipass --ignore-running'));
-        if (fixedBy === 'snap start multipass.multipassd') {
-            assert.ok(at('snap stop multipass.multipassd') > at('snap restart multipass.multipassd'));
-            assert.ok(at('pkill -KILL -x multipassd') > at('snap stop multipass.multipassd'));
-        } else assert.ok(!b.calls.includes('snap stop multipass.multipassd'), 'nothing more once it answers');
-        assert.ok(at('mp start clv-a') > at(fixedBy));
-        assert.ok(!b.calls.some((c) => c.includes('revert')), 'never its previous version');
+        if (fixedBy === 'UNSTICK') {
+            assert.ok(b.calls.findIndex((c) => /^bash .*multipass-unstick\.sh$/.test(c)) > at('snap restart multipass.multipassd'), 'stopped and started for sure, its old dnsmasq ended');
+        } else assert.ok(!b.calls.some((c) => c.includes('multipass-unstick')), 'nothing more once it answers');
+        assert.ok(at('mp start clv-a') > (fixedBy === 'UNSTICK' ? b.calls.findIndex((c) => c.includes('multipass-unstick')) : at(fixedBy)));
+        assert.ok(!b.calls.some((c) => c.startsWith('snap revert')), 'never its previous version');
         assert.deepEqual(b.data().multipassRefresh.machines, []);
     }
 });
