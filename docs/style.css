@@ -247,3 +247,7 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 .lead:hover .rot-pause,.rot-pause:focus-visible,.rot-stopped .rot-pause{opacity:1}
 @media (hover:none){.rot-pause{display:none}.rot{cursor:pointer}}
 .film-note{margin:6px 0 0;color:var(--mute);font-size:.8rem;text-align:center}
+
+.explainer{margin-top:8px}
+.explainer-play{max-width:880px}
+video.explainer-video{display:block;width:100%;aspect-ratio:16/9;border:1px solid var(--line);border-radius:14px;background:var(--card,#fff)}
