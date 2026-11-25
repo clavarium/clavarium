@@ -47,10 +47,10 @@ function fakeTethers({ fail = false } = {}) {
 
 async function serve(tethers, { gate = () => 'local' } = {}) {
     const server = createServer((q, r) => r.end());
-    const consoles = attachConsole(server, { tethers, gate, originOk: makeOriginCheck() });
+    attachConsole(server, { tethers, gate, originOk: makeOriginCheck() });
     await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
     const host = `127.0.0.1:${server.address().port}`;
-    return { server, host, consoles, close: () => new Promise((ok) => server.close(ok)) };
+    return { server, host, close: () => new Promise((ok) => server.close(ok)) };
 }
 const open = (host, query, headers = { origin: `http://${host}` }) => new Promise((ok) => {
     const ws = new WebSocket(`ws://${host}${CONSOLE_PATH}?${query}`, { headers });
@@ -124,18 +124,4 @@ test('a destructive terminal line, as a request card in the chat: irreversible, 
     const plain = demandeView({ ...base, card: { kind: 'terminal', action: 'type', text: 'df -h' } });
     assert.equal(risky.irreversible, true); assert.notEqual(plain.irreversible, true);
     assert.ok((risky.risk ?? []).length > (plain.risk ?? []).length);
-});
-
-test('a console whose person is no longer let in ends as soon as it is looked at again (a role changed, #419), not 30 s later', async () => {
-    const tethers = fakeTethers();
-    let allowed = true;
-    const s = await serve(tethers, { gate: () => (allowed ? 'someone@example.com' : undefined) });
-    try {
-        const got = await open(s.host, 'target=box&cols=100&rows=30');
-        await until(() => got.texts.some((m) => m.type === 'ready'));
-        allowed = false;
-        s.consoles.recheck();
-        await until(() => got.closed !== null, 1000);
-        assert.equal(got.closed, 4403);
-    } finally { await s.close(); }
 });

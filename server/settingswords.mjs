@@ -7,7 +7,7 @@ export const SETTINGS_WORDS_FR = {
     'set-ch-general': 'Général', 'set-ch-machine': 'Machine', 'set-ch-access': 'Accès', 'set-ch-sharing': 'Partage', 'set-ch-chat': 'Chat',
     'set-ch-wakeups': 'Réveils', 'set-ch-answerer': 'Répondeur', 'set-ch-health': 'Santé', 'set-ch-advanced': 'Avancé',
     'set-ch-s-general': 'Général', 'set-ch-s-about': 'À propos', 'set-ch-s-screen': 'Écran', 'set-ch-s-alerts': 'Alertes',
-    'set-ch-s-resources': 'Ressources', 'set-ch-s-operators': 'Comptes', 'set-ch-s-network': 'Réseau', 'set-ch-s-remote-screen': 'Écran à distance',
+    'set-ch-s-resources': 'Ressources', 'set-ch-s-operators': 'Administrateurs', 'set-ch-s-network': 'Réseau', 'set-ch-s-remote-screen': 'Écran à distance',
     'set-ch-s-words': 'Écran du chat', 'set-ch-s-dictation': 'Dictée', 'set-ch-s-shortcuts': 'Raccourcis', 'set-ch-s-thread': 'Événements du chat',
     'set-ch-s-updates': 'Mises à jour', 'set-ch-s-binders': 'Classeurs', 'set-ch-s-events': 'Activité', 'set-ch-s-jobs': 'Tâches', 'set-ch-s-logs': 'Journaux',
     'set-ch-s-usage': 'Usage', 'set-ch-s-backup': 'Sauvegarde', 'set-ch-s-advanced': 'Avancé',
@@ -59,7 +59,7 @@ export const SETTINGS_WORDS_FR = {
     'set-lang-device': 'La langue de chaque appareil', 'set-res-now': 'Mémoire {m} % · disque {d} %',
     'set-share-memory': 'Mémoire par machine', 'set-share-disk': 'Disque par machine', 'set-share-others': 'Autres',
     'set-share-rest': 'Système et autres', 'set-share-else': 'Tout le reste', 'set-share-free': 'Libre', 'set-share-used': 'Utilisé', 'set-share-of': 'sur {total}',
-    'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs', 'set-member-1': '1 membre', 'set-members': '{n} membres', 'set-member-gone': 'Plus rien n\'est partagé avec vous.', 'set-give-read': 'Lecture seule', 'set-give-chat': 'Chat', 'set-give-both': 'Chat + terminal', 'set-give-terminal': 'Terminal', 'set-give-none': 'Retirer l\'accès', 'set-given-none': 'Rien de partagé pour l\'instant.', 'set-given-ai': 'Chat et terminal : tout ce que son IA atteint.', 'set-give-add': 'Partager une conversation…', 'set-role-admin': 'Administrateur', 'set-role-member': 'Membre', 'set-add-account': 'Ajouter un compte', 'set-ch-s-operators-about': 'Qui se connecte, et ce qu\'il voit.',
+    'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs',
     'set-backup-now': 'Exporter · importer', 'set-git-key': '1 clé git', 'set-git-keys': '{n} clés git', 'set-restart': 'redémarrer',
     'set-logs-now': 'Clavarium, machines, système',
     /* Diagnostics › Charge (vm.mjs HostTally): les commandes à l'hôte, par fenêtre de 5 minutes. */

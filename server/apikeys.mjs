@@ -1320,8 +1320,6 @@ export async function handleApiKeys(request, response, keys, originOk, headers =
         for await (const piece of request) { text += piece; if (text.length > 16_384) return send(413, { error: 'Too long.' }); }
         let body;
         try { body = text ? JSON.parse(text) : {}; } catch { return send(400, { error: 'The request is not JSON.' }); }
-        /* One made a member or disabled while its request came makes no key (audit 8). */
-        if (request.stillAllowed && !request.stillAllowed()) return send(403, { error: 'Your account changed: sign in again.' });
         if (!body || typeof body !== 'object') body = {};
         if (pathname === '/api/apikeys') {
             const made = keys.create({ label: body.label, scopes: body.scopes ?? [], conversations: body.conversations ?? {}, rooms: body.rooms ?? {}, boxes: body.boxes ?? {}, binders: body.binders ?? {}, days: body.days === undefined ? DEFAULT_DAYS : body.days }, who);

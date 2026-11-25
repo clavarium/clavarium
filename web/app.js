@@ -18,14 +18,12 @@
 
     /* A paired device gets the same page with less in it, and asks its own
        door: see server/door.mjs. */
-    /* A MEMBER (#419) has the page of a device: the same screens, what it was given only, at /m/ (member.js). */
-    const MEMBER = document.documentElement.dataset.door === 'member';
-    const DEVICE = document.documentElement.dataset.door === 'device' || MEMBER;
+    const DEVICE = document.documentElement.dataset.door === 'device';
     /* THE KIT (kit.js): the pieces every screen shares -- the state's point, the conversation's card... */
     const KIT = window.clavariumKit;
     /* On a paired device, every request names the pairing it speaks for:
        the address is completed once the device has signed in. */
-    let API = MEMBER ? '/m/api' : DEVICE ? '/c/api' : '/api';
+    let API = DEVICE ? '/c/api' : '/api';
     let pairing = '';
     let deviceShared = [];
     /* The parts of its conversation this device was given: its terminal, its
@@ -91,12 +89,10 @@
        the page is leaving. */
     let serverVersion = '';
     const leaving = (r) => {
-        /* Made a member while this administrators' page was open (#419): its own page, at once. */
-        if (!DEVICE && r.status === 403 && r.headers.get('x-clavarium-role') === 'member') { location.replace('/m/'); return true; }
         const update = r.headers.get('x-clavarium-update') ?? '';
         if (update || r.headers.get('x-clavarium-down')) {
             const [kind, to] = update ? update.split(' ') : ['', ''];
-            location.replace(`${MEMBER ? '/m' : DEVICE ? '/c' : ''}/maintenance.html?${new URLSearchParams({ kind, ...(to ? { to } : {}), back: location.pathname + location.search })}`);
+            location.replace(`${DEVICE ? '/c' : ''}/maintenance.html?${new URLSearchParams({ kind, ...(to ? { to } : {}), back: location.pathname + location.search })}`);
             return true;
         }
         const version = r.headers.get('x-clavarium-version') ?? '';
@@ -848,7 +844,7 @@
         say('connecting', 'connecting');
         fit.fit();
         const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-        const where = MEMBER ? `/m/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}` : DEVICE ? `/c/terminal?d=${pairing}&c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}`;
+        const where = DEVICE ? `/c/terminal?d=${pairing}&c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}${resume ? '&resume=1' : ''}`;
         const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
@@ -1330,7 +1326,7 @@
     let appName = 'Clavarium';
     let pageTitle = '';
     const INSTALL_NAME = 'clavarium-install-name';
-    const MANIFEST = MEMBER ? '/m/manifest.webmanifest' : DEVICE ? '/c/manifest.webmanifest' : '/manifest.webmanifest';
+    const MANIFEST = DEVICE ? '/c/manifest.webmanifest' : '/manifest.webmanifest';
     const manifestLink = document.querySelector('link[rel="manifest"]');
     const installName = () => { try { return localStorage.getItem(INSTALL_NAME) ?? ''; } catch { return ''; } };
     const pointManifest = (name) => { if (manifestLink) manifestLink.href = name ? `${MANIFEST}?name=${encodeURIComponent(name)}` : MANIFEST; };
@@ -1353,7 +1349,7 @@
         return j;
     };
     /* The name a person reads; a conversation made before free names is read by its identifier. */
-    const shownName = (c) => (c && typeof c.title === 'string' && c.title ? c.title : DEVICE && c && typeof c.chatName === 'string' && c.chatName ? c.chatName : c?.name ?? '');
+    const shownName = (c) => (c && typeof c.title === 'string' && c.title ? c.title : c?.name ?? '');
     /* It needs its owner: it asks or waits, its answerer asks, it failed, its machine is unwell. Said even when it is hidden. */
     /* Its tool asks or waits for its owner, and the owner has not written since (talk.mjs, brief). */
     const talkNeeds = (c) => Boolean(c.talk && (c.talk.needs ?? (c.talk.waiting > 0 || c.talk.state === 'waiting')));
@@ -1996,8 +1992,6 @@
                 const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
                 let r = await fetch(mePath());
                 if (leaving(r)) return;
-                /* A member whose account was changed or removed (#419): said plainly, nothing more tried. */
-                if (MEMBER && r.status === 403) { shut(uiSaid('set-member-gone', 'Nothing is shared with you now.')); return; }
                 if (r.status === 401) {
                     /* The session ended: the device signs again, quietly. */
                     const door = await window.clavariumDoor();
@@ -8332,47 +8326,11 @@
     $('access-devices-here').addEventListener('click', () => { void openAccessPage('map', { of: current }); });
 
     /* ---------- Settings: this device, and the platform ---------- */
-    /* What a member may use, conversation by conversation (#419): Chat to read, Chat, Chat and terminal, Terminal. */
-    const GIVE_LEVELS = () => [['r', uiSaid('set-give-read', 'Read only')], ['rw', uiSaid('set-give-chat', 'Chat')], ['rwx', uiSaid('set-give-both', 'Chat + terminal')], ['x', uiSaid('set-give-terminal', 'Terminal')], ['', uiSaid('set-give-none', 'Remove access')]];
-    function memberGiven(o) {
-        const box = el('div', 'op-given');
-        const given = new Map((o.given ?? []).map((g) => [g.name, g.rights]));
-        const label = (n) => conversations.find((c) => c.name === n)?.chatName || n;
-        const set = async (name, rights) => {
-            $('operators-error').hidden = true;
-            const body = { conversation: name, chat: rights.includes('w') ? 'write' : rights.includes('r') ? 'read' : null, terminal: rights.includes('x') };
-            try { await post(`${API}/operators/${encodeURIComponent(o.email)}/${rights ? 'give' : 'take'}`, body); }
-            catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
-            await paintOperators();
-        };
-        const level = (name, rights) => {
-            const sel = el('select'); sel.setAttribute('aria-label', `What ${o.email} may use in ${label(name)}`);
-            for (const [v, l] of GIVE_LEVELS()) { const opt = el('option', '', l); opt.value = v; sel.append(opt); }
-            sel.value = GIVE_LEVELS().some(([v]) => v === rights) ? rights : 'rw';
-            sel.addEventListener('change', () => void set(name, sel.value));
-            return sel;
-        };
-        if (given.size === 0) box.append(el('small', '', uiSaid('set-given-none', 'Nothing shared yet.')));
-        /* What a chat or a terminal really gives (audit 24-11): what its AI can reach -- its folders, mail, keys. */
-        else box.append(el('small', 'hint', uiSaid('set-given-ai', 'Chat and terminal: all its AI can reach.')));
-        for (const [name, rights] of given) { const line = el('div', 'op-given-line'); line.append(el('span', '', label(name)), level(name, rights)); box.append(line); }
-        const rest = conversations.filter((c) => !given.has(c.name));
-        if (rest.length) {
-            const add = el('select', 'op-give-add'); add.setAttribute('aria-label', `Give ${o.email} a conversation`);
-            const first = el('option', '', uiSaid('set-give-add', 'Share a conversation…')); first.value = ''; add.append(first);
-            for (const c of rest) { const opt = el('option', '', label(c.name)); opt.value = c.name; add.append(opt); }
-            add.addEventListener('change', () => { if (add.value) void set(add.value, 'rw'); });
-            box.append(add);
-        }
-        return box;
-    }
     /* ADMINISTRATORS: who may sign in (server/operators.mjs); a password is shown once, then never again. */
     async function paintOperators() {
         const got = await fetch(`${API}/operators`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         $('settings-ch-operators').hidden = !got || got.local === true;
         if (!got || got.local) return;
-        if (got.defaultRole && !$('operators-role').dataset.touched) $('operators-role').value = got.defaultRole;
-        $('operators-role').onchange = () => { $('operators-role').dataset.touched = '1'; };
         const rows = $('operators-rows'); rows.replaceChildren();
         const act = async (path) => {
             $('operators-error').hidden = true;
@@ -8381,34 +8339,17 @@
             await paintOperators();
         };
         for (const o of got.operators) {
-            const row = el('div', 'list-item folder'); row.dataset.email = o.email; row.dataset.role = o.role ?? 'admin';
+            const row = el('div', 'list-item folder'); row.dataset.email = o.email;
             const name = el('div', 'set-what'); name.append(el('b', '', o.email));
             const word = o.locked ? `Locked until ${new Date(o.locked).toLocaleTimeString([], { timeStyle: 'short' })}` : o.enabled ? (o.email === got.me ? 'You' : '') : 'Disabled';
             if (word) name.append(el('small', '', word));
             const buttons = [['password', 'New password']];
             if (o.email !== got.me) buttons.push(o.enabled ? ['disable', 'Disable'] : ['enable', 'Enable'], ['remove', 'Remove']);
             const acts = el('div', 'set-control');
-            /* ITS ROLE (#419): an administrator does everything; a member sees only what it is given. Never one's own. */
-            if (o.email !== got.me) {
-                const role = el('select', 'op-role'); role.setAttribute('aria-label', `Role of ${o.email}`);
-                for (const [v, l] of [['admin', uiSaid('set-role-admin', 'Administrator')], ['member', uiSaid('set-role-member', 'Member')]]) { const opt = el('option', '', l); opt.value = v; role.append(opt); }
-                role.value = o.role ?? 'admin';
-                role.addEventListener('change', async () => {
-                    $('operators-error').hidden = true;
-                    try { await post(`${API}/operators/${encodeURIComponent(o.email)}/role`, { role: role.value }); }
-                    catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
-                    await paintOperators();
-                });
-                acts.append(role);
-            } else name.append(el('small', '', o.role === 'member' ? uiSaid('set-role-member', 'Member') : uiSaid('set-role-admin', 'Administrator')));
             acts.append(...buttons.map(([verb, label]) => { const b = el('button', verb === 'remove' ? 'danger' : '', label); b.type = 'button'; b.dataset.act = verb; b.addEventListener('click', () => void act([o.email, verb])); return b; }));
             row.append(name, acts);
             rows.append(row);
-            /* WHAT A MEMBER WAS GIVEN (#419): each conversation, its chat and/or its terminal; one more added from a list. */
-            if (o.role === 'member') rows.append(memberGiven(o));
         }
-        /* Its line in the chapter's head: counted once the rows are there (#419). */
-        void paintSettingsStates().catch(() => {});
     }
     /* API KEYS (server/apikeys.mjs): what a program or an AI elsewhere may read with a key. Made with no
        scope until one is ticked; its secret shown this once, then never; revoked at once, confirmed in place.
@@ -8633,7 +8574,7 @@
     $('operators-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('operators-error').hidden = true;
-        try { const r = await post(`${API}/operators`, { email: $('operators-email').value.trim(), role: $('operators-role').value }); showPassword(r.email, r.password); $('operators-email').value = ''; }
+        try { const r = await post(`${API}/operators`, { email: $('operators-email').value.trim() }); showPassword(r.email, r.password); $('operators-email').value = ''; }
         catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
         await paintOperators();
     });
@@ -8829,11 +8770,8 @@
         const shortcuts = [...document.querySelectorAll('#settings-shortcuts .list-item b')].map((b) => b.textContent);
         chapterNow('s-shortcuts', shortcuts.length ? shortcuts.slice(0, 3).join(' · ') + (shortcuts.length > 3 ? ` +${shortcuts.length - 3}` : '') : uiSaid('set-none', 'None'));
         if ($('binders-agent-lists').value !== '') chapterNow('s-binders', uiSaid('set-binders-max', 'Agents make up to {n}', { n: $('binders-agent-lists').value }));
-        /* Accounts (#419): the administrators, and the members beside them. */
-        const accountRows = [...$('operators-rows').querySelectorAll('[data-email]')];
-        const members = accountRows.filter((r) => r.dataset.role === 'member').length;
-        const admins = accountRows.length - members;
-        chapterNow('s-operators', accountRows.length ? `${uiSaid(admins === 1 ? 'set-admin-1' : 'set-admins', admins === 1 ? '1 administrator' : '{n} administrators', { n: admins })}${members ? ` · ${uiSaid(members === 1 ? 'set-member-1' : 'set-members', members === 1 ? '1 member' : '{n} members', { n: members })}` : ''}` : '');
+        const admins = $('operators-rows').children.length;
+        chapterNow('s-operators', admins ? uiSaid(admins === 1 ? 'set-admin-1' : 'set-admins', admins === 1 ? '1 administrator' : '{n} administrators', { n: admins }) : '');
         chapterNow('s-backup', uiSaid('set-backup-now', 'Export · import'));
         const shelf = $('shelf-state').textContent.split(' · ')[0];
         const keys = $('git-hosts').children.length;
@@ -13882,8 +13820,8 @@
     /* A device may have been given several conversations, each by a code of
        its own. One is shown at a time; the others are a tap away. */
     function offerOthers(others) {
-        $('others').hidden = MEMBER && others.length === 0;
-        $('others').textContent = others.length > 0 ? `Conversations (${others.length + 1})` : MEMBER ? 'Conversations' : 'This device';
+        $('others').hidden = false;
+        $('others').textContent = others.length > 0 ? `Conversations (${others.length + 1})` : 'This device';
         $('others').onclick = () => {
             const rows = $('others-rows');
             rows.replaceChildren();
@@ -13892,7 +13830,7 @@
                 const name = document.createElement('b'); name.textContent = isCurrent ? `${label} (shown now)` : label;
                 const open = document.createElement('button'); open.type = 'button'; open.className = 'primary'; open.textContent = 'Open'; open.hidden = isCurrent;
                 open.addEventListener('click', () => { void window.clavariumShowPairing(id, conversation); });
-                const leave = document.createElement('button'); leave.type = 'button'; leave.textContent = 'Remove from this device'; leave.hidden = MEMBER;
+                const leave = document.createElement('button'); leave.type = 'button'; leave.textContent = 'Remove from this device';
                 leave.addEventListener('click', () => {
                     leave.textContent = 'Yes, remove it'; leave.className = 'danger';
                     leave.onclick = async () => { await window.clavariumLeave(id); location.reload(); };
@@ -13924,7 +13862,7 @@
             say(fresh ? 'pairing' : 'connecting', 'connecting');
             const door = await window.clavariumDoor();
             if (!door.ok) { shut(door.message); return; }
-            pairing = door.pairing; API = MEMBER ? '/m/api' : `/c/api/${pairing}`; current = door.conversation ?? '';
+            pairing = door.pairing; API = `/c/api/${pairing}`; current = door.conversation ?? '';
             document.documentElement.dataset.pairing = pairing;      /* not a secret: a name, useless without the key */
             offerOthers(door.others);
             welcoming = fresh && door.conversation !== null;

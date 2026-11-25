@@ -67,7 +67,7 @@ import { Refusal } from './conversations.mjs';
 export const RIGHTS = Object.freeze({ conversation: 'rwxm', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'rw', room: 'rwm', box: 'rw' });
 /* What each of the server's own assets takes: its state and its jobs are read, rooms are made. */
 const SERVER_RIGHTS = Object.freeze({ 'server:status': 'r', 'server:jobs': 'r', 'server:rooms': 'w', 'server:diagnostics': 'r' });
-const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|(pairing|apikey):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|person:[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+[a-z]{2,24})$/;
+const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|(pairing|apikey):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$|^server:(status|jobs|rooms|diagnostics)$|^(room|box):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export const typeOf = (asset) => String(asset).split(':')[0];
@@ -114,9 +114,7 @@ export class Grants {
         /* A secret is handed to a conversation, never to a device: a device
            would be a way to read it. */
         if (typeOf(asset) === 'secret' && !subject.startsWith('conversation:')) throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
-        /* A MEMBER (person:, people.mjs, #419) is given conversations only, in this version: its chat, its terminal. */
-        if (subject.startsWith('person:') && typeOf(asset) !== 'conversation') throw new Refusal(400, 'A member is given conversations only.');
-        if (typeOf(asset) === 'conversation' && !subject.startsWith('pairing:') && !subject.startsWith('apikey:') && !subject.startsWith('person:')) throw new Refusal(400, 'A conversation is shared with a device or an API key, not with another conversation.');
+        if (typeOf(asset) === 'conversation' && !subject.startsWith('pairing:') && !subject.startsWith('apikey:')) throw new Refusal(400, 'A conversation is shared with a device or an API key, not with another conversation.');
         /* The state of the server is given to an API key only; an API key is given only that, and
            conversations one by one -- their chat, to read or to write in, never their terminal. */
         if (typeOf(asset) === 'server' && !subject.startsWith('apikey:')) throw new Refusal(400, 'The state of the server is given to an API key only.');
@@ -143,8 +141,6 @@ export class Grants {
     /* Who has something on one asset: [{ subject, rights }]. */
     on(asset) { return this.#store.all().filter((g) => g.asset === asset).map((g) => ({ subject: g.subject, rights: g.rights })); }
 
-    /* The subjects there are that start so ('person:'). */
-    subjects(prefix) { return [...new Set(this.#store.all().map((g) => g.subject).filter((s) => s.startsWith(prefix)))]; }
     forgetSubject(subject) { for (const g of this.#store.all()) if (g.subject === subject) this.#store.remove(g.name); }
     forgetAsset(asset) { for (const g of this.#store.all()) if (g.asset === asset) this.#store.remove(g.name); }
 }

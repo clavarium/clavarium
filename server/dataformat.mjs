@@ -22,11 +22,8 @@ import { join } from 'node:path';
 export const DATA_FORMAT = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).clavarium?.dataFormat ?? 1;
 export const FORMAT_FILE = 'data-format.json';
 
-/* No migration yet. FORMAT 2 IS NOT TO BE USED: 0.2.527-next.1 wrote it for a day (accounts and rights, #419) with
-   nothing changed in the files, which blocked going back; it is read as 1 and written back as 1. The next real
-   change of format is 3. (Going back to a release from before accounts once members exist: refused, deploy/updater.mjs.) */
+/* None yet: format 1 is the only one. The next one adds its step here. */
 export const MIGRATIONS = {};
-const SAME_AS_1 = 2;
 
 export function dataFormat(dataDir) {
     try { return JSON.parse(readFileSync(join(dataDir, FORMAT_FILE), 'utf8')).format; } catch { return undefined; }
@@ -40,7 +37,6 @@ export function migrateData(dataDir, { format = DATA_FORMAT, migrations = MIGRAT
         try { existing = readdirSync(dataDir).some((f) => f.endsWith('.json')); } catch { /* a new directory */ }
         found = existing ? 1 : format;
     }
-    if (found === SAME_AS_1 && format === 1) { write(dataDir, 1); found = 1; }
     if (!Number.isInteger(found) || found < 1) throw new Error(`${join(dataDir, FORMAT_FILE)} does not hold a format number`);
     if (found > format) throw new Error(`The data in ${dataDir} is in format ${found}, written by a newer Clavarium; this one reads format ${format} at most. Go back to the newer version (Settings, Updates; or deploy/updater.mjs), or restore the backup made before the update.`);
     const ran = [];

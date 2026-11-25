@@ -87,18 +87,13 @@ export function devicePairing(devices, headers, pairing) {
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
-export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes, signinCode, person }) {
+export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes, signinCode }) {
     const url = new URL(request.url ?? '/', 'http://local');
-    /* A MEMBER (people.mjs, #419) comes through the same door, at /m/api/, as the person the sign-in names: no
-       pairing, no code, no key, no session of its own -- who it is comes from the gate alone, never from the address.
-       What it was given is read from the same table as a device's, under `person:<email>`. */
-    const base = person ? '/m/api' : '/c/api';
-    if (!url.pathname.startsWith(`${base}/`)) return false;
+    if (!url.pathname.startsWith('/c/api/')) return false;
     /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
-    const named = person ? null : /^\/([0-9a-f-]{36})(\/.*)$/.exec(url.pathname.slice(base.length));
-    const pairing = person ? person.key : named?.[1];
-    const route = named ? named[2] : url.pathname.slice(base.length);
-    const given_ = person ?? devices;
+    const named = /^\/([0-9a-f-]{36})(\/.*)$/.exec(url.pathname.slice('/c/api'.length));
+    const pairing = named?.[1];
+    const route = named ? named[2] : url.pathname.slice('/c/api'.length);
     const send = (status, body, extra = {}) => {
         response.writeHead(status, { ...headers, ...extra, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
         return true;
@@ -106,8 +101,7 @@ export async function handleDoor(request, response, { devices, conversations, re
     try {
         if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' });
 
-        /* ---- pairing: no session yet (never for a member: 404) ---- */
-        if (person && ['/pair', '/challenge', '/session', '/leave'].includes(route)) return send(404, { error: 'Not found.' });
+        /* ---- pairing: no session yet ---- */
         if (request.method === 'POST' && route === '/pair') return send(201, devices.pair(await readJson(request)));
         if (request.method === 'POST' && route === '/challenge') return send(200, devices.challenge(String((await readJson(request)).device ?? '')));
         if (request.method === 'POST' && route === '/session') {
@@ -117,21 +111,17 @@ export async function handleDoor(request, response, { devices, conversations, re
         }
 
         /* ---- everything else: a device session, and its one conversation ---- */
-        if (!person && devicePairing(devices, request.headers, pairing) === undefined) return send(401, { error: 'This device has no open session.' });
+        if (devicePairing(devices, request.headers, pairing) === undefined) return send(401, { error: 'This device has no open session.' });
         /* What this pairing was given: conversations to use, and things of its own to read or write. */
-        const given = given_.grantsOf(pairing);
+        const given = devices.grantsOf(pairing);
         const names = given.filter((g) => g.type === 'conversation').map((g) => g.name);
         const own = given.filter((g) => g.type !== 'conversation').filter((g) => resources.get(g.name))
             .map((g) => ({ name: g.name, type: g.type, access: g.rights.includes('w') ? 'write' : 'read' }));
-        const name = person ? person.conversationOf(url.searchParams.get('c') ?? undefined) : deviceConversation(devices, request.headers, pairing, url.searchParams.get('c') ?? undefined);
+        const name = deviceConversation(devices, request.headers, pairing, url.searchParams.get('c') ?? undefined);
         const mine = name === undefined ? undefined : conversations.list().find((c) => c.name === name);
         /* The parts of that conversation this pairing was given. */
-        const rights = name === undefined ? '' : given_.rightsOn(pairing, name);
+        const rights = name === undefined ? '' : devices.rightsOn(pairing, name);
         const part = { terminal: rights.includes('x'), chat: rights.includes('r') ? (rights.includes('w') ? 'write' : 'read') : null };
-        /* A member, once a body is read: still let in, still given that right (audits 8 and 10). A device: as before. */
-        const stillMay = (right) => !person || (person.still() && given_.rightsOn(pairing, name).includes(right));
-        /* A member writing in a folder, once what it sends has come: still let in, still given it (audit 11). */
-        const writesStill = () => { if (person && !person.still()) throw new Refusal(403, 'This conversation is not shared with you any more.'); if (person && !given_.rightsOn(pairing, name).includes('x')) throw new Refusal(403, 'This conversation is not shared with you any more.'); };
         const need = (ok, what) => { if (!ok) throw new Refusal(403, `This device was not given ${what} of this conversation.`); };
         /* Its chat alone: what is reached through the conversation is only what its chat holds. */
         const chatOnly = mine !== undefined && !part.terminal;
@@ -193,38 +183,20 @@ export async function handleDoor(request, response, { devices, conversations, re
             if (request.method === 'GET' && talking[1] === '/search') return send(200, talk.search(name, url.searchParams.get('q') ?? ''));
             /* Reminding the tool and writing to it: a chat given to write in. Nothing else (turning it on, inviting the tool) is a device's. */
             if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind' || talking[1] === '/file' || talking[1] === '/react')) need(part.chat === 'write', 'the chat to write in');
-            /* A reaction or an answer to a question reaches the tool as its owner's choice: not a member's (audit 6). */
-            if (person && request.method === 'POST' && talking[1] === '/react') throw new Refusal(403, 'A member writes; it does not react for the owner.');
             if (request.method === 'POST' && talking[1] === '/react') { const body = await readJson(request); return send(200, await talk.react(name, body.to, body.reaction ?? null)); }
             if (request.method === 'POST' && talking[1] === '/remind') return send(200, await talk.remind(name));
             if (request.method === 'POST' && talking[1] === '/file') {
                 if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An attachment is a file.' });
-                const attached = await talk.attach(name, url.searchParams.get('name') ?? '', request);
-                /* A member disabled while its file came: not given back to it (audit 10). */
-                if (!stillMay('w')) throw new Refusal(403, 'This conversation is not shared with you any more.');
-                return send(201, attached);
+                return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
             }
-            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request);
-                /* Its right looked at again once the message is read: taken back meanwhile, nothing said (audit 8). */
-                if (!stillMay('w')) throw new Refusal(403, 'This conversation is not shared with you any more.'); if (part.terminal && signinCode && conversations.signinHelp?.codeInChat(name, body.text, body.files)) return send(201, { ...(await signinCode(name, body.text)), told: 'signin' }); /* A member's words (#419): said as theirs, so that the tool never takes them for its owner's. */
-                if (person) {
-                    /* Every word of a member said as a member's: its text (a line of its own starting "[" cannot pass for
-                       another mark), the notes of its files; no answer to a question, no way through (audit 6). */
-                    const mark = `[${person.email}, a member]`;
-                    const clean = (t) => String(t ?? '').replace(/[\u200B-\u200F\u2060\uFEFF]/g, '').replace(/[[\uFF3B]/g, '(');
-                    const files = Array.isArray(body.files) ? body.files.map((f) => (f && typeof f === 'object' ? { ...f, note: `${mark} ${clean(f.note)}`.trim() } : f)) : body.files;
-                    return send(201, await talk.say(name, `${mark} ${clean(body.text)}`.trim(), undefined, files, undefined, { quick: false }));
-                }
-                return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); if (part.terminal && signinCode && conversations.signinHelp?.codeInChat(name, body.text, body.files)) return send(201, { ...(await signinCode(name, body.text)), told: 'signin' }); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
         }
         /* A sign-in code (#405): a device given its terminal could type it there; no other. Named twice, never guessed. */
         const codeFor = /^\/conversations\/([^/]+)\/signin-code$/.exec(route);
         if (request.method === 'POST' && codeFor && signinCode) {
             need(part.terminal, 'the terminal');
             if (decodeURIComponent(codeFor[1]) !== name) throw new Refusal(403, 'This device was not given the terminal of this conversation.');
-            const code = (await readJson(request)).code;
-            if (!stillMay('x')) throw new Refusal(403, 'This conversation is not shared with you any more.');
-            return send(200, await signinCode(name, code));
+            return send(200, await signinCode(name, (await readJson(request)).code));
         }
         /* Its terminal does not come: only a device given it asks for it to be repaired. */
         if (request.method === 'POST' && route === '/terminal/repair') { need(part.terminal, 'the terminal'); return send(200, await repair(name)); }
@@ -256,7 +228,7 @@ export async function handleDoor(request, response, { devices, conversations, re
         }
         /* A mail cited by its reference (mailref.mjs): only a mailbox this device was given to read. */
         if (request.method === 'GET' && (route === '/mail/open' || route === '/mail/page')) {
-            return await mailRoute(route, url.searchParams, response, { tethers, headers, who: person ? { id: `person:${person.email}`, name: person.email } : { id: `pairing:${pairing}`, name: 'A device' }, may: (t) => deviceMayRead(t, own, mailboxes), offline: mine?.offline === true });
+            return await mailRoute(route, url.searchParams, response, { tethers, headers, who: { id: `pairing:${pairing}`, name: 'A device' }, may: (t) => deviceMayRead(t, own, mailboxes), offline: mine?.offline === true });
         }
         if (request.method === 'GET' && route === '/files/download') {
             const file = await download(attached('read', 'open'), url.searchParams.get('p') ?? '');
@@ -268,13 +240,13 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'POST' && route === '/files/import') {
             if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An import is a file.' });
             return send(201, await importFile(attached('write'), url.searchParams.get('p') ?? '', url.searchParams.get('name') ?? '', request,
-                { exists: url.searchParams.get('exists') ?? 'keep', dir: url.searchParams.get('dir') ?? '', batch: url.searchParams.get('batch') ?? undefined, ok: writesStill }));
+                { exists: url.searchParams.get('exists') ?? 'keep', dir: url.searchParams.get('dir') ?? '', batch: url.searchParams.get('batch') ?? undefined }));
         }
         /* Thumbnails, editing, making, renaming, moving, removing: as listing
            and importing are. A device given the chat alone has none of them
            (`attached` refuses all but opening a file of the chat). */
         /* A thumbnail is the file read, as opening it is: a device given the chat alone sees the pictures of its chat. */
-        const answer = await changeRoute(request.method, route, url.searchParams, request, (need) => { if (need === 'write') writesStill(); return attached(need, route === '/files/thumb' ? 'open' : undefined); }, writesStill);
+        const answer = await changeRoute(request.method, route, url.searchParams, request, (need) => attached(need, route === '/files/thumb' ? 'open' : undefined));
         if (answer?.picture) {
             response.writeHead(200, { ...headers, ...IMAGE_HEADERS, 'content-type': answer.picture.type, 'content-length': answer.picture.bytes.length });
             response.end(answer.picture.bytes);

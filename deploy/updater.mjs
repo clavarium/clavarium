@@ -666,15 +666,6 @@ export class Updater {
         const live = busy.filter((c) => !stale.includes(c));
         return live.length ? `a machine is being built or restarted (${names(live)}): the update waits` : '';
     }
-    /* MEMBERS AND AN OLDER RELEASE (#419). A release from before accounts and rights takes every account for an
-       administrator: once accounts and rights were used here (people.json written, at the first member), going back to
-       one is refused, by hand and by the watchdog -- as for a release that cannot read the data. Undefined: allowed. */
-    #membersBlock(to) {
-        /* A release that reads the lists of today (0.2.526-next.1 wrote another form: refused too). */
-        try { if (readFileSync(join(to.app, 'server', 'people.mjs'), 'utf8').includes('export const PEOPLE_LISTS')) return undefined; } catch { /* none: from before accounts */ }
-        const file = join(this.#o.data, 'people.json');
-        return existsSync(file) || existsSync(`${file}.bak`) ? `${to.version} does not know these members: it would not read who is an administrator` : undefined;
-    }
     #dataFormat() { try { return JSON.parse(readFileSync(join(this.#o.data, 'data-format.json'), 'utf8')).format; } catch { return undefined; } }
 
     #lock() {
@@ -710,9 +701,6 @@ export class Updater {
                 this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: error.message, ...(fetched ? { fetch: true } : {}), ...(typeof error.log === 'string' && error.log ? { log: error.log.slice(-LOG_MAX) } : {}) });
                 throw error;
             }
-            /* Members here, and a release that would not read them (a newer number cut without them, say): not installed. */
-            const blocked = this.#membersBlock(release);
-            if (blocked) { rmSync(release.dir, { recursive: true, force: true }); this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: blocked }); throw new Refused(blocked); }
             const before = this.#dataFormat();
             let archive;
             try {
@@ -754,7 +742,6 @@ export class Updater {
         if (to.current) throw new Refused(`${id} is the release that runs`);
         const format = this.#dataFormat();
         if (format !== undefined && to.dataFormat < format) throw new Refused(`${to.version} cannot read the data of this version (format ${format}; it reads ${to.dataFormat})`);
-        const members = this.#membersBlock(to); if (members) throw new Refused(members);
         const why = await this.busy(); if (why) throw new Refused(why);
         const unlock = this.#lock();
         try {
@@ -883,7 +870,7 @@ export class Updater {
             const recent = failed && current && last && last.action === 'update' && last.result === 'done' && last.to === current.version && now - new Date(last.at) < WATCH_RECENT_MS;
             const previous = recent ? this.releases().find((r) => !r.current && r.version === last.from) : undefined;
             const format = this.#dataFormat();
-            if (previous && (format === undefined || previous.dataFormat >= format) && !this.#membersBlock(previous)) {
+            if (previous && (format === undefined || previous.dataFormat >= format)) {
                 let why = `${current.version} did not stay up (its service ${state === 'active' ? 'did not answer' : `was ${state}`}) nor came back after a restart (${failed}): back to ${previous.version}`;
                 this.#o.log(`watchdog: ${why}`);
                 this.#step('update', current.version, 'Going back');

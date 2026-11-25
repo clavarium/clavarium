@@ -46,10 +46,7 @@ export class Operators {
         const r = await this.#host(['operator', 'list']);
         if (r.code !== 0) throw new Refusal(502, `Who may sign in could not be read: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         const read = String(r.stdout).split('\n').map((l) => l.split('\t')).filter(([e, s]) => EMAIL.test(e ?? '') && ['enabled', 'disabled'].includes(s));
-        const before = JSON.stringify(this.#list);
         if (read.length) this.#list = read.map(([email, state]) => ({ email, enabled: state === 'enabled' }));
-        /* Changed outside the page (the host program): whoever lost their place loses their terminals at once (#419). */
-        if (JSON.stringify(this.#list) !== before) { try { this.onChanged?.(); } catch { /* the minute's recheck sees it */ } }
         return this.list();
     }
     async #do(argv, input) {
@@ -74,29 +71,9 @@ export class Operators {
         await this.#do(['operator', 'password', e], `${password}\n`);
         return { email: e, password };
     }
-    /* The last administrator stays (people.mjs): `lastAdmin(email)` says whether it is that one. */
-    #lastAdmin = () => false;
-    useLastAdmin(fn) { this.#lastAdmin = fn; }
-    #keep(email) { if (this.#lastAdmin(email)) throw new Refusal(409, 'The last administrator cannot be disabled or removed.'); }
-    /* Disabled or removed now: not counted as an administrator from the check on, so that two of them taking each
-       other out at once cannot leave none (audit 6, 24-11). One at a time, too. */
-    leaving = new Set();
-    #turn = Promise.resolve();
-    #leave(email, verb) {
-        const e = this.#email(email);
-        const go = async () => {
-            this.#keep(e);
-            this.leaving.add(e);
-            try { await this.#do(['operator', verb, e]); } finally { this.leaving.delete(e); }
-            this.#unlock(e);
-            return this.list();
-        };
-        const p = this.#turn.then(go, go); this.#turn = p.catch(() => {});
-        return p;
-    }
-    async disable(email) { return this.#leave(email, 'disable'); }
+    async disable(email) { await this.#do(['operator', 'disable', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
     async enable(email) { await this.#do(['operator', 'enable', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
-    async remove(email) { return this.#leave(email, 'remove'); }
+    async remove(email) { await this.#do(['operator', 'remove', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
     #unlock(email) { const locks = { ...(this.#store.get('locks') ?? {}) }; delete locks[email]; this.#store.put({ name: 'locks', ...locks }); }
 
     /* At each turn: too many failed sign-ins lock an address for a while; a lock that is over is lifted. */
@@ -114,7 +91,7 @@ export class Operators {
                 if (Number(n) < FAILS_MAX || locks[email]) continue;
                 const one = this.#list.find((o) => o.email === email && o.enabled);
                 if (!one) continue;
-                if (this.allowed().length === 1 || this.#lastAdmin(email)) {
+                if (this.allowed().length === 1) {
                     if (this.#said.get(email) !== 'last') { this.#said.set(email, 'last'); this.#tell(`${n} failed sign-ins as ${email}`, 'It is the last operator: not locked out. Change its password if this was not you.'); }
                     continue;
                 }

@@ -90,9 +90,7 @@ export const sameOrigin = makeOriginCheck();
 const BY_ITSELF = /\x1b\[[IO]|\x1b\[\??[>=]?[\d;]*c|\x1b\[\d+;\d+R|\x1b\][\d;]*(?:rgb:[0-9a-fA-F/]+)?(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
 export const byHand = (typed) => String(typed ?? '').replace(BY_ITSELF, '').length > 0;
 
-export const MEMBER_PATH = '/m/terminal';
-
-export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, memberName = () => undefined, onRejoin = () => {}, onTyped = () => {}, asleep = () => false }) {
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {}, onTyped = () => {}, asleep = () => false }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
     /* THE DEVICES AT A TERMINAL, each with what lets it stay: asked again when the owner changes
@@ -100,8 +98,6 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
        back used to end only at the next connection -- an open terminal went on (found 19-10). */
     const deviceSeats = new Map();      /* viewer -> () => still allowed */
     const revoked = new WeakSet();
-    /* Who a screen is, for What happened: a paired device, a member (#419), else the page of an administrator. */
-    const fromDevice = new WeakSet(); const fromMember = new WeakSet();
     const allowed = (viewer) => {
         if (revoked.has(viewer)) return false;
         const still = deviceSeats.get(viewer);
@@ -124,18 +120,9 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             name = ask();
             if (!isConversationName(name) || !originOk(request.headers)) { socket.destroy(); return; }
             still = () => ask() === name;
-        } else if (url.pathname === MEMBER_PATH) {
-            /* A member (people.mjs, #419): the sign-in names it; the terminal of a conversation it was given, only. */
-            const wanted = url.searchParams.get('c') ?? '';
-            const ask = () => memberName(request.headers, wanted) ?? '';
-            name = ask();
-            if (!isConversationName(name) || !originOk(request.headers)) { socket.destroy(); return; }
-            still = () => ask() === name;
         } else if (url.pathname === PATH) {
             name = url.searchParams.get('c') ?? '';
             if (!isConversationName(name) || !originOk(request.headers) || gate(request.headers) === undefined) { socket.destroy(); return; }
-            /* An administrator made a member, or an account disabled: its open terminals end too (#419). */
-            still = () => gate(request.headers) !== undefined;
         } else return;
         const cols = Number(url.searchParams.get('cols'));
         const rows = Number(url.searchParams.get('rows'));
@@ -143,7 +130,6 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         const resume = url.searchParams.get('resume') === '1';
         sockets.handleUpgrade(request, socket, head, (viewer) => {
             if (still) { deviceSeats.set(viewer, still); viewer.on('close', () => deviceSeats.delete(viewer)); }
-            if (url.pathname === DEVICE_PATH) fromDevice.add(viewer); else if (url.pathname === MEMBER_PATH) fromMember.add(viewer);
             seat(viewer, name, within(cols, COLS) ? cols : 80, within(rows, ROWS) ? rows : 24, resume);
         });
     });
@@ -200,7 +186,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
     }
     async function openNow(name, cols, rows, sink, say) {
         /* Who opens it, for What happened when it wakes a sleeper: a screen, or this server (warm). */
-        const who = sink ? (fromDevice.has(sink) ? 'a paired device' : fromMember.has(sink) ? 'a member' : 'a page') : undefined;
+        const who = sink ? (deviceSeats.has(sink) ? 'a paired device' : 'a page') : undefined;
         const terminal = await spawn(name, cols, rows, say, who);
         /* While it was being opened another one may have been: the newest wins. */
         if (live.has(name)) close(name);

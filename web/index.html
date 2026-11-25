@@ -1163,10 +1163,10 @@
         <section class="settings-group" id="settings-group-access" data-group="access" role="tabpanel" aria-label="Access">
         <!-- WHO MAY SIGN IN (server/operators.mjs): hidden on this machine alone. -->
         <details class="chapter" id="settings-ch-operators" data-chapter="s-operators" hidden>
-          <summary><span class="chapter-title" data-said="set-ch-s-operators">Accounts</span><span class="chapter-about" data-said="set-ch-s-operators-about">Who signs in, and what they see.</span></summary>
+          <summary><span class="chapter-title" data-said="set-ch-s-operators">Administrators</span><span class="chapter-about">Who may sign in.</span></summary>
           <div class="chapter-body">
         <div id="operators-rows"></div>
-        <form id="operators-new" class="set-row" autocomplete="off"><div class="set-what"><label for="operators-email" data-said="set-add-account">Add an account</label><small>Email address</small><small class="tip" hidden>Locked 15 min after 5 failures. The last administrator is never locked or removed.</small></div><div class="set-control"><input id="operators-email" type="email" placeholder="someone@example.com" spellcheck="false" autocapitalize="off" required><select id="operators-role" aria-label="Role of the new account"><option value="member" data-said="set-role-member">Member</option><option value="admin" data-said="set-role-admin">Administrator</option></select><button type="submit">Add</button></div></form>
+        <form id="operators-new" class="set-row" autocomplete="off"><div class="set-what"><label for="operators-email">Add an administrator</label><small>Email address</small><small class="tip" hidden>Locked 15 min after 5 failures. The last administrator is never locked or removed.</small></div><div class="set-control"><input id="operators-email" type="email" placeholder="someone@example.com" spellcheck="false" autocapitalize="off" required><button type="submit">Add</button></div></form>
         <div id="operators-password" class="as-form" hidden><p><b id="operators-password-for"></b>: its password, shown <b>this once</b>. Give it to them yourself.</p><div class="row"><input id="operators-password-value" readonly spellcheck="false"><button type="button" id="operators-password-copy">Copy</button><button type="button" id="operators-password-done">Done</button></div></div>
         <p class="error" id="operators-error" role="alert" hidden></p>
           </div>
