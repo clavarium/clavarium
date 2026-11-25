@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 /* MULTIPASS UPDATED IN CLAVARIUM'S OWN WINDOW (23-11, its owner's ask, after a morning on a real server: snap
  * updated Multipass by itself at 06:08, every machine was left suspended, nothing could be reached).
  *
@@ -16,6 +17,8 @@ const BACK_TRIES = 36;
 const BACK_EVERY_MS = 5_000;
 export const TRY_EVERY_MS = 20 * 3600_000;
 /* In the data folder while it runs: the server's watch leaves Multipass alone (vmwatch.mjs, `paused`). */
+/* Its daemon stopped, its old dnsmasq ended, systemd's failed starts reset, started (multipass-unstick.sh, 25-11). */
+export const UNSTICK = fileURLToPath(new URL('multipass-unstick.sh', import.meta.url));
 export const MULTIPASS_UPDATING = 'multipass-updating';
 
 const first = (r) => String(r?.stderr || r?.stdout || '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) || `exit ${r?.code}`;
@@ -68,7 +71,7 @@ export async function multipassTurn({ run, mode, inWindow, busy, state, save, lo
         for (const [what, argv] of steps) {
             log(`multipass: it does not answer: ${what}`);
             if (argv) await sh(argv, REFRESH_MS);
-            else { await sh(['snap', 'stop', 'multipass.multipassd'], SNAP_MS); await sh(['pkill', '-KILL', '-x', 'multipassd'], 30_000); await sleep(2_000); await sh(['snap', 'start', 'multipass.multipassd'], SNAP_MS); }
+            else await sh(['bash', UNSTICK], 300_000);
             if (await answers()) { log(`multipass: it answers again (${what})`); return true; }
         }
         return false;
