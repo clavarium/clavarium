@@ -253,3 +253,12 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 video.explainer-video{display:block;width:100%;aspect-ratio:16/9;border:1px solid var(--line);border-radius:14px;background:var(--card,#fff)}
 /* Only the site's own play button before the film starts (Chrome on Android adds its own big one). */
 .explainer-video::-webkit-media-controls-start-playback-button,.explainer-video::-webkit-media-controls-overlay-play-button{display:none!important;-webkit-appearance:none}
+.explainer{max-width:880px;margin-left:auto;margin-right:auto}
+.explainer .sec{text-align:left}
+.playbtn.explainer-btn{inset:auto auto 7% 6%;margin:0;width:auto;height:auto;padding:.7em 1.2em;border-radius:999px;font:700 1.05rem/1 inherit;font-family:inherit;display:flex;gap:.5em;align-items:center;background:var(--f,#2c6e5a);color:var(--on,#fff);box-shadow:0 4px 18px rgba(0,0,0,.18)}
+.playbtn.explainer-btn .dur{font-weight:500;opacity:.85}
+@media (max-width:520px){.playbtn.explainer-btn{font-size:.9rem;padding:.55em 1em}}
+/* The explainer framed as a screen, like the demo films lower down: it reads as a video, not as part of the page. */
+.explainer-play{box-sizing:border-box;border:10px solid #15171a;border-radius:22px;background:#15171a;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+video.explainer-video{border:0;border-radius:12px}
+@media (max-width:520px){.explainer-play{border-width:6px;border-radius:16px}video.explainer-video{border-radius:10px}}
