@@ -18,7 +18,7 @@
  * server was installed with (`install`, its --operators) are the administrators and every other one a member --
  * never everybody locked out, never a member made an administrator. It is said, loudly.
  */
-import { readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Refusal } from './conversations.mjs';
 
@@ -103,11 +103,18 @@ export class People {
     }
     /* An account ABOUT TO BE added, its role said first: never an administrator for a moment by mistake, and an
        account removed then added again does not come back as it was. */
+    /* Returns what puts it back as it was, when the account could not be added after all (audit 13): no file left
+       where there was none -- an owner without members keeps everything as before. */
     adding(email, role) {
         const e = low(email);
-        if (!ROLES.includes(role) || this.#damaged) return;
-        if (this.#lists === null && role === 'admin') return;
+        if (!ROLES.includes(role) || this.#damaged) return () => {};
+        if (this.#lists === null && role === 'admin') return () => {};
+        const before = this.#lists === null ? null : { admins: [...this.#lists.admins], members: [...this.#lists.members] };
         this.#seed(); this.#put(e, role); this.#save();
+        return () => {
+            if (before === null) { this.#lists = null; rmSync(this.#path, { force: true }); rmSync(`${this.#path}.bak`, { force: true }); return; }
+            this.#lists = before; this.#save();
+        };
     }
     /* An account removed: its role forgotten with it. */
     removed(email) {

@@ -278,14 +278,21 @@ test('only a member is given conversations, and only conversations; an account r
 
 test('a new account comes as a member unless said otherwise, through the page too', async (t) => {
     const b = await bench(t);
-    const list = async () => (await (await b.as(OWNER, '/api/operators')).json());
-    assert.equal((await list()).defaultRole, 'member');
-    /* The host program of this bench says yes and lists nobody new: the role is what is checked. */
-    await b.as(OWNER, '/api/operators', { body: { email: 'new@example.com' } });
-    const lists = JSON.parse(readFileSync(join(b.dir, 'people.json'), 'utf8'));
-    assert.ok(lists.members.includes('new@example.com'), 'written as a member before it exists');
-    assert.deepEqual(lists.admins.sort(), [AUNT, KID, OWNER].sort(), 'the accounts there were stay administrators');
+    assert.equal((await (await b.as(OWNER, '/api/operators')).json()).defaultRole, 'member');
+    /* The host program of this bench says yes and lists nobody new: the add fails, and leaves nothing behind. */
+    assert.equal((await b.as(OWNER, '/api/operators', { body: { email: 'new@example.com' } })).status, 502);
+    assert.equal(existsSync(join(b.dir, 'people.json')), false, 'no member made: everything as before');
+    /* Its role said before it exists (People.adding, kept when the add goes through): */
+    const dir = mkdtempSync(join(tmpdir(), 'clv-people-'));
+    try {
+        const all = [{ email: OWNER }, { email: KID }];
+        const p = new People({ path: join(dir, 'people.json'), accounts: () => all });
+        p.adding('new@example.com', 'member'); all.push({ email: 'new@example.com' });
+        const lists = JSON.parse(readFileSync(join(dir, 'people.json'), 'utf8'));
+        assert.deepEqual([lists.admins, lists.members], [[OWNER, KID], ['new@example.com']]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
 
 test('the data format stays 1 (going back is not blocked); the 2 written by 0.2.527-next.1 is read as 1', async () => {
     const { migrateData, dataFormat, DATA_FORMAT } = await import('../server/dataformat.mjs');
@@ -447,4 +454,26 @@ test('audit 11-12: the form one dev build (0.2.526-next.1) wrote is not guessed:
     });
     assert.equal(r.status, 403, r.body);
     assert.equal(existsSync(join(b.dir, 'resources', 'photos', 'late.txt')), false);
+});
+
+test('audit 13: made an administrator, what it was given is forgotten (not back if it is a member again); an add that fails leaves no role and no file', async (t) => {
+    const b = await bench(t, { roles: { admins: [OWNER, AUNT], members: [KID] } });
+    await b.as(OWNER, `/api/operators/${KID}/give`, { body: { conversation: 'family', chat: 'write', terminal: true } });
+    await b.as(OWNER, `/api/operators/${KID}/role`, { body: { role: 'admin' } });
+    await b.as(OWNER, `/api/operators/${KID}/role`, { body: { role: 'member' } });
+    const kid = (await (await b.as(OWNER, '/api/operators')).json()).operators.find((o) => o.email === KID);
+    assert.deepEqual(kid.given, []);
+    const dir = mkdtempSync(join(tmpdir(), 'clv-people-'));
+    try {
+        const p = new People({ path: join(dir, 'people.json'), accounts: () => [{ email: OWNER }, { email: AUNT }] });
+        const undo = p.adding('new@example.com', 'member');
+        assert.ok(existsSync(join(dir, 'people.json')));
+        undo();
+        assert.equal(existsSync(join(dir, 'people.json')), false, 'an owner without members: as before');
+        assert.equal(p.roleOf('new@example.com'), 'admin', 'no list: everybody as before');
+        p.setRole(AUNT, 'member');
+        const undo2 = p.adding('other@example.com', 'admin');
+        undo2();
+        assert.deepEqual(JSON.parse(readFileSync(join(dir, 'people.json'), 'utf8')), { admins: [OWNER], members: [AUNT] });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
 });

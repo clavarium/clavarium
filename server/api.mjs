@@ -801,8 +801,9 @@ export async function handleApi(request, response, conversations, headers, resou
             if (team.list().some((o) => o.email === adding)) throw new Refusal(409, 'This account exists already.');
             /* Nothing of a past account of that address comes back with the new one. */
             team.grants?.forgetSubject(`person:${adding}`);
-            team.people?.adding(adding, role);
-            const made = await team.add(body.email);
+            const undo = team.people?.adding(adding, role);
+            let made;
+            try { made = await team.add(body.email); } catch (error) { undo?.(); throw error; }
             return send(201, { ...made, role: team.people?.roleOf(made.email) ?? 'admin' }), true;
         }
         /* An account made an administrator or a member (#419): never oneself, never the last administrator. */
@@ -810,7 +811,10 @@ export async function handleApi(request, response, conversations, headers, resou
         if (roleOf && team?.people) {
             const email = decodeURIComponent(roleOf[1]).trim().toLowerCase();
             if (email === identity) throw new Refusal(409, 'You cannot change your own role: ask another administrator.');
-            return send(200, { operators: team.people.setRole(email, String(body.role ?? '')) }), true;
+            const changed = team.people.setRole(email, String(body.role ?? ''));
+            /* Made an administrator: what it was given as a member is forgotten, not given back if it is a member again (audit 13). */
+            if (team.people.roleOf(email) === 'admin') team.grants?.forgetSubject(`person:${email}`);
+            return send(200, { operators: changed }), true;
         }
         /* A conversation given to a member, or taken back: its chat (read or write) and/or its terminal (#419). */
         const giving = /^\/api\/operators\/([^/]{3,200})\/(give|take)$/.exec(pathname);
