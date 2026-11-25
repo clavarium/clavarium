@@ -251,3 +251,5 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 .explainer{margin-top:8px}
 .explainer-play{max-width:880px}
 video.explainer-video{display:block;width:100%;aspect-ratio:16/9;border:1px solid var(--line);border-radius:14px;background:var(--card,#fff)}
+/* Only the site's own play button before the film starts (Chrome on Android adds its own big one). */
+.explainer-video::-webkit-media-controls-start-playback-button,.explainer-video::-webkit-media-controls-overlay-play-button{display:none!important;-webkit-appearance:none}

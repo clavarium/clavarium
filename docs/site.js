@@ -98,7 +98,7 @@
 document.querySelectorAll('.play').forEach(function (box) {
   var v = box.querySelector('video'), b = box.querySelector('.playbtn');
   if (!v || !b) return;
-  b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
+  b.addEventListener('click', function () { box.classList.add('on'); v.controls = true; v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
 });
 
