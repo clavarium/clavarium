@@ -56,14 +56,14 @@ export async function multipassTurn({ run, mode, inWindow, busy, state, save, lo
 
     const answers = async () => { for (let i = 0; i < BACK_TRIES; i += 1) { if ((await sh([multipass, 'list', '--format', 'json'], 30_000)).code === 0) return true; await sleep(BACK_EVERY_MS); } return false; };
     /* MUTE AFTER ITS UPDATE (25-11, on a real server: four machines started, then its daemon died and stayed mute for
-       three hours). Not waited for: its daemon restarted, then stopped and started for sure, then -- right after its
-       own update -- snap's previous revision of it put back. Each step said. True once it answers. */
-    const rescue = async ({ updated }) => {
+       three hours). Not waited for: its daemon restarted, then stopped and started for sure; each step said. Its
+       previous version is never put back by itself (its owner's choice: it may not read what the new one wrote).
+       Still mute: the server's watch tries again every 10 minutes and says so. True once it answers. */
+    const rescue = async () => {
         if (await answers()) return true;
         const steps = [
             ['its daemon is restarted', ['snap', 'restart', 'multipass.multipassd']],
             ['its daemon is stopped and started for sure', null],
-            ...(updated ? [['its previous version is put back', ['snap', 'revert', 'multipass']]] : []),
         ];
         for (const [what, argv] of steps) {
             log(`multipass: it does not answer: ${what}`);
@@ -74,8 +74,8 @@ export async function multipassTurn({ run, mode, inWindow, busy, state, save, lo
         return false;
     };
     /* Started again; what could not be stays written down, for the next turn. */
-    const back = async (names, { updated = false } = {}) => {
-        if (!(await rescue({ updated }))) { log('multipass: it still does not answer: its machines are started at the next turn; the server\'s watch keeps trying'); return names; }
+    const back = async (names) => {
+        if (!(await rescue())) { log('multipass: it still does not answer: its machines are started at the next turn; the server\'s watch keeps trying'); return names; }
         const left = [];
         for (const name of names) {
             let r = await sh([multipass, 'start', name], MACHINE_MS);
@@ -83,7 +83,7 @@ export async function multipassTurn({ run, mode, inWindow, busy, state, save, lo
             if (r.code !== 0) {
                 /* It died while they were started (25-11): rescued, then this one tried once more. */
                 const mute = (await sh([multipass, 'list', '--format', 'json'], 30_000)).code !== 0;
-                if (mute && await rescue({ updated })) r = await sh([multipass, 'start', name], MACHINE_MS);
+                if (mute && await rescue()) r = await sh([multipass, 'start', name], MACHINE_MS);
                 if (r.code !== 0) { left.push(name); log(`multipass: ${name} could not be started again: ${first(r)}`); }
             }
         }
@@ -92,9 +92,7 @@ export async function multipassTurn({ run, mode, inWindow, busy, state, save, lo
 
     const pending = state().multipassRefresh?.machines ?? [];
     if (pending.length) {
-        /* Its own update lately (a day): putting its previous version back is still one of the ways. */
-        const lately = Date.parse(state().multipassRefresh?.triedAt ?? '');
-        const left = await back(pending, { updated: Number.isFinite(lately) && now() - lately < 86_400_000 });
+        const left = await back(pending);
         save({ multipassRefresh: { ...state().multipassRefresh, machines: left } });
         if (left.length) return `${left.length} machine(s) still to start again`;
         log('multipass: the machines of the last update are running again');
@@ -128,7 +126,7 @@ export async function multipassTurn({ run, mode, inWindow, busy, state, save, lo
         /* --ignore-running: a client of Multipass still open (a terminal, a command) would make snap refuse (seen on a real machine); its machine is asleep. */
         const done = await sh(['snap', 'refresh', 'multipass', '--ignore-running'], REFRESH_MS);
         log(done.code === 0 ? 'multipass: updated' : `multipass: its update failed: ${first(done)}`);
-        const left = await back(running, { updated: done.code === 0 });
+        const left = await back(running);
         save({ multipassRefresh: { ...state().multipassRefresh, machines: left } });
         log(left.length ? `multipass: ${left.length} machine(s) to start again at the next turn` : 'multipass: its machines are running again');
         return done.code === 0 ? 'updated' : 'update failed';
