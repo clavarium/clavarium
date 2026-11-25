@@ -706,3 +706,24 @@ test('a version just out is installed by itself only once it has settled: since 
     await s.u.runOnce();
     assert.equal(s.current(), '1.0.4');
 });
+
+/* 25-11, on a test machine: frozen in the middle of an update, started again. */
+test('an update cut by the machine stopping: no longer "under way" at the next turn, written down as cut; a lock of an earlier start is not held, even if its number is taken', async (t) => {
+    let boot = 'boot-1';
+    const s = await setup(t, { bootId: () => boot });
+    await installed(s);
+    /* The state as it was left: under way, and a lock of that start with a number alive now (this test's). */
+    const state = JSON.parse(readFileSync(join(s.dirs.stateDir, 'state.json'), 'utf8'));
+    writeFileSync(join(s.dirs.stateDir, 'state.json'), JSON.stringify({ ...state, running: { action: 'prepare', version: '1.0.1', step: 'Fetching', since: '2026-11-25T07:19:01Z' } }));
+    writeFileSync(join(s.dirs.stateDir, 'lock'), `${process.pid} boot-0`);
+    assert.equal(s.u.about().running?.step, 'Fetching');
+    assert.equal(s.u.clearCut(), true);
+    assert.equal(s.u.about().running, null);
+    assert.match(s.u.about().history[0].why, /cut at "Fetching": the machine stopped/);
+    /* A lock of this start, alive: really under way, kept. */
+    writeFileSync(join(s.dirs.stateDir, 'state.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(s.dirs.stateDir, 'state.json'), 'utf8')), running: { action: 'update', version: '1.0.1', step: 'Backing up' } }));
+    writeFileSync(join(s.dirs.stateDir, 'lock'), `${process.pid} boot-1`);
+    assert.equal(s.u.clearCut(), false);
+    assert.equal(s.u.about().running?.step, 'Backing up');
+    rmSync(join(s.dirs.stateDir, 'lock'));
+});
