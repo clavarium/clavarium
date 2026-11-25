@@ -78,3 +78,21 @@ test('every setup offered for download is one the import reads', async () => {
         assert.ok(doc.nodes.filter((n) => n.kind === 'conversation').every((n) => tools.some((t) => t.id === n.tool)), `${f}: an agent on a tool Clavarium does not have`);
     }
 });
+
+/* ONE FOOTER, ONE HEADER (25-11): written into each page (read without a script, by search engines too), the same
+   everywhere -- the install page alone without the install line, which the whole page is about. */
+test('every page has the same header and the same footer (the install page: without the install line)', () => {
+    const top = (p) => /<header class="top">[\s\S]*?<\/header>/.exec(read(p))?.[0];
+    const foot = (p) => /<footer>[\s\S]*?<\/footer>/.exec(read(p))?.[0];
+    const pages = PAGES.filter((p) => !p.includes('/') && foot(p));
+    assert.ok(pages.length > 10, `${pages.length} pages with a footer`);
+    const ref = foot('index.html');
+    const refTop = top('index.html');
+    assert.match(ref, /install\.sh \| sudo bash/);
+    for (const p of pages) {
+        const f = foot(p);
+        if (p === 'install.html') assert.equal(f, ref.replace(/ {4}<p class="cmd-label">[\s\S]*?<\/div>\n(?= {4}<div class="meta">)/, ''), p);
+        else assert.equal(f, ref, p);
+        assert.equal(top(p), refTop, `${p}: its header`);
+    }
+});
