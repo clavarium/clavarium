@@ -262,3 +262,4 @@ video.explainer-video{display:block;width:100%;aspect-ratio:16/9;border:1px soli
 .explainer-play{box-sizing:border-box;border:10px solid #15171a;border-radius:22px;background:#15171a;box-shadow:0 10px 30px rgba(0,0,0,.18)}
 video.explainer-video{border:0;border-radius:12px}
 @media (max-width:520px){.explainer-play{border-width:6px;border-radius:16px}video.explainer-video{border-radius:10px}}
+.explainer{margin-bottom:clamp(40px,7vw,72px)}
