@@ -601,6 +601,12 @@ test('server logs / restart: a source and a span from fixed lists only', () => {
     assert.match(say('server', 'logs', 'machines', '24').stdout, /snap\.multipass\.multipassd\.service --since -24h/);
     for (const bad of [['clavarium', '2'], ['../x', '1'], ['clavarium', '1;id']]) assert.equal(say('server', 'logs', ...bad).status, 78, bad.join(' '));
     assert.equal(say('server', 'logs', 'clavarium').status, 64);
+    /* 25-11: the start before this one, a window, how many lines -- each from a fixed form only. */
+    assert.match(say('server', 'logs', 'machines', 'prev', '02:20', '02:45', '3000').stdout, /snap\.multipass\.multipassd\.service -b -1 --since 02:20 --until 02:45 -o short-iso --no-pager -q -n 3000/);
+    assert.match(say('server', 'logs', 'updates', '24', '2026-11-25 02:00', '-').stdout, /clavarium-update\.service -u clavarium-certificate\.service --since 2026-11-25 02:00 -o short-iso/);
+    assert.doesNotMatch(say('server', 'logs', 'updates', '24', '02:00', '-').stdout, /-24h/, 'a window replaces an hour span');
+    for (const bad of [['prev', '2:20', '-'], ['prev', '02:20;id', '-'], ['prev', '-', '-', '10'], ['prev', '-', '-', '99999'], ['prev', '-', '-', 'x']]) assert.equal(say('server', 'logs', 'machines', ...bad).status, 78, bad.join(' '));
+    assert.equal(say('server', 'logs', 'machines', 'prev', '-', '-', '100', 'more').status, 64);
     assert.match(say('server', 'restart').stdout, /systemctl restart clavarium\.service/);
     assert.equal(say('server', 'restart', 'now').status, 64);
     assert.match(say('server', 'reboot').stdout, /systemctl reboot/);

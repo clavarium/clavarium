@@ -108,16 +108,43 @@ document.querySelectorAll('.play').forEach(function (box) {
     var box = v.closest('.play');
     if (box) box.appendChild(n); else v.insertAdjacentElement('afterend', n);
   });
-  /* The changing words of the home subtitle: ONE pass of under 5 s, then they stay on the last ones, which is also
-     what shows without script or for people who ask for less motion. */
+  /* The changing words of the home subtitle: they go round and round (24-11, its owner's ask). As accessibility asks of
+     anything that moves for more than 5 s: they stop while the pointer or the focus is on them; a small button, shown on
+     hover or focus, pauses them for good, and on a phone a tap on the words does it, and nothing moves for people who ask for less motion. Without script, the last ones stay. */
   document.querySelectorAll('[data-rotate]').forEach(function (box) {
-    var words = box.children, last = words.length - 1, at = last;
+    var words = box.children, last = words.length - 1, at = last, timer = null, held = false, stopped = false;
     var fit = function () { box.style.width = words[at].getBoundingClientRect().width + 'px'; };
     var show = function (i) { words[at].classList.remove('on'); at = i; words[at].classList.add('on'); fit(); };
     fit();
     window.addEventListener('resize', fit);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
     if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var line = box.parentNode;
+    var pause = document.createElement('button');
+    pause.type = 'button'; pause.className = 'rot-pause'; pause.setAttribute('aria-pressed', 'false');
+    pause.setAttribute('aria-label', 'Pause the changing words'); pause.title = 'Pause';
+    pause.textContent = '\u275a\u275a';
+    line.appendChild(pause);
+    var tick = function () { if (!held && !stopped) show(at === last ? 0 : at + 1); };
+    var start = function () { if (!timer) timer = setInterval(tick, 2200); };
+    var toggle = function () {
+      stopped = !stopped;
+      pause.setAttribute('aria-pressed', String(stopped));
+      pause.setAttribute('aria-label', stopped ? 'Play the changing words' : 'Pause the changing words');
+      pause.title = stopped ? 'Play' : 'Pause';
+      pause.textContent = stopped ? '\u25b6' : '\u275a\u275a';
+      line.classList.toggle('rot-stopped', stopped);
+    };
+    pause.addEventListener('click', toggle);
+    /* On a phone, with no pointer to hover with: a tap on the changing words pauses them, or starts them again. */
+    box.addEventListener('click', toggle);
+    /* A pointer that can hover only: a tap on a phone also says "mouseenter", and nothing ever leaves after it. */
+    if (!window.matchMedia || matchMedia('(hover: hover)').matches) {
+      line.addEventListener('mouseenter', function () { held = true; });
+      line.addEventListener('mouseleave', function () { held = false; });
+    }
+    line.addEventListener('focusin', function () { held = true; });
+    line.addEventListener('focusout', function () { held = false; });
     show(0);
-    for (var i = 1; i <= last; i++) (function (n) { setTimeout(function () { show(n); }, n * 1600); })(i);
+    start();
   });

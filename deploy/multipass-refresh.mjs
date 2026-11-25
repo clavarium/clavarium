@@ -55,14 +55,37 @@ export async function multipassTurn({ run, mode, inWindow, busy, state, save, lo
     }
 
     const answers = async () => { for (let i = 0; i < BACK_TRIES; i += 1) { if ((await sh([multipass, 'list', '--format', 'json'], 30_000)).code === 0) return true; await sleep(BACK_EVERY_MS); } return false; };
+    /* MUTE AFTER ITS UPDATE (25-11, on a real server: four machines started, then its daemon died and stayed mute for
+       three hours). Not waited for: its daemon restarted, then stopped and started for sure; each step said. Its
+       previous version is never put back by itself (its owner's choice: it may not read what the new one wrote).
+       Still mute: the server's watch tries again every 10 minutes and says so. True once it answers. */
+    const rescue = async () => {
+        if (await answers()) return true;
+        const steps = [
+            ['its daemon is restarted', ['snap', 'restart', 'multipass.multipassd']],
+            ['its daemon is stopped and started for sure', null],
+        ];
+        for (const [what, argv] of steps) {
+            log(`multipass: it does not answer: ${what}`);
+            if (argv) await sh(argv, REFRESH_MS);
+            else { await sh(['snap', 'stop', 'multipass.multipassd'], SNAP_MS); await sh(['pkill', '-KILL', '-x', 'multipassd'], 30_000); await sleep(2_000); await sh(['snap', 'start', 'multipass.multipassd'], SNAP_MS); }
+            if (await answers()) { log(`multipass: it answers again (${what})`); return true; }
+        }
+        return false;
+    };
     /* Started again; what could not be stays written down, for the next turn. */
     const back = async (names) => {
-        if (!(await answers())) { log('multipass: it does not answer: its machines are started at the next turn'); return names; }
+        if (!(await rescue())) { log('multipass: it still does not answer: its machines are started at the next turn; the server\'s watch keeps trying'); return names; }
         const left = [];
         for (const name of names) {
             let r = await sh([multipass, 'start', name], MACHINE_MS);
             if (r.code !== 0) { await sleep(BACK_EVERY_MS); r = await sh([multipass, 'start', name], MACHINE_MS); }
-            if (r.code !== 0) { left.push(name); log(`multipass: ${name} could not be started again: ${first(r)}`); }
+            if (r.code !== 0) {
+                /* It died while they were started (25-11): rescued, then this one tried once more. */
+                const mute = (await sh([multipass, 'list', '--format', 'json'], 30_000)).code !== 0;
+                if (mute && await rescue()) r = await sh([multipass, 'start', name], MACHINE_MS);
+                if (r.code !== 0) { left.push(name); log(`multipass: ${name} could not be started again: ${first(r)}`); }
+            }
         }
         return left;
     };

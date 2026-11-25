@@ -15,7 +15,7 @@ function bench({ answers = true, hour = 3, mode } = {}) {
         if (argv[1] === 'start') return { code: host.noStart ? 1 : 0, stderr: 'no' };
         if (argv[1] === 'exec') { host.asked = (host.asked ?? 0) + 1; return { code: host.ghost?.includes(argv[2]) ? 1 : 0, stderr: 'no route' }; }
         if (argv[1] === 'halt') { host.ghost = (host.ghost ?? []).filter((n) => n !== argv[2]); return { code: 0 }; }
-        if (argv[1] === 'revive') { host.revive += 1; host.answers = true; return { code: 0 }; }
+        if (argv[1] === 'revive') { host.revive += 1; if (argv[2] === 'hard') host.hard = (host.hard ?? 0) + 1; if (!host.stayMute) host.answers = true; return { code: 0 }; }
         return { code: 64 };
     };
     const w = new VmWatch({ wait: async () => {}, run, store, now: () => clock, hour: () => host.hour, log: () => {}, alert: (p) => told.push(p) });
@@ -31,7 +31,7 @@ test('the VM manager answers: nothing done, nothing said', async () => {
     assert.equal(b.w.mode(), 'night', 'the default');
 });
 
-test('hung at night (the default): its daemon restarted once, recorded, the owner told; never again within hours', async () => {
+test('hung at night (the default): its daemon restarted, recorded, the owner told; mute again, tried again every 10 minutes, by force, up to six times in hours, then rarely (25-11)', async () => {
     const b = bench({ answers: false, hour: 3 });
     assert.equal(await b.w.look(), 'down');
     assert.equal(b.w.ok, false, 'the pages are told');
@@ -42,19 +42,24 @@ test('hung at night (the default): its daemon restarted once, recorded, the owne
     assert.equal(b.host.revive, 1);
     assert.match(b.w.last().why, /did not answer for 2 minutes/);
     assert.deepEqual([b.w.last().result, b.w.last().by], ['done', 'server']);
-    assert.deepEqual(b.told.map((x) => x.title), ['The machines could not be reached']);
+    assert.deepEqual(b.told.map((x) => x.title), ['The machines answer again']);
     assert.equal(await b.w.look(), 'ok');
-    /* Stuck again an hour later: said, not restarted again. */
-    b.host.answers = false;
-    b.later(60);
+    /* Mute again: not before 10 minutes after the last try, then by force; six tries, then once in hours. */
+    b.host.answers = false; b.host.stayMute = true;
     await b.w.look(); b.later(3);
-    assert.equal(await b.w.look(), 'down; restarted already');
-    assert.equal(b.host.revive, 1);
-    /* Hours later, it may be once more. */
+    assert.equal(await b.w.look(), 'down; restarted already', 'three minutes after the last try');
+    b.later(7);
+    assert.equal(await b.w.look(), 'revived');
+    assert.equal(b.host.revive, 2); assert.equal(b.host.hard, 1, 'by force from the second try');
+    assert.match(b.told.at(-1).title, /still cannot be reached/);
+    for (let n = 3; n <= 6; n += 1) { b.later(8); await b.w.look(); b.later(2); await b.w.look(); assert.equal(b.host.revive, n, `try ${n}`); }
+    b.later(8); await b.w.look(); b.later(2);
+    assert.equal(await b.w.look(), 'down; restarted already', 'six tries: then rarely');
     b.later(6 * 60);
     assert.equal(await b.w.look(), 'revived');
-    assert.equal(b.host.revive, 2);
+    assert.equal(b.host.revive, 7);
 });
+
 
 test('hung by day (night): its owner asked once, with the way to do it; restarted by hand, confirmed in the page', async () => {
     const b = bench({ answers: false, hour: 14 });

@@ -409,8 +409,9 @@ export class Updater {
     #o; #run; #fetch;
     constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, tunnelTarget = PATHS.tunnel, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
         verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, serviceState, answers, restarts, mainPid, pidCwd, diagnose, dropIn = DROP_IN,
+        bootId = () => { try { return readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch { return ''; } },
         clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000, noticeMs = NOTICE_MS, releaseSettleMs = RELEASE_SETTLE_MS } = {}) {
-        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, tunnelTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, noticeMs, releaseSettleMs, clock, sleep, dropIn };
+        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, tunnelTarget, registry: registry.replace(/\/$/, ''), now, log, bootId, minFreeMb, healthMs, watchMs, settleMs, noticeMs, releaseSettleMs, clock, sleep, dropIn };
         this.#run = run; this.#fetch = fetcher;
         this.verifySignatures = verifySignatures ?? ((dir) => this.#npm(['audit', 'signatures'], { cwd: dir, timeoutMs: 300_000 }));
         this.restart = restart ?? (() => this.#restart());
@@ -668,15 +669,35 @@ export class Updater {
     }
     #dataFormat() { try { return JSON.parse(readFileSync(join(this.#o.data, 'data-format.json'), 'utf8')).format; } catch { return undefined; } }
 
+    /* Whether the lock is held by a process alive now -- of THIS start of the machine (25-11, on a test machine: frozen
+       in the middle of an update, started again; its lock and its "under way" stayed, and a number taken by another
+       process after the start would have looked alive for ever). */
+    #lockHeld() {
+        let text = '';
+        try { text = readFileSync(join(this.#o.stateDir, 'lock'), 'utf8').trim(); } catch { return false; }
+        const [pidText, boot] = text.split(/\s+/);
+        const pid = Number(pidText) || 0;
+        if (boot && boot !== this.#o.bootId()) return false;
+        let alive = false; try { if (pid) { process.kill(pid, 0); alive = true; } } catch (e) { alive = e.code === 'EPERM'; }
+        return alive;
+    }
+    /* An update or a return cut by the machine stopping: no longer said "under way"; written down as cut. */
+    clearCut() {
+        const running = this.#state().running;
+        if (!running || this.#lockHeld()) return false;
+        this.#o.log(`${running.action} ${running.version}: cut at "${running.step}" (the machine stopped): no longer under way`);
+        this.#history({ action: running.action === 'back' ? 'back' : 'update', to: running.version ?? null, result: 'failed', why: `cut at "${running.step}": the machine stopped in the middle; nothing was switched` });
+        return true;
+    }
     #lock() {
         mkdirSync(this.#o.stateDir, { recursive: true, mode: 0o755 });
         const file = join(this.#o.stateDir, 'lock');
         for (let i = 0; i < 2; i += 1) {
-            try { const fd = openSync(file, 'wx'); writeFileSync(fd, String(process.pid)); closeSync(fd); return () => rmSync(file, { force: true }); } catch (error) {
+            try { const fd = openSync(file, 'wx'); writeFileSync(fd, `${process.pid} ${this.#o.bootId()}`); closeSync(fd); return () => rmSync(file, { force: true }); } catch (error) {
                 if (error.code !== 'EEXIST') throw error;
-                const pid = Number(readFileSync(file, 'utf8')) || 0;
+                const pid = Number(readFileSync(file, 'utf8').trim().split(/\s+/)[0]) || 0;
                 /* A lock left by a process that is gone (killed, the machine stopped) is taken over. */
-                let alive = false; try { if (pid) { process.kill(pid, 0); alive = true; } } catch (e) { alive = e.code === 'EPERM'; }
+                const alive = this.#lockHeld();
                 if (!alive) this.#o.log(`a stale lock (process ${pid || '?'} is gone): taken over`);
                 if (alive) throw new Refused('an update or an installation is running already');
                 rmSync(file, { force: true });
@@ -890,6 +911,7 @@ export class Updater {
 
     /* What the host program asked (a request file), or the timer's turn. */
     async runOnce() {
+        this.clearCut();
         const file = join(this.#o.stateDir, 'request');
         let request = '';
         try { request = readFileSync(file, 'utf8').trim(); rmSync(file, { force: true }); } catch { /* none */ }
@@ -1086,7 +1108,7 @@ async function main(argv) {
     const u = new Updater({ log: (line) => console.error(line) });
     const print = (x) => console.log(JSON.stringify(x, null, 2));
     switch (verb) {
-        case 'check': await u.check().catch(() => {}); return print(u.about());
+        case 'check': u.clearCut(); await u.check().catch(() => {}); return print(u.about());
         case 'status': return print(u.about());
         case 'run': {
             /* What this release sets up beside itself (the certificate timer), at its first turn: the

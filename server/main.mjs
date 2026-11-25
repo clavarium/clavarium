@@ -943,7 +943,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* What Clavarium does (jobs.mjs), as Settings shows it: the list without logs, one job with its log. */
         jobs: { list: () => withUpdates(all.jobs, all.list(), updates?.about().history ?? []), log: (id) => all.jobs.log(id) },
         /* Diagnostics (scope "diagnostics"): what Settings > Diagnostics > Load and Logs show. */
-        diagnostics: { load: () => serverLogs.load(), profile: (seconds) => serverLogs.profile(seconds), logs: (source, span) => serverLogs.start(source, span) },
+        diagnostics: { load: () => serverLogs.load(), profile: (seconds) => serverLogs.profile(seconds), logs: (source, span, how) => serverLogs.start(source, span, undefined, how) },
         /* A key's conversations (their chat, through talk.mjs): read as the page reads it; a message posted as the page
            posts one (its secrets lifted the same way), signed with the key's name. */
         chats: {

@@ -21,6 +21,11 @@ export const EVERY_MS = 60_000;
    has said nothing at all for this long: mute (30 s each) on three looks in a row. */
 export const STUCK_MS = 2 * 60_000;
 export const REVIVE_EVERY_MS = 6 * 3600_000;
+/* 25-11, on a real server: restarted once after an update of Multipass, it stayed mute for three hours -- one try was
+   not enough. While it stays mute: tried again every 10 minutes, a stronger restart from the second try, up to
+   SOON_TRIES; then every REVIVE_EVERY_MS. Each try said to its owner. */
+export const SOON_EVERY_MS = 10 * 60_000;
+export const SOON_TRIES = 6;
 /* After a cut, how long a machine is given to answer before it is restarted: 2 min. */
 export const ANSWER_TRIES = 5;
 export const ANSWER_EVERY_MS = 30_000;
@@ -100,10 +105,16 @@ export class VmWatch {
             return 'asked';
         }
         const before = this.#store.get('revive');
-        if (before?.at && this.#now() - Date.parse(before.at) < this.#reviveEveryMs) return 'down; restarted already';
-        this.#log(`vm manager: ${why}: its daemon is restarted, once`);
-        const result = await this.#revive(why, 'server');
-        this.#alert({ title: 'The machines could not be reached', body: `${why}: it was restarted (${result}).`, url: '/?open=settings&at=machines' });
+        /* Tries within the last REVIVE_EVERY_MS, mute all along or mute again: soon at first, then rarely -- never a loop. */
+        const tries = before?.at && this.#now() - Date.parse(before.at) < this.#reviveEveryMs ? (before.tries ?? 1) : 0;
+        const every = tries < SOON_TRIES ? SOON_EVERY_MS : this.#reviveEveryMs;
+        if (tries > 0 && before?.at && this.#now() - Date.parse(before.at) < every) return 'down; restarted already';
+        /* Mute again soon after a restart, or still mute: the stronger restart. */
+        const hard = tries >= 1;
+        this.#log(`vm manager: ${why}: its daemon is restarted${hard ? ', by force' : ''} (try ${tries + 1})`);
+        const result = await this.#revive(why, 'server', { hard, tries: tries + 1 });
+        const back = (await this.#run(['vm', 'ping'], { timeoutMs: PING_MS }).catch(() => ({ code: 1 }))).code === 0;
+        this.#alert({ title: back ? 'The machines answer again' : 'The machines still cannot be reached', body: `${why}: restarted${hard ? ' by force' : ''}, try ${tries + 1} (${result})${back ? '.' : `; tried again in ${Math.round((tries + 1 < SOON_TRIES ? SOON_EVERY_MS : this.#reviveEveryMs) / 60_000)} minutes. A restart of the whole server is the last resort.`}`, url: '/?open=settings&at=machines' });
         return result === 'done' ? 'revived' : 'revive failed';
     }
 
@@ -148,12 +159,12 @@ export class VmWatch {
         return this.about();
     }
 
-    #revive(why, by) {
+    #revive(why, by, { hard = false, tries = 1 } = {}) {
         this.#reviving = (async () => {
-            this.#store.put({ name: 'revive', at: new Date(this.#now()).toISOString(), why, result: null, by });
-            const done = await this.#run(['vm', 'revive'], { timeoutMs: 180_000 }).catch((e) => ({ code: 1, stderr: e.message }));
+            this.#store.put({ name: 'revive', at: new Date(this.#now()).toISOString(), why, result: null, by, tries });
+            const done = await this.#run(hard ? ['vm', 'revive', 'hard'] : ['vm', 'revive'], { timeoutMs: 240_000 }).catch((e) => ({ code: 1, stderr: e.message }));
             const result = done.code === 0 ? 'done' : `failed: ${said(done)}`;
-            this.#store.put({ name: 'revive', at: new Date(this.#now()).toISOString(), why, result, by });
+            this.#store.put({ name: 'revive', at: new Date(this.#now()).toISOString(), why, result, by, tries });
             this.#log(`vm manager: restart ${result}`);
             if (done.code === 0) { this.#store.remove?.('asked'); this.#downSince = null; }
             return result;
