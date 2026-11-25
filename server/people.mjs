@@ -23,14 +23,18 @@ import { dirname } from 'node:path';
 import { Refusal } from './conversations.mjs';
 
 export const ROLES = Object.freeze(['admin', 'member']);
+/* What deploy/updater.mjs looks for in a release before going back to it: it reads these lists (#419). */
+export const PEOPLE_LISTS = 1;
 const low = (e) => String(e ?? '').trim().toLowerCase();
 
 export class People {
     #path; #lists = null; #damaged = false; #accounts; #tell; #install; #changed = () => {};
     /* `accounts()`: every account there is, enabled or not ([{ email, enabled }], operators.mjs).
        `install`: the accounts the server was started with (--operators), the administrators of last resort. */
-    constructor({ path, accounts = () => [], tell = () => {}, install = [] }) {
-        this.#path = path; this.#accounts = accounts; this.#tell = tell; this.#install = install.map(low);
+    #leaving;
+    /* `leaving()`: the accounts being disabled or removed right now (operators.mjs), already not counted. */
+    constructor({ path, accounts = () => [], tell = () => {}, install = [], leaving = () => [] }) {
+        this.#path = path; this.#accounts = accounts; this.#tell = tell; this.#install = install.map(low); this.#leaving = leaving;
         mkdirSync(dirname(path), { recursive: true });
         this.#load();
     }
@@ -60,20 +64,17 @@ export class People {
     }
 
     #all() { return (this.#accounts() ?? []).map((a) => ({ email: low(a.email), enabled: a.enabled !== false })); }
-    /* Whether there are members at all (a file written). */
-    hasMembers() { return this.#lists !== null && this.#lists.members.length > 0; }
 
     /* 'admin' or 'member'. */
     roleOf(email) {
         const e = low(email);
         if (this.#all().length <= 1) return 'admin';
-        if (this.#damaged && this.#lists === null) return this.#install.includes(e) ? 'admin' : 'member';
+        if (this.#damaged) return this.#install.includes(e) ? 'admin' : 'member';
         if (this.#lists === null) return 'admin';
         return this.#lists.admins.includes(e) && !this.#lists.members.includes(e) ? 'admin' : 'member';
     }
-    damaged() { return this.#damaged; }
     /* The enabled administrators. */
-    admins() { return this.#all().filter((a) => a.enabled && this.roleOf(a.email) === 'admin').map((a) => a.email); }
+    admins() { const out = new Set([...this.#leaving()].map(low)); return this.#all().filter((a) => a.enabled && !out.has(a.email) && this.roleOf(a.email) === 'admin').map((a) => a.email); }
     /* Whether taking `email` out of the administrators (made a member, disabled, removed, locked out) leaves none. */
     isLastAdmin(email) {
         const e = low(email);
@@ -115,6 +116,17 @@ export class People {
         this.#lists.admins = this.#lists.admins.filter((x) => x !== e);
         this.#lists.members = this.#lists.members.filter((x) => x !== e);
         this.#save();
+    }
+    /* Accounts gone outside the page (the host program): their roles forgotten. Returns the addresses forgotten. */
+    prune() {
+        if (this.#lists === null || this.#damaged) return [];
+        const here = new Set(this.#all().map((a) => a.email));
+        if (here.size === 0) return [];
+        const gone = [...this.#lists.admins, ...this.#lists.members].filter((e) => !here.has(e));
+        if (!gone.length) return [];
+        this.#lists.admins = this.#lists.admins.filter((e) => here.has(e)); this.#lists.members = this.#lists.members.filter((e) => here.has(e));
+        this.#save();
+        return gone;
     }
     /* The role a new account gets when none is said: a member (24-11, its owner's choice); an administrator is ticked. */
     defaultRole() { return 'member'; }

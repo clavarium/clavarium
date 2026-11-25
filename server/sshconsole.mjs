@@ -41,6 +41,8 @@ const machineOf = (tethers, id) => {
 };
 
 export function attachConsole(server, { tethers, gate = () => 'local', originOk }) {
+    /* Each open console and whether it may stay: looked at again when a role changes (#419), not only every 30 s. */
+    const open = new Map();
     const sockets = new WebSocketServer({ noServer: true, maxPayload: KEYS_MAX });
     server.on('upgrade', (request, socket, head) => {
         const url = new URL(request.url ?? '/', 'http://local');
@@ -51,7 +53,9 @@ export function attachConsole(server, { tethers, gate = () => 'local', originOk 
         sockets.handleUpgrade(request, socket, head, (ws) => {
             /* Still an administrator (#419): made a member, disabled, removed -- the console ends at once. */
             const still = () => gate(request.headers) !== undefined;
-            const watch = setInterval(() => { if (!still()) { try { ws.close(4403, 'not allowed any more'); } catch { /* gone */ } } }, 30_000); watch.unref?.();
+            const look = () => { if (!still()) { try { ws.close(4403, 'not allowed any more'); } catch { /* gone */ } } };
+            const watch = setInterval(look, 30_000); watch.unref?.();
+            open.set(ws, look); ws.on('close', () => open.delete(ws));
             ws.on('close', () => clearInterval(watch));
             ws.on('message', () => { if (!still()) { try { ws.close(4403, 'not allowed any more'); } catch { /* gone */ } } });
             void seat(ws, target, whoOf(request.headers), { cols, rows }, still);
@@ -90,6 +94,8 @@ export function attachConsole(server, { tethers, gate = () => 'local', originOk 
             else if (m?.type === 'interrupt') handle.interrupt();
         });
     }
+    /* `recheck`: each open console looked at now (a role changed, #419). */
+    sockets.recheck = () => { for (const look of [...open.values()]) look(); };
     return sockets;
 }
 

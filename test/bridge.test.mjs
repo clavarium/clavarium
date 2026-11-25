@@ -283,3 +283,15 @@ test('a page that comes back by itself to a machine put to sleep does not wake i
     assert.equal(terminals.made.length, 2);
     asked.close();
 });
+
+test('an administrator made a member or disabled is put out of its open administrator terminal at once (#419)', async (t) => {
+    let admin = true;
+    const b = await bench(t, { gate: () => (admin ? 'aunt@example.com' : undefined) });
+    const ws = new WebSocket(`ws://${b.host}/terminal?c=demo`, { headers: { origin: `http://${b.host}` } });
+    await once(ws, 'open');
+    await b.until(() => b.terminals.made.length === 1);
+    admin = false;
+    const closed = once(ws, 'close');
+    b.bridge.recheck();
+    assert.equal((await closed)[0], CLOSE_REVOKED);
+});

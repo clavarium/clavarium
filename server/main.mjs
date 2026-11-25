@@ -274,12 +274,14 @@ function serve(port, conversations, resources, { gate = () => 'local', memberGat
         }
         /* Before anything else, static files included: see gate.mjs. */
         const who = gate(request.headers);
+        /* Looked at again once a body is read: one made a member or disabled meanwhile does nothing more (audit 8). */
+        request.stillAllowed = () => gate(request.headers) !== undefined;
         if (who === undefined) {
             /* A MEMBER (people.mjs, #419): its own door, and nothing else of this server -- not a page, not an API,
                not a file. A page it held from before (an administrator then) is told, and goes to its own. */
             const member = memberGate(request.headers);
             if (member !== undefined && door && personOf) {
-                if (await handleDoor(request, response, { ...door, person: personOf(member) })) return;
+                if (await handleDoor(request, response, { ...door, person: { ...personOf(member), still: () => memberGate(request.headers) === member } })) return;
                 if (pathname === '/m/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
                 if (pathname === '/m/' && (request.method === 'GET' || request.method === 'HEAD')) { response.writeHead(200, { ...HEADERS, 'content-type': 'text/html; charset=utf-8' }).end(memberPage()); return; }
                 const file = MEMBER_FILES[pathname];
@@ -353,9 +355,18 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* WHO IS WHAT (people.mjs, #419): the gate of everything there was admits ADMINISTRATORS only -- pages, API,
        terminals, the SSH console, all of it -- so a member is refused there by default; members come in through
        their own door alone (/m/, memberGate). With no member, everybody who may sign in passes, as before. */
-    const people = team ? new People({ path: `${dataDir}/people.json`, install: operators, accounts: () => team.list(), tell: (title, body) => { try { void alerts?.tell?.({ title, body, url: '/?open=settings&at=operators' })?.catch?.(() => {}); } catch { /* said in the log */ } console.error(`people: ${title}: ${body}`); } }) : null;
+    const people = team ? new People({ path: `${dataDir}/people.json`, install: operators, accounts: () => team.list(), leaving: () => team.leaving, tell: (title, body) => { try { void alerts?.tell?.({ title, body, url: '/?open=settings&at=operators' })?.catch?.(() => {}); } catch { /* said in the log */ } console.error(`people: ${title}: ${body}`); } }) : null;
     team?.useLastAdmin((email) => people.roleOf(email) === 'admin' && people.isLastAdmin(email));
-    if (team) { team.people = people; team.onChanged = () => people.changed(); }
+    /* The list changed outside the page too: an account gone takes its role and what it was given with it (audit 6). */
+    if (team) {
+        team.people = people;
+        team.onChanged = () => {
+            people.prune();
+            const here = new Set(team.list().map((o) => o.email));
+            if (here.size && team.grants) for (const s of team.grants.subjects('person:')) if (!here.has(s.slice('person:'.length))) team.grants.forgetSubject(s);
+            people.changed();
+        };
+    }
     const gate = makeGate(team ? () => team.allowed().filter((e) => people.roleOf(e) === 'admin') : []);
     const memberGate = team ? makeGate(() => team.allowed().filter((e) => people.roleOf(e) === 'member')) : () => undefined;
     const originOk = makeOriginCheck(publicOrigin);
@@ -1041,7 +1052,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     boxes.attach(server, WebSocketServer);
     browsers.attach(server, WebSocketServer); server.on('close', () => browsers.shutdown());
     /* A machine's shared SSH console, live in its asset panel (sshconsole.mjs): the same checks as the terminal. */
-    attachConsole(server, { tethers, gate, originOk });
+    const consoles = attachConsole(server, { tethers, gate, originOk });
     /* The wake word's weekly threshold tuning (Sunday from 03:00, each box's own time): looked at every 10 minutes. */
     const wakeWeekly = setInterval(() => { try { boxes.wakeWeekly(); } catch (error) { console.error(`wake tuning: ${error.message}`); } }, 10 * 60_000); wakeWeekly.unref?.(); server.on('close', () => clearInterval(wakeWeekly));
     /* A collect session's clock: the stations asked, its end, the speaker told to stop (boxcollect.mjs). */
@@ -1076,7 +1087,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         memberName: (headers, wanted) => { const m = memberGate(headers); if (m === undefined || !personOf) return undefined; const p = personOf(m); return p.conversationOf(wanted) === wanted && p.rightsOn(p.key, wanted).includes('x') ? wanted : undefined; },
     });
     /* A role or a person's right changed: the terminals it held and lost go at once (#419). */
-    people?.useChanged?.(() => bridge.recheck());
+    people?.useChanged?.(() => { bridge.recheck(); consoles?.recheck?.(); });
     all.drop = (name) => bridge.drop(name);
     /* What a device was given changes: a terminal it holds and lost goes at once. */
     devices.changed = () => bridge.recheck();

@@ -592,6 +592,7 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
+        if (request.stillAllowed && !request.stillAllowed()) throw new Refusal(403, 'Your account changed: sign in again.');
         /* A SIGN-IN CODE (#405): answered before anything below can see this body (the journal, say). */
         const codeOf = /^\/api\/conversations\/([^/]+)\/signin-code$/.exec(pathname);
         if (codeOf && conversations.signinHelp) return send(200, await conversations.signinHelp.enterCode(decodeURIComponent(codeOf[1]), body?.code)), true;
@@ -795,21 +796,27 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/operators' && team) {
             /* Its role said at once (#419): an account removed and added again does not come back as it was. */
             const role = body.role === 'member' ? 'member' : body.role === 'admin' ? 'admin' : (team.people?.defaultRole?.() ?? 'admin');
-            team.people?.adding(String(body.email ?? '').trim().toLowerCase(), role);
+            const adding = String(body.email ?? '').trim().toLowerCase();
+            /* An account there already keeps its role: changed by its own way, with its checks (audit 6, 24-11). */
+            if (team.list().some((o) => o.email === adding)) throw new Refusal(409, 'This account exists already.');
+            /* Nothing of a past account of that address comes back with the new one. */
+            team.grants?.forgetSubject(`person:${adding}`);
+            team.people?.adding(adding, role);
             const made = await team.add(body.email);
             return send(201, { ...made, role: team.people?.roleOf(made.email) ?? 'admin' }), true;
         }
         /* An account made an administrator or a member (#419): never oneself, never the last administrator. */
         const roleOf = /^\/api\/operators\/([^/]{3,200})\/role$/.exec(pathname);
         if (roleOf && team?.people) {
-            const email = decodeURIComponent(roleOf[1]).toLowerCase();
+            const email = decodeURIComponent(roleOf[1]).trim().toLowerCase();
             if (email === identity) throw new Refusal(409, 'You cannot change your own role: ask another administrator.');
             return send(200, { operators: team.people.setRole(email, String(body.role ?? '')) }), true;
         }
         /* A conversation given to a member, or taken back: its chat (read or write) and/or its terminal (#419). */
         const giving = /^\/api\/operators\/([^/]{3,200})\/(give|take)$/.exec(pathname);
         if (giving && team?.people && team.grants) {
-            const email = decodeURIComponent(giving[1]).toLowerCase();
+            const email = decodeURIComponent(giving[1]).trim().toLowerCase();
+            if (!team.list().some((o) => o.email === email)) throw new Refusal(404, 'No such account.');
             if (team.people.roleOf(email) !== 'member') throw new Refusal(409, 'Only a member is given conversations: an administrator has them all.');
             const name = String(body.conversation ?? '');
             if (!conversations.list().some((c) => c.name === name)) throw new Refusal(404, 'No such conversation.');
@@ -821,7 +828,7 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
         if (op && team) {
-            const email = decodeURIComponent(op[1]);
+            const email = decodeURIComponent(op[1]).trim().toLowerCase();
             /* Not oneself out: another operator does it, or nobody would see it was a mistake. */
             if (op[2] !== 'password' && op[2] !== 'enable' && email.toLowerCase() === identity) throw new Refusal(409, 'You cannot do that to your own account: ask another operator.');
             const done = op[2] === 'password' ? await team.password(email) : { operators: await team[op[2]](email) };

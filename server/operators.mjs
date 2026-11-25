@@ -78,9 +78,25 @@ export class Operators {
     #lastAdmin = () => false;
     useLastAdmin(fn) { this.#lastAdmin = fn; }
     #keep(email) { if (this.#lastAdmin(email)) throw new Refusal(409, 'The last administrator cannot be disabled or removed.'); }
-    async disable(email) { this.#keep(this.#email(email)); await this.#do(['operator', 'disable', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
+    /* Disabled or removed now: not counted as an administrator from the check on, so that two of them taking each
+       other out at once cannot leave none (audit 6, 24-11). One at a time, too. */
+    leaving = new Set();
+    #turn = Promise.resolve();
+    #leave(email, verb) {
+        const e = this.#email(email);
+        const go = async () => {
+            this.#keep(e);
+            this.leaving.add(e);
+            try { await this.#do(['operator', verb, e]); } finally { this.leaving.delete(e); }
+            this.#unlock(e);
+            return this.list();
+        };
+        const p = this.#turn.then(go, go); this.#turn = p.catch(() => {});
+        return p;
+    }
+    async disable(email) { return this.#leave(email, 'disable'); }
     async enable(email) { await this.#do(['operator', 'enable', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
-    async remove(email) { this.#keep(this.#email(email)); await this.#do(['operator', 'remove', this.#email(email)]); this.#unlock(this.#email(email)); return this.list(); }
+    async remove(email) { return this.#leave(email, 'remove'); }
     #unlock(email) { const locks = { ...(this.#store.get('locks') ?? {}) }; delete locks[email]; this.#store.put({ name: 'locks', ...locks }); }
 
     /* At each turn: too many failed sign-ins lock an address for a while; a lock that is over is lifted. */

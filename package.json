@@ -1,6 +1,6 @@
 {
   "name": "clavarium",
-  "version": "0.2.527-next.1",
+  "version": "0.2.528-next.1",
   "license": "MIT",
   "type": "module",
   "description": "A conversation is a VM with a terminal in it. Everything else is a folder.",
@@ -22,7 +22,7 @@
     "README.md"
   ],
   "clavarium": {
-    "dataFormat": 2
+    "dataFormat": 1
   },
   "scripts": {
     "start": "node server/main.mjs",

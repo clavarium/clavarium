@@ -75,7 +75,6 @@ export const nameOf = (asset) => String(asset).slice(String(asset).indexOf(':') 
 export const conversationSubject = (name) => `conversation:${name}`;
 export const pairingSubject = (id) => `pairing:${id}`;
 export const apiKeySubject = (id) => `apikey:${id}`;
-export const personSubject = (email) => `person:${String(email).toLowerCase()}`;
 
 /* The rights asked for, in the one order they are written, or a refusal:
    only letters this type of asset takes, at least one, none twice. */
@@ -144,6 +143,8 @@ export class Grants {
     /* Who has something on one asset: [{ subject, rights }]. */
     on(asset) { return this.#store.all().filter((g) => g.asset === asset).map((g) => ({ subject: g.subject, rights: g.rights })); }
 
+    /* The subjects there are that start so ('person:'). */
+    subjects(prefix) { return [...new Set(this.#store.all().map((g) => g.subject).filter((s) => s.startsWith(prefix)))]; }
     forgetSubject(subject) { for (const g of this.#store.all()) if (g.subject === subject) this.#store.remove(g.name); }
     forgetAsset(asset) { for (const g of this.#store.all()) if (g.asset === asset) this.#store.remove(g.name); }
 }

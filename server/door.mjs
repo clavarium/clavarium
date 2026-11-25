@@ -128,6 +128,10 @@ export async function handleDoor(request, response, { devices, conversations, re
         /* The parts of that conversation this pairing was given. */
         const rights = name === undefined ? '' : given_.rightsOn(pairing, name);
         const part = { terminal: rights.includes('x'), chat: rights.includes('r') ? (rights.includes('w') ? 'write' : 'read') : null };
+        /* A member, once a body is read: still let in, still given that right (audits 8 and 10). A device: as before. */
+        const stillMay = (right) => !person || (person.still() && given_.rightsOn(pairing, name).includes(right));
+        /* A member writing in a folder, once what it sends has come: still let in, still given it (audit 11). */
+        const writesStill = () => { if (person && !person.still()) throw new Refusal(403, 'This conversation is not shared with you any more.'); if (person && !given_.rightsOn(pairing, name).includes('x')) throw new Refusal(403, 'This conversation is not shared with you any more.'); };
         const need = (ok, what) => { if (!ok) throw new Refusal(403, `This device was not given ${what} of this conversation.`); };
         /* Its chat alone: what is reached through the conversation is only what its chat holds. */
         const chatOnly = mine !== undefined && !part.terminal;
@@ -189,22 +193,38 @@ export async function handleDoor(request, response, { devices, conversations, re
             if (request.method === 'GET' && talking[1] === '/search') return send(200, talk.search(name, url.searchParams.get('q') ?? ''));
             /* Reminding the tool and writing to it: a chat given to write in. Nothing else (turning it on, inviting the tool) is a device's. */
             if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind' || talking[1] === '/file' || talking[1] === '/react')) need(part.chat === 'write', 'the chat to write in');
+            /* A reaction or an answer to a question reaches the tool as its owner's choice: not a member's (audit 6). */
+            if (person && request.method === 'POST' && talking[1] === '/react') throw new Refusal(403, 'A member writes; it does not react for the owner.');
             if (request.method === 'POST' && talking[1] === '/react') { const body = await readJson(request); return send(200, await talk.react(name, body.to, body.reaction ?? null)); }
             if (request.method === 'POST' && talking[1] === '/remind') return send(200, await talk.remind(name));
             if (request.method === 'POST' && talking[1] === '/file') {
                 if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An attachment is a file.' });
-                return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
+                const attached = await talk.attach(name, url.searchParams.get('name') ?? '', request);
+                /* A member disabled while its file came: not given back to it (audit 10). */
+                if (!stillMay('w')) throw new Refusal(403, 'This conversation is not shared with you any more.');
+                return send(201, attached);
             }
-            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); if (part.terminal && signinCode && conversations.signinHelp?.codeInChat(name, body.text, body.files)) return send(201, { ...(await signinCode(name, body.text)), told: 'signin' }); /* A member's words (#419): said as theirs, so that the tool never takes them for its owner's. */
-                const text = person && typeof body.text === 'string' && body.text.trim() ? `[${person.email}, a member] ${body.text}` : body.text;
-                return send(201, await talk.say(name, text, body.answers, body.files, body.via, { quick: body.quick === true })); }
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request);
+                /* Its right looked at again once the message is read: taken back meanwhile, nothing said (audit 8). */
+                if (!stillMay('w')) throw new Refusal(403, 'This conversation is not shared with you any more.'); if (part.terminal && signinCode && conversations.signinHelp?.codeInChat(name, body.text, body.files)) return send(201, { ...(await signinCode(name, body.text)), told: 'signin' }); /* A member's words (#419): said as theirs, so that the tool never takes them for its owner's. */
+                if (person) {
+                    /* Every word of a member said as a member's: its text (a line of its own starting "[" cannot pass for
+                       another mark), the notes of its files; no answer to a question, no way through (audit 6). */
+                    const mark = `[${person.email}, a member]`;
+                    const clean = (t) => String(t ?? '').replace(/[\u200B-\u200F\u2060\uFEFF]/g, '').replace(/[[\uFF3B]/g, '(');
+                    const files = Array.isArray(body.files) ? body.files.map((f) => (f && typeof f === 'object' ? { ...f, note: `${mark} ${clean(f.note)}`.trim() } : f)) : body.files;
+                    return send(201, await talk.say(name, `${mark} ${clean(body.text)}`.trim(), undefined, files, undefined, { quick: false }));
+                }
+                return send(201, await talk.say(name, body.text, body.answers, body.files, body.via, { quick: body.quick === true })); }
         }
         /* A sign-in code (#405): a device given its terminal could type it there; no other. Named twice, never guessed. */
         const codeFor = /^\/conversations\/([^/]+)\/signin-code$/.exec(route);
         if (request.method === 'POST' && codeFor && signinCode) {
             need(part.terminal, 'the terminal');
             if (decodeURIComponent(codeFor[1]) !== name) throw new Refusal(403, 'This device was not given the terminal of this conversation.');
-            return send(200, await signinCode(name, (await readJson(request)).code));
+            const code = (await readJson(request)).code;
+            if (!stillMay('x')) throw new Refusal(403, 'This conversation is not shared with you any more.');
+            return send(200, await signinCode(name, code));
         }
         /* Its terminal does not come: only a device given it asks for it to be repaired. */
         if (request.method === 'POST' && route === '/terminal/repair') { need(part.terminal, 'the terminal'); return send(200, await repair(name)); }
@@ -248,13 +268,13 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'POST' && route === '/files/import') {
             if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An import is a file.' });
             return send(201, await importFile(attached('write'), url.searchParams.get('p') ?? '', url.searchParams.get('name') ?? '', request,
-                { exists: url.searchParams.get('exists') ?? 'keep', dir: url.searchParams.get('dir') ?? '', batch: url.searchParams.get('batch') ?? undefined }));
+                { exists: url.searchParams.get('exists') ?? 'keep', dir: url.searchParams.get('dir') ?? '', batch: url.searchParams.get('batch') ?? undefined, ok: writesStill }));
         }
         /* Thumbnails, editing, making, renaming, moving, removing: as listing
            and importing are. A device given the chat alone has none of them
            (`attached` refuses all but opening a file of the chat). */
         /* A thumbnail is the file read, as opening it is: a device given the chat alone sees the pictures of its chat. */
-        const answer = await changeRoute(request.method, route, url.searchParams, request, (need) => attached(need, route === '/files/thumb' ? 'open' : undefined));
+        const answer = await changeRoute(request.method, route, url.searchParams, request, (need) => { if (need === 'write') writesStill(); return attached(need, route === '/files/thumb' ? 'open' : undefined); }, writesStill);
         if (answer?.picture) {
             response.writeHead(200, { ...headers, ...IMAGE_HEADERS, 'content-type': answer.picture.type, 'content-length': answer.picture.bytes.length });
             response.end(answer.picture.bytes);
