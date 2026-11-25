@@ -55,3 +55,15 @@ test('the load is what it is given (the host tally), read-only', () => {
     assert.deepEqual(new ServerLogs({ host: async () => ({ code: 0 }), load: () => windows }).load(), windows);
     assert.deepEqual(new ServerLogs({ host: async () => ({ code: 0 }) }).load(), { everyMs: 0, windows: [] });
 });
+
+test('25-11: the start before this one, a window and how many lines go to the host program in their fixed forms; anything else refused before', async () => {
+    const asked = [];
+    const logs = new ServerLogs({ host: async (argv) => { asked.push(argv.join('|')); return { code: 0, stdout: '2026-11-25T02:21:00+00:00 host multipassd[1]: it said\n', stderr: '' }; } });
+    const r = await logs.read('machines', 'prev', { from: '02:20', until: '2026-11-25T02:45', lines: 3000 });
+    assert.deepEqual(asked, ['server|logs|machines|prev|02:20|2026-11-25 02:45|3000']);
+    assert.equal(r.from, '02:20'); assert.equal(r.lines, 1);
+    await logs.read('machines', 'prev');
+    assert.equal(asked[1], 'server|logs|machines|prev', 'nothing more asked: as before');
+    for (const how of [{ from: '2:20' }, { until: '02:20;id' }, { lines: 10 }, { lines: 30000 }, { lines: 'x' }]) await assert.rejects(logs.read('machines', 'prev', how), /time|Lines/);
+    await assert.rejects(logs.read('machines', 'yesterday'), /Not a span/);
+});

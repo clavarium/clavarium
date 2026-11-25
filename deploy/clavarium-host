@@ -956,10 +956,21 @@ case "$AREA $VERB" in
     "vm revive")
         # The VM manager has not answered for minutes: its daemon restarted
         # (every machine is suspended and resumed). Asked by the server as its
-        # owner chose (vmwatch.mjs: at night, always, or never by itself), at
-        # most once in hours; or by its owner, confirmed in Settings, Machines.
-        [ $# -eq 0 ] || usage
-        run timeout 170 snap restart multipass.multipassd ;;
+        # owner chose (vmwatch.mjs: at night, always, or never by itself); or by
+        # its owner, confirmed in Settings, Machines.
+        # hard (25-11: a restart left it mute for hours): stopped, its daemon process
+        # ended if it stayed (by its exact name), then started.
+        [ $# -le 1 ] || usage
+        if [ $# -eq 1 ]; then
+            [ "$1" = "hard" ] || refuse "vm revive [hard]"
+            if [ "$SAY" = "yes" ]; then echo "snap stop multipass.multipassd; pkill -KILL -x multipassd; snap start multipass.multipassd"; exit 0; fi
+            timeout 120 snap stop multipass.multipassd || true
+            pkill -KILL -x multipassd 2>/dev/null || true
+            sleep 2
+            run timeout 120 snap start multipass.multipassd
+        else
+            run timeout 170 snap restart multipass.multipassd
+        fi ;;
     "vm states")
         # EVERY MACHINE'S STATE AT ONCE: one question to the VM manager instead of one per
         # machine. It answers one question at a time, and a machine frozen inside makes each
@@ -1219,13 +1230,15 @@ case "$AREA $VERB" in
         # WHAT THE SERVER'S PROGRAMS SAID, for Settings (This server, Logs): one
         # source, over a span; read-only, bounded. The page masks what looks
         # like a secret before showing it.
-        #   server logs <clavarium|machines|updates|web|signin|tunnel|system> <10m|1|6|24|168|boot>
+        #   server logs <clavarium|machines|updates|web|signin|tunnel|system> <10m|1|6|24|168|boot|prev> [<from> <until> [<lines>]]
+        # prev: the boot BEFORE this one (what led to a restart, 25-11). <from> <until>: a window, HH:MM or
+        # YYYY-MM-DD HH:MM (or - for none), within that boot for boot and prev. <lines>: the newest 50 to 20000.
         # 17-11: a journal flooded by sudo (a line a second, the server's own calls of this program)
         # took more than the page waits. The server's unit is read by indexed fields, its own output
         # only (stdout), not sudo's syslog lines; sudo and PAM session lines are left out of any
         # source; the read is given LOGS_SECONDS, then what it said by then is shown, with a NOTE
         # on stderr -- never a bare failure.
-        [ $# -eq 2 ] || usage
+        [ $# -ge 2 ] && [ $# -le 5 ] || usage
         # A unit by its fields: what it wrote, and what systemd said of it.
         unit() { printf '%s\n' "_SYSTEMD_UNIT=$1" + "UNIT=$1" "_PID=1" +; }
         case "$1" in
@@ -1242,13 +1255,22 @@ case "$AREA $VERB" in
             system)    matches=(-k) ;;
             *) refuse "not a source of logs: $1" ;;
         esac
-        case "$2" in 10m) since=(--since "-10min") ;; 1|6|24|168) since=(--since "-$2h") ;; boot) since=(-b) ;; *) refuse "not a span: $2 (10m, 1, 6, 24, 168 hours, or boot)" ;; esac
-        # The newest 20000 lines at most: more is too much to read on a page, and to send.
-        if [ "$SAY" = "yes" ]; then echo "journalctl ${matches[*]} ${since[*]} -o short-iso --no-pager -q -n 20000 (sudo and PAM session lines left out; ${LOGS_SECONDS}s at most)"; exit 0; fi
+        case "$2" in 10m) since=(--since "-10min") ;; 1|6|24|168) since=(--since "-$2h") ;; boot) since=(-b) ;; prev) since=(-b -1) ;; *) refuse "not a span: $2 (10m, 1, 6, 24, 168 hours, boot or prev)" ;; esac
+        window='^([0-9]{4}-[0-9]{2}-[0-9]{2} )?[0-9]{2}:[0-9]{2}$'
+        from="${3:--}"; until="${4:--}"; lines="${5:-20000}"
+        [ "$from" = "-" ] || [[ "$from" =~ $window ]] || refuse "not a time: $from (HH:MM or YYYY-MM-DD HH:MM)"
+        [ "$until" = "-" ] || [[ "$until" =~ $window ]] || refuse "not a time: $until (HH:MM or YYYY-MM-DD HH:MM)"
+        [[ "$lines" =~ ^[0-9]{2,5}$ ]] && [ "$lines" -ge 50 ] && [ "$lines" -le 20000 ] || refuse "not a number of lines: $lines (50 to 20000)"
+        # A window replaces an hour span; within a boot it narrows it.
+        if [ "$from" != "-" ] || [ "$until" != "-" ]; then case "$2" in boot|prev) : ;; *) since=() ;; esac; fi
+        [ "$from" = "-" ] || since+=(--since "$from")
+        [ "$until" = "-" ] || since+=(--until "$until")
+        # The newest $lines lines at most (20000 by default): more is too much to read on a page, and to send.
+        if [ "$SAY" = "yes" ]; then echo "journalctl ${matches[*]} ${since[*]} -o short-iso --no-pager -q -n $lines (sudo and PAM session lines left out; ${LOGS_SECONDS}s at most)"; exit 0; fi
         out="$(mktemp)"; err="$(mktemp)"
         trap 'rm -f -- "$out" "$err"' EXIT
         code=0
-        timeout -k 5 "$LOGS_SECONDS" "$JOURNALCTL" "${matches[@]}" "${since[@]}" -o short-iso --no-pager -q -n 20000 >"$out" 2>"$err" || code=$?
+        timeout -k 5 "$LOGS_SECONDS" "$JOURNALCTL" "${matches[@]}" "${since[@]}" -o short-iso --no-pager -q -n "$lines" >"$out" 2>"$err" || code=$?
         grep -avE ' (sudo|pkexec)\[[0-9]+\]: | pam_unix\((sudo|sudo-i|pkexec):session\)' "$out" | cut -c1-2000 || true
         case "$code" in
             0) : ;;

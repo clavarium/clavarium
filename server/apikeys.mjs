@@ -599,8 +599,8 @@ export const PROFILE_TOOL = {
 export const LOGS_TOOL = {
     name: 'clavarium_logs',
     title: 'Logs of this Clavarium',
-    description: 'Read-only: what one of the server\'s programs said over a span, as Settings reads it (secrets masked). source: clavarium (default), machines, updates, web, signin, tunnel, system. span: 10m (default), 1, 6, 24, 168 (hours) or boot. A big journal takes a while: {pending: true} means ask again in a moment.',
-    inputSchema: { type: 'object', properties: { source: { type: 'string' }, span: { type: 'string' } }, additionalProperties: false },
+    description: 'Read-only: what one of the server\'s programs said, as Settings reads it (secrets masked). source: clavarium (default), machines, updates, web, signin, tunnel, system. span: 10m (default), 1, 6, 24, 168 (hours), boot (since this start) or prev (the start before it: what led to a restart). from/until: a window, HH:MM or YYYY-MM-DD HH:MM (within boot or prev for those). lines: the newest 50 to 20000 (2000 by default here). A big journal takes a while: {pending: true} means ask again in a moment.',
+    inputSchema: { type: 'object', properties: { source: { type: 'string' }, span: { type: 'string' }, from: { type: 'string' }, until: { type: 'string' }, lines: { type: 'integer', minimum: 50, maximum: 20000 } }, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
 export const CONVERSATIONS_TOOL = {
@@ -1233,7 +1233,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
                         if (!diagnostics) throw new Refusal(404, 'Not available on this server.');
                         if (name === LOAD_TOOL.name) return result(diagnostics.load());
                         if (name === PROFILE_TOOL.name) return result(await diagnostics.profile(args.seconds ?? 10));
-                        const r = await diagnostics.logs(typeof args.source === 'string' ? args.source : 'clavarium', typeof args.span === 'string' ? args.span : '10m');
+                        const r = await diagnostics.logs(typeof args.source === 'string' ? args.source : 'clavarium', typeof args.span === 'string' ? args.span : '10m', { from: typeof args.from === 'string' ? args.from : undefined, until: typeof args.until === 'string' ? args.until : undefined, lines: Number.isInteger(args.lines) ? args.lines : 2000 });
                         return result(r.pending ? r : { ...r, text: masked(r.text ?? '') });
                     }
                     if (name === JOB_LOG_TOOL.name) {

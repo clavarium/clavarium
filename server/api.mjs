@@ -486,7 +486,7 @@ export async function handleApi(request, response, conversations, headers, resou
             }
             /* What this server asked of the host, by 5-minute window, and its own event loop (vm.mjs HostTally). */
             if (pathname === '/api/server/load' && serverLogs) return send(200, serverLogs.load()), true;
-            if (pathname === '/api/server/logs' && serverLogs) { const r = await serverLogs.start(query.get('source') ?? 'clavarium', query.get('span') ?? '10m'); return send(r.pending ? 202 : 200, r), true; }
+            if (pathname === '/api/server/logs' && serverLogs) { const r = await serverLogs.start(query.get('source') ?? 'clavarium', query.get('span') ?? '10m', undefined, { from: query.get('from') || undefined, until: query.get('until') || undefined, lines: query.get('lines') || undefined }); return send(r.pending ? 202 : 200, r), true; }
             if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;
             if (pathname === '/api/machines/places' && machinesMove) return send(200, await machinesMove.places()), true;
             if (pathname === '/api/machines/moving' && machinesMove) return send(200, await machinesMove.moving()), true;
