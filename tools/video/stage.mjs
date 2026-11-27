@@ -31,7 +31,7 @@ export async function loadBench() {
 export const tool = (id, label) => ({ id, label, instructions: `.${id}/NOTES.md`, state: { keep: [`.${id}`] }, command: ['env', 'PS1=agent@work:/work$ ', 'bash', '--norc', '--noprofile'], resume: ['env', 'PS1=agent@work:/work$ ', 'bash', '--norc', '--noprofile'], memoryMb: 2048, install: [['true']] });
 
 /* The browser of the person filmed, at one format: pointer, taps, cards, cues. */
-export async function filmed(b, format, vids, { theme = process.env.THEME || 'light', opening = '' } = {}) {
+export async function filmed(b, format, vids, { theme = process.env.THEME || 'light', opening = '', at = '/' } = {}) {
     const F = FORMATS[format];
     mkdirSync(vids, { recursive: true });
     const context = await b.browser.newContext({ viewport: F.viewport, deviceScaleFactor: F.scale, isMobile: F.mobile, hasTouch: F.mobile, colorScheme: theme, locale: 'en-GB', recordVideo: { dir: vids, size: F.size } });
@@ -61,7 +61,7 @@ export async function filmed(b, format, vids, { theme = process.env.THEME || 'li
             addEventListener('mouseup', () => { c.style.transform = ''; }, true);
         });
     });
-    const me = await b.person({ context });
+    const me = await b.person({ context, at });
     const page = me.page;
     const videoStart = Date.now();
     /* Taps like a hand: the pointer travels, presses, lets go. */
@@ -99,7 +99,8 @@ export async function filmed(b, format, vids, { theme = process.env.THEME || 'li
         if (!(await mark(3))) await sleep(ms);
     };
     /* A card over the page: the opening or the closing line, the site's colours. */
-    const card = (text, { sub = '', id = 'film-card' } = {}) => page.evaluate(({ text, sub, id }) => {
+    /* The closing card: its time is kept (the insets end there). */
+    const card = (text, { sub = '', id = 'film-card' } = {}) => (f.cardAt = (Date.now() - f.t0) / 1000, page.evaluate(({ text, sub, id }) => {
         document.getElementById(id)?.remove();
         const d = document.createElement('div'); d.id = id;
         d.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;background:#f7f6f2;color:#1d1d1b;text-align:center;padding:8vw;z-index:2147483646;opacity:0;transition:opacity .45s';
@@ -111,7 +112,7 @@ export async function filmed(b, format, vids, { theme = process.env.THEME || 'li
         d.append(inner); document.documentElement.append(d);
         requestAnimationFrame(() => { d.style.opacity = '1'; });
         const p = document.getElementById('film-pointer'); if (p) p.style.opacity = '0';
-    }, { text, sub, id });
+    }, { text, sub, id }));
     /* The honest line, small, in a corner, for the whole film (the site's films say the same). */
     const badge = (text = 'Demo: invented data, scripted agents') => page.evaluate((text) => {
         document.getElementById('film-badge')?.remove();

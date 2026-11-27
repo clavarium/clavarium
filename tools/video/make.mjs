@@ -65,7 +65,7 @@ async function make(sc, { bench, bridge }) {
             /* 2. Played on a fresh bench, filmed. */
             const after = [];
             const vids = join(work, `rec-${format}`);
-            let cut = 0; let starts = []; let total = 0; let cuts = [];
+            let cut = 0; let starts = []; let total = 0; let cuts = []; const insets = []; let laid = [];
             try {
                 const b = await bench({ after: (fn) => after.push(fn) }, { tools: sc.tools, ...(sc.bench ?? {}) });
                 const setup = await b.person();
@@ -73,6 +73,9 @@ async function make(sc, { bench, bridge }) {
                 await setup.page.close();
                 const f = await filmed(b, format, vids, { opening: sc.opening });
                 const cued = cueing(f, said, sc.gaps);
+                /* A second screen in the corner (a phone that scans a code, a device that is shared): filmed beside
+                   the first from when it is opened, laid over it at assembly. */
+                f.inset = async (fmt, at) => { const g = await filmed(b, fmt, `${vids}-inset${insets.length}`, { at }); insets.push(g); return g; };
                 await sc.play(f, cued.cue, ctx);
                 cuts = f.cuts;
                 /* Times in the film as assembled: what the ellipses took out before each moment, removed. */
@@ -84,6 +87,8 @@ async function make(sc, { bench, bridge }) {
                 if (left > 0) await new Promise((r) => setTimeout(r, left));
                 if (f.me.errors.length) throw new Error(`${sc.name}/${format}: ${f.me.errors.join('; ')}`);
                 cut = (f.t0 - f.videoStart) / 1000;
+                for (const g of insets) await g.context.close();
+                laid = insets.map((g, i) => ({ dir: `${vids}-inset${i}`, from: (g.videoStart - f.t0) / 1000, until: f.cardAt ?? 1e6, format: g.format }));
                 await f.context.close();
             } finally { for (const fn of after.reverse()) await fn(); }
             const webm = join(vids, ls(vids).find((n) => n.endsWith('.webm')));
@@ -97,12 +102,22 @@ async function make(sc, { bench, bridge }) {
             const { width: W, height: H } = FORMATS[format].out;
             const drop = cuts.length ? `fps=30,select='not(${cuts.map(([a, b]) => `between(t,${a.toFixed(3)},${b.toFixed(3)})`).join('+')})',setpts=N/30/TB,` : '';
             const up = `${drop}scale=${W}:${H}:flags=lanczos,setsar=1`;
+            /* The insets: each its own film, put at its time, scaled into the right side, with a thin frame. */
+            const insetIns = laid.flatMap((l) => ['-itsoffset', Math.max(0, l.from).toFixed(3), '-i', join(l.dir, ls(l.dir).find((n) => n.endsWith('.webm')))]);
+            const page = FORMATS[format].viewport;
+            const over = (base) => laid.reduce((acc, l, i) => {
+                const k = said.length + 1 + i;
+                const h = Math.round(page.height * 0.8); const w = Math.round(h * FORMATS[l.format].viewport.width / FORMATS[l.format].viewport.height);
+                return `${acc};[${k}:v]scale=${w}:${h},pad=${w + 6}:${h + 6}:3:3:color=0x1d1d1b[in${i}];[${i ? `o${i - 1}` : base}][in${i}]overlay=x=W-w-${Math.round(page.width * 0.04)}:y=(H-h)/2:eof_action=pass:enable='between(t,${Math.max(0, l.from).toFixed(3)},${l.until.toFixed(3)})'[o${i}]`;
+            }, '');
+            const base = laid.length ? `o${laid.length - 1}` : '0:v';
+            const pre = laid.length ? over('0:v').slice(1) + ';' : '';
             const tail = ['-t', total.toFixed(2), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out];
             if (burn) {
                 const style = `FontName=DejaVu Sans,FontSize=${format === 'phone' ? 12 : 13},PrimaryColour=&H00FFFFFF,OutlineColour=&H20201C1A,BackColour=&H20201C1A,BorderStyle=3,Outline=5,Shadow=0,MarginV=${format === 'phone' ? 70 : 22}`;
-                ffmpeg(['-ss', cut.toFixed(3), '-i', webm, ...ins, '-filter_complex', `${mix};[0:v]${up},subtitles=${join(work, 'subs.srt')}:force_style='${style}'[v]`, '-map', '[v]', '-map', '[a]', ...tail]);
+                ffmpeg(['-ss', cut.toFixed(3), '-i', webm, ...ins, ...insetIns, '-filter_complex', `${mix};${pre}[${base}]${up},subtitles=${join(work, 'subs.srt')}:force_style='${style}'[v]`, '-map', '[v]', '-map', '[a]', ...tail]);
             } else {
-                ffmpeg(['-ss', cut.toFixed(3), '-i', webm, ...ins, '-i', join(work, 'subs.srt'), '-filter_complex', `${mix};[0:v]${up}[v]`, '-map', '[v]', '-map', '[a]', '-map', `${said.length + 1}:s`, '-c:s', 'mov_text', '-metadata:s:s:0', 'language=eng', '-disposition:s:0', 'default', ...tail]);
+                ffmpeg(['-ss', cut.toFixed(3), '-i', webm, ...ins, ...insetIns, '-i', join(work, 'subs.srt'), '-filter_complex', `${mix};${pre}[${base}]${up}[v]`, '-map', '[v]', '-map', '[a]', '-map', `${said.length + 1 + laid.length}:s`, '-c:s', 'mov_text', '-metadata:s:s:0', 'language=eng', '-disposition:s:0', 'default', ...tail]);
             }
             ffmpeg(['-ss', String(Math.min(total - 0.5, starts[3] ?? starts.at(-1))), '-i', out, '-frames:v', '1', join(OUT, `${sc.name}-${format}-poster.png`)]);
             const problems = keyFrames(out, starts, said, total, join(OUT, `${sc.name}-${format}-keys.png`));
