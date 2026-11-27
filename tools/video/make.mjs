@@ -67,7 +67,7 @@ async function make(sc, { bench, bridge }) {
             const vids = join(work, `rec-${format}`);
             let cut = 0; let starts = []; let total = 0;
             try {
-                const b = await bench({ after: (fn) => after.push(fn) }, { tools: sc.tools });
+                const b = await bench({ after: (fn) => after.push(fn) }, { tools: sc.tools, ...(sc.bench ?? {}) });
                 const setup = await b.person();
                 const ctx = { b, bridge, ...(await sc.seed(b, setup, { bridge })) };
                 await setup.page.close();
