@@ -65,7 +65,7 @@ async function make(sc, { bench, bridge }) {
             /* 2. Played on a fresh bench, filmed. */
             const after = [];
             const vids = join(work, `rec-${format}`);
-            let cut = 0; let starts = []; let total = 0;
+            let cut = 0; let starts = []; let total = 0; let cuts = [];
             try {
                 const b = await bench({ after: (fn) => after.push(fn) }, { tools: sc.tools, ...(sc.bench ?? {}) });
                 const setup = await b.person();
@@ -74,10 +74,13 @@ async function make(sc, { bench, bridge }) {
                 const f = await filmed(b, format, vids, { opening: sc.opening });
                 const cued = cueing(f, said, sc.gaps);
                 await sc.play(f, cued.cue, ctx);
-                starts = cued.starts;
+                cuts = f.cuts;
+                /* Times in the film as assembled: what the ellipses took out before each moment, removed. */
+                const taken = (t) => cuts.reduce((n, [a, b]) => n + (t > a ? Math.min(t, b) - a : 0), 0);
+                starts = cued.starts.map((t) => t - taken(t));
                 if (starts.length !== said.length) throw new Error(`${sc.name}/${format}: ${starts.length} cues for ${said.length} lines`);
                 total = starts.at(-1) + said.at(-1).seconds + TAIL;
-                const left = total * 1000 - (Date.now() - f.t0);
+                const left = (total + taken(Infinity)) * 1000 - (Date.now() - f.t0);
                 if (left > 0) await new Promise((r) => setTimeout(r, left));
                 if (f.me.errors.length) throw new Error(`${sc.name}/${format}: ${f.me.errors.join('; ')}`);
                 cut = (f.t0 - f.videoStart) / 1000;
@@ -92,7 +95,8 @@ async function make(sc, { bench, bridge }) {
             const mix = said.map((_, i) => `[${i + 1}]adelay=${Math.round(starts[i] * 1000)}|${Math.round(starts[i] * 1000)}[a${i}]`).join(';') + ';' + said.map((_, i) => `[a${i}]`).join('') + `amix=inputs=${said.length}:normalize=0,apad[a]`;
             const out = join(OUT, `${sc.name}-${format}${process.env.THEME ? `-${process.env.THEME}` : ''}${burn ? '-burned' : ''}.mp4`);
             const { width: W, height: H } = FORMATS[format].out;
-            const up = `scale=${W}:${H}:flags=lanczos,setsar=1`;
+            const drop = cuts.length ? `fps=30,select='not(${cuts.map(([a, b]) => `between(t,${a.toFixed(3)},${b.toFixed(3)})`).join('+')})',setpts=N/30/TB,` : '';
+            const up = `${drop}scale=${W}:${H}:flags=lanczos,setsar=1`;
             const tail = ['-t', total.toFixed(2), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out];
             if (burn) {
                 const style = `FontName=DejaVu Sans,FontSize=${format === 'phone' ? 12 : 13},PrimaryColour=&H00FFFFFF,OutlineColour=&H20201C1A,BackColour=&H20201C1A,BorderStyle=3,Outline=5,Shadow=0,MarginV=${format === 'phone' ? 70 : 22}`;

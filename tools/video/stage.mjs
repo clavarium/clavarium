@@ -89,12 +89,14 @@ export async function filmed(b, format, vids, { theme = process.env.THEME || 'li
         await l.waitFor({ state: 'visible', timeout: 15_000 });
         await l.scrollIntoViewIfNeeded().catch(() => {});
         await sleep(250);
-        await l.evaluate((e, ms) => {
+        /* A list drawn again meanwhile takes the element away: found again, a few times; else the pause alone. */
+        const mark = (n) => l.evaluate((e, ms) => {
             /* On the element itself, so it follows it if the page moves. */
             const was = [e.style.outline, e.style.outlineOffset, e.style.borderRadius, e.style.transition];
             e.style.transition = 'outline-color .3s'; e.style.outline = '3px solid #3aa587'; e.style.outlineOffset = '5px'; e.style.borderRadius = e.style.borderRadius || '8px';
             setTimeout(() => { [e.style.outline, e.style.outlineOffset, e.style.borderRadius, e.style.transition] = was; }, ms);
-        }, ms);
+        }, ms, { timeout: 3000 }).then(() => true, () => (n > 1 ? mark(n - 1) : false));
+        if (!(await mark(3))) await sleep(ms);
     };
     /* A card over the page: the opening or the closing line, the site's colours. */
     const card = (text, { sub = '', id = 'film-card' } = {}) => page.evaluate(({ text, sub, id }) => {
@@ -140,6 +142,17 @@ export async function filmed(b, format, vids, { theme = process.env.THEME || 'li
     const f = { me, page, tap, point, spot, badge, reveal, settled, card, uncard, context, videoStart, t0: videoStart, format, mobile: F.mobile };
     /* The film starts here: what came before (loading) is cut at assembly. */
     f.begin = () => { f.t0 = Date.now(); };
+    /* An ellipsis: a wait nobody needs to watch (a push, a slow check) is filmed, then taken out at assembly;
+       a moment is kept on each side. The voice is let finish first, so that no line is cut. */
+    f.cuts = [];
+    f.skip = async (fn, keep = 0.4) => {
+        await f.quiet?.();
+        const a = (Date.now() - f.t0) / 1000;
+        const r = await fn();
+        const b = (Date.now() - f.t0) / 1000;
+        if (b - a > 2 * keep + 0.3) f.cuts.push([a + keep, b - keep]);
+        return r;
+    };
     return f;
 }
 
@@ -154,6 +167,14 @@ export function cueing(f, said, gaps = []) {
         const now = (Date.now() - f.t0) / 1000;
         if (now < free) await sleep((free - now) * 1000);
         starts[i] = (Date.now() - f.t0) / 1000;
+    };
+    /* Until the last line said is over, with its silence. */
+    f.quiet = async () => {
+        const i = starts.length - 1;
+        if (i < 0) return;
+        const end = starts[i] + said[i].seconds + (gaps[i + 1] ?? 0.5);
+        const now = (Date.now() - f.t0) / 1000;
+        if (now < end) await sleep((end - now) * 1000);
     };
     return { cue, starts };
 }
