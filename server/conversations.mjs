@@ -188,7 +188,7 @@ export class Conversations {
             if (c.phase === 'moving') store.patch(c.name, { phase: 'ready', step: undefined, moved: 'The server restarted while the work folder was being moved. The files are safe, in the machine: look at /work, /work.before-move and /work.moving.' });
             /* A move into a shared machine cut short (14-11): back in its own machine, as it was -- never « build it
                again », which would make its own machine anew and lose its tool's memory. */
-            if (c.phase === 'building' && c.movingTo) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, sharedMachine: undefined, machineMb: undefined, machineUser: undefined, ...(c.movingFromMb ? { memoryMb: c.movingFromMb } : {}), movingTo: undefined, movingFromMb: undefined, stopped: true, moved: `The server restarted while it was moving to the shared machine ${c.movingTo}: it stays in its own machine, as it was. Move it again when you like.` });
+            if (c.phase === 'building' && c.movingTo) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, sharedMachine: undefined, machineMb: undefined, machineDiskGb: undefined, machineCpus: undefined, machineUser: undefined, ...(c.movingFromMb ? { memoryMb: c.movingFromMb } : {}), movingTo: undefined, movingFromMb: undefined, stopped: true, moved: `The server restarted while it was moving to the shared machine ${c.movingTo}: it stays in its own machine, as it was. Move it again when you like.` });
             else if (c.phase === 'building' && c.movingOutOf) store.patch(c.name, { phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, ...c.movingOutOf, movingOutOf: undefined, stopped: true, moved: `The server restarted while it was moving out of the shared machine ${c.movingOutOf.sharedMachine}: it stays there. Move it again when you like.` });
             else if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
             /* A change of AI cut short before its switch: it kept its AI (the record changes in one write). */
@@ -338,6 +338,11 @@ export class Conversations {
 
     /* The size of a shared machine: what its first conversation made it with (each of its conversations carries
        it); undefined while none lives in it. */
+    /* Its disk and cores as the others in that machine know them (28-11), or nothing: the defaults it was made with. */
+    #machineSizesOf(machine) {
+        const peer = this.#store.all().find((x) => x.sharedMachine === machine && (Number.isInteger(x.machineDiskGb) || Number.isInteger(x.machineCpus)));
+        return peer ? { machineDiskGb: peer.machineDiskGb, machineCpus: peer.machineCpus } : {};
+    }
     #machineMbOf(machine) {
         const there = this.#store.all().filter((x) => x.sharedMachine === machine);
         if (!there.length) return undefined;
@@ -374,7 +379,7 @@ export class Conversations {
         }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, ...(machine ? { sharedMachine: machine, machineMb: size } : {}), work: workOnDisk === true && !machine ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, ...(machine ? { sharedMachine: machine, machineMb: size, ...this.#machineSizesOf(machine) } : {}), work: workOnDisk === true && !machine ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         /* A new one comes first in its folder (or first of those in none). */
         const { order, groups } = this.#order();
         this.#store.put(conversation);
@@ -1496,7 +1501,7 @@ export class Conversations {
         const carried = join(dir, 'state.tar.gz');
         const back = (why) => {
             /* Back to its own machine, as it was (stopped: the next opening wakes it). */
-            this.#store.patch(name, { toolsStarted: c.toolsStarted, sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingTo: undefined, movingFromMb: undefined, moveFailed: `Not moved: ${why}` });
+            this.#store.patch(name, { toolsStarted: c.toolsStarted, sharedMachine: undefined, machineMb: undefined, machineDiskGb: undefined, machineCpus: undefined, machineUser: undefined, memoryMb: c.memoryMb, phase: 'ready', step: undefined, progress: undefined, buildingSince: undefined, error: undefined, movingTo: undefined, movingFromMb: undefined, moveFailed: `Not moved: ${why}` });
             this.#fresh.add(name); this.#mountAgain.add(name);
             try { this.renewed(name, `Not moved to the shared machine ${machine}: ${why} It stays in its own machine, as it was.`, false); } catch { /* told, nothing more */ }
         };
@@ -1512,7 +1517,8 @@ export class Conversations {
                 const stopped = await this.#vms.stop(name);
                 if (stopped.code !== 0) return back(`its machine did not stop: ${firstLine(stopped.stderr) || `exit ${stopped.code}`}.`);
             }
-            this.#store.patch(name, { sharedMachine: machine, machineMb: size, memoryMb: memory });
+            /* Its disk and cores are the machine's: those the others there know of (28-11). */
+            this.#store.patch(name, { sharedMachine: machine, machineMb: size, memoryMb: memory, ...this.#machineSizesOf(machine) });
             await this.#buildShared(name, tool, memory);
             const now = this.#store.get(name);
             if (!now) return undefined; /* archived meanwhile */
@@ -1602,7 +1608,7 @@ export class Conversations {
                 left = true;
             }
             /* Its own machine, as a new conversation's: built with its name, held before its tool starts. */
-            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineUser: undefined, memoryMb: memory, step: 'Starting the machine' });
+            this.#store.patch(name, { sharedMachine: undefined, machineMb: undefined, machineDiskGb: undefined, machineCpus: undefined, machineUser: undefined, memoryMb: memory, step: 'Starting the machine' });
             /* One left behind by an attempt cut short: not this conversation's any more. */
             if ((await this.#vms.state(name, { fresh: true }).catch(() => undefined)) !== undefined) await this.#vms.removeVm(vmName(name)).catch(() => {});
             this.#holding.add(name);
@@ -2472,30 +2478,48 @@ export class Conversations {
         return this.#store.get(name);
     }
 
-    /* A SHARED MACHINE GIVEN MORE OR LESS MEMORY (#221), from the settings of any conversation in it: never less than
-       the largest limit of those in it; stopped cleanly, set, started again -- every conversation in it is
-       interrupted, the page says so before. Each then finds its place again (its work mounted) at its next opening. */
-    async resizeShared(name, { machineMb } = {}) {
+    /* A SHARED MACHINE RESIZED (#221; disk and cores 28-11), from the settings of any conversation in it: its memory
+       never less than the largest limit of those in it, its disk only grows, its cores up to the server's; stopped
+       cleanly, set, started again -- every conversation in it is interrupted, the page says so before. Each then finds
+       its place again (its work mounted) at its next opening. What is not given stays as it is. */
+    async resizeShared(name, { machineMb, diskGb, cpus } = {}) {
         const c = this.#busyCheck(name);
         if (!c.sharedMachine) throw new Refusal(400, 'Not in a shared machine.');
         const all = this.#store.all().filter((x) => x.sharedMachine === c.sharedMachine);
+        const given = (v) => v !== undefined && v !== null && v !== '';
         const now = this.#machineMbOf(c.sharedMachine);
-        const size = Number(machineMb);
+        const real = await this.#vms.size(name).catch(() => ({}));
+        const diskNow = real?.diskGb ?? all.map((x) => x.machineDiskGb).find(Number.isInteger) ?? DISK_GB;
+        const cpusNow = real?.cpus ?? all.map((x) => x.machineCpus).find(Number.isInteger) ?? 1;
+        const size = given(machineMb) ? Number(machineMb) : now;
+        const disk = given(diskGb) ? Number(diskGb) : diskNow;
+        const cores = given(cpus) ? Number(cpus) : cpusNow;
         const largest = Math.max(...all.map((x) => Number(x.memoryMb) || 0));
-        if (!Number.isInteger(size) || size < Math.max(1024, largest) || size > 16384) throw new Refusal(400, `The machine ${c.sharedMachine} has ${Math.max(1024, largest)} to 16384 MB (no less than the largest of its conversations).`);
-        if (size === now) throw new Refusal(409, 'Nothing to change: it already has this.');
+        if (size !== now && (!Number.isInteger(size) || size < Math.max(1024, largest) || size > 16384)) throw new Refusal(400, `The machine ${c.sharedMachine} has ${Math.max(1024, largest)} to 16384 MB (no less than the largest limit of the conversations in it).`);
+        if (!Number.isInteger(disk) || disk > DISK_MAX_GB) throw new Refusal(400, `A disk is at most ${DISK_MAX_GB} GB.`);
+        if (disk < diskNow) throw new Refusal(400, `A disk can only grow: it has ${diskNow} GB.`);
+        const hostCpus = availableParallelism();
+        if (cores !== cpusNow && (!Number.isInteger(cores) || cores < 1 || cores > hostCpus)) throw new Refusal(400, `Cores: 1 to ${hostCpus}, those of this server, which its machines share.`);
+        if (size === now && disk === diskNow && cores === cpusNow) throw new Refusal(409, 'Nothing to change: it already has this.');
         for (const x of all) if (this.#acts.has(x.name)) throw this.#busy(x.name);
         const state = await this.#vms.state(name, { fresh: true }).catch(() => undefined);
         if (state === undefined) throw new Refusal(410, 'The shared machine no longer exists.');
-        await this.room({ kind: 'grow', name, memoryMb: state === 'Running' ? Math.max(0, size - now) : 0, diskMb: 0 });
+        await this.room({ kind: 'grow', name, memoryMb: state === 'Running' ? Math.max(0, size - now) : 0, diskMb: Math.max(0, disk - diskNow) * 1024 });
         for (const x of all) { this.#cancelStop(x.name); this.drop(x.name); }
         const fail = (what, r) => new Refusal(502, `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`);
         if (state !== 'Stopped') { const r = await this.#vms.stop(name); if (r.code !== 0) throw fail('The shared machine did not stop', r); }
-        const set = await this.#vms.setMemory(name, size);
-        if (set.code !== 0) { await this.#vms.start(name).catch(() => undefined); throw fail('Its memory could not be set', set); }
+        const steps = [[size !== now, () => this.#vms.setMemory(name, size), 'Its memory could not be set'],
+            [cores !== cpusNow, () => this.#vms.setCpus(name, cores), 'Its cores could not be set'],
+            [disk !== diskNow, () => this.#vms.setDisk(name, disk), 'Its disk could not be grown']];
+        for (const [wanted, run, what] of steps) {
+            if (!wanted) continue;
+            const r = await run();
+            if (r.code !== 0) { await this.#vms.start(name).catch(() => undefined); throw fail(what, r); }
+        }
         const started = await this.#vms.start(name);
+        const said = [size !== now ? `${size} MB` : '', cores !== cpusNow ? `${cores} core${cores > 1 ? 's' : ''}` : '', disk !== diskNow ? `a ${disk} GB disk` : ''].filter(Boolean).join(', ');
         for (const x of all) {
-            this.#store.patch(x.name, { machineMb: size, toolStarted: false, restarted: `Its shared machine was restarted with ${size} MB.` });
+            this.#store.patch(x.name, { machineMb: size, machineDiskGb: disk, machineCpus: cores, toolStarted: false, restarted: `Its shared machine was restarted with ${said}.` });
             this.#mountAgain.add(x.name); this.#fresh.add(x.name);
         }
         if (started.code !== 0) throw fail('The shared machine did not start again', started);

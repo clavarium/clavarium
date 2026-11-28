@@ -240,7 +240,11 @@
             <form id="shared-size" autocomplete="off" hidden>
               <label for="shared-memory">Shared machine memory</label>
               <select id="shared-memory"></select>
-              <p class="hint" id="shared-size-hint">Restarts every conversation in it</p>
+              <label for="shared-cpus">Its cores</label>
+              <select id="shared-cpus"></select>
+              <label for="shared-disk">Its disk</label>
+              <select id="shared-disk"></select>
+              <p class="hint" id="shared-size-hint">Restarts every conversation in it · a disk only grows</p>
               <div class="row"><button type="submit" id="shared-size-apply">Change...</button></div>
             </form>
             <div id="work-box">

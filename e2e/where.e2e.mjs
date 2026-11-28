@@ -77,6 +77,19 @@ test('in a shared machine, its settings: its limit (no cores nor disk of its own
     await me.page.locator('#shared-size-apply').click();
     await me.until('asked first', async () => /Diary/.test(await me.page.locator('#notice').innerText().catch(() => '')));
     assert.match(await me.page.locator('#notice').innerText(), /IT IS STOPPED AND STARTED AGAIN/);
+    /* 28-11: its disk and cores too, the machine's; a disk only grows, and the question says so. */
+    await me.page.locator('#notice-action, #notice-cancel, #notice button').last().click().catch(() => {});
+    await me.page.locator('#folders').click().catch(() => {});
+    await me.chapter('machine');
+    await me.until('its shared size again', async () => me.page.locator('#shared-size').isVisible());
+    assert.equal(await me.page.locator('#shared-cpus').isVisible(), true);
+    const disks = await me.page.locator('#shared-disk option').evaluateAll((o) => o.map((x) => Number(x.value)));
+    assert.equal(Math.min(...disks), 8, `its disk now first, nothing smaller: ${disks}`);
+    await me.page.selectOption('#shared-disk', String(disks.find((d) => d > 8)));
+    await me.page.locator('#shared-size-apply').click();
+    await me.until('asked first, with the disk', async () => /GB disk/.test(await me.page.locator('#notice').innerText().catch(() => '')));
+    assert.match(await me.page.locator('#notice').innerText(), /cannot shrink again/);
+    assert.doesNotMatch(await me.page.locator('#notice').innerText(), /of memory/, 'its memory not changed');
     assert.deepEqual(me.errors, []);
 });
 

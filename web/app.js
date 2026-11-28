@@ -3149,12 +3149,20 @@
             if (sharers) $('where-now').append(' · ', uiSaid('set-where-stops', 'Stopping it stops them too'));
             for (const id of ['where-copy', 'where-move']) $(id).disabled = here.phase !== 'ready';
         }
-        if (sharedHere && document.activeElement !== $('shared-memory')) {
+        if (sharedHere && !['shared-memory', 'shared-cpus', 'shared-disk'].includes(document.activeElement?.id)) {
             const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine);
             const floor = Math.max(1024, ...inIt.map((x) => x.memoryMb ?? 0)); const now = here.machineMb ?? floor;
             const sizes = [...new Set([now, ...MEMORY_CHOICES.filter((m) => m >= floor)])].sort((a, b) => a - b);
             $('shared-memory').replaceChildren(...sizes.map((m) => Object.assign(document.createElement('option'), { value: String(m), textContent: `${sizeWords(m)}${m === now ? ' (now)' : ''}` })));
             $('shared-memory').value = String(now);
+            /* Its cores and disk (28-11): the machine's, as last set (else the defaults it was made with); a disk only grows. */
+            const coresNow = here.machineCpus ?? 1; const most = Math.max(here.hostCpus ?? 1, coresNow);
+            $('shared-cpus').replaceChildren(...Array.from({ length: most }, (_, i) => i + 1).map((n) => Object.assign(document.createElement('option'), { value: String(n), textContent: `${n}${n === coresNow ? ' (now)' : ''}` })));
+            $('shared-cpus').value = String(coresNow);
+            const diskNow = here.machineDiskGb ?? 8;
+            const disks = [...new Set([diskNow, ...DISK_CHOICES.filter((d) => d > diskNow)])].sort((a, b) => a - b);
+            $('shared-disk').replaceChildren(...disks.map((d) => Object.assign(document.createElement('option'), { value: String(d), textContent: `${d} GB${d === diskNow ? ' (now)' : ''}` })));
+            $('shared-disk').value = String(diskNow);
         }
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
@@ -3510,14 +3518,17 @@
         const here = conversations.find((x) => x.name === name);
         if (!here?.sharedMachine) return;
         const machineMb = Number($('shared-memory').value);
-        if (machineMb === here.machineMb) { $('panel-error').textContent = 'Nothing to change: choose another memory first.'; $('panel-error').hidden = false; return; }
+        const machineCpus = Number($('shared-cpus').value); const machineDiskGb = Number($('shared-disk').value);
+        const coresNow = here.machineCpus ?? 1; const diskNow = here.machineDiskGb ?? 8;
+        if (machineMb === here.machineMb && machineCpus === coresNow && machineDiskGb === diskNow) { $('panel-error').textContent = 'Nothing to change: choose another size first.'; $('panel-error').hidden = false; return; }
+        const asked = [machineMb !== here.machineMb ? `${sizeWords(machineMb)} of memory (now ${sizeWords(here.machineMb ?? 0)})` : '', machineCpus !== coresNow ? `${machineCpus} core${machineCpus > 1 ? 's' : ''} (now ${coresNow})` : '', machineDiskGb !== diskNow ? `a ${machineDiskGb} GB disk (now ${diskNow} GB; a disk cannot shrink again)` : ''].filter(Boolean).join(', ');
         const inIt = conversations.filter((x) => x.sharedMachine === here.sharedMachine).map((x) => x.title ?? x.name);
         leavePanel();
         const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
-        show(`Give the shared machine « ${here.sharedMachine} » ${sizeWords(machineMb)} of memory (now ${sizeWords(here.machineMb ?? 0)})? IT IS STOPPED AND STARTED AGAIN: ${inIt.join(', ')} ${inIt.length > 1 ? 'are' : 'is'} interrupted.`,
+        show(`Give the shared machine « ${here.sharedMachine} » ${asked}? IT IS STOPPED AND STARTED AGAIN: ${inIt.join(', ')} ${inIt.length > 1 ? 'are' : 'is'} interrupted.`,
             'Change it', async () => {
                 disconnect(); say('restarting', 'connecting'); show('Changing the shared machine...'); $('notice-spin').hidden = false;
-                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { machineMb }); await refresh(); enter(); }
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { ...(machineMb !== here.machineMb ? { machineMb } : {}), ...(machineCpus !== coresNow ? { machineCpus } : {}), ...(machineDiskGb !== diskNow ? { machineDiskGb } : {}) }); await refresh(); enter(); }
                 catch (error) { show(error.message, 'Back', enter); }
             }, resume);
     });

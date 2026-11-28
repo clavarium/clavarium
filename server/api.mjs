@@ -1076,8 +1076,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (typeof body?.escalate === 'boolean') return send(200, conversations.setStopEscalate(conversation, body.escalate)), true;
             /* Its watchdog (watchdog.mjs): on or off, and how long it waits. */
             if (body?.watchdog && typeof body.watchdog === 'object') return send(200, conversations.setWatchdog(conversation, { on: typeof body.watchdog.on === 'boolean' ? body.watchdog.on : undefined, delayMin: body.watchdog.delayMin })), true;
-            /* Its shared machine's own memory (#221): the whole machine restarted, every conversation in it. */
-            if (body?.machineMb !== undefined) return send(200, await conversations.resizeShared(conversation, { machineMb: body.machineMb })), true;
+            /* Its shared machine's own memory, cores and disk (#221; 28-11): the whole machine restarted, every conversation in it. */
+            if (body?.machineMb !== undefined || body?.machineDiskGb !== undefined || body?.machineCpus !== undefined) return send(200, await conversations.resizeShared(conversation, { machineMb: body.machineMb, diskGb: body.machineDiskGb, cpus: body.machineCpus })), true;
             const resized = await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus });
             /* Asleep, nothing was started: the choice is only kept, for its wake. */
             return send(resized.phase === 'restarting' ? 202 : 200, resized), true;

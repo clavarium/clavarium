@@ -4,6 +4,7 @@
    programs ended, its work taken out; the machine goes only with the last one. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { availableParallelism } from 'node:os';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -153,6 +154,28 @@ test('in a shared machine, its memory is its limit (set without a restart); the 
     await b.all.resizeShared('diary', { machineMb: 6144 });
     assert.match(b.calls.join('\n'), /^vm stop clv-assist[^\n]*\n(?:[^\n]*\n)*vm set clv-assist memory 6144\n(?:[^\n]*\n)*vm start clv-assist/m, 'stopped, set, started');
     assert.equal(b.store.get('mail').machineMb, 6144); assert.equal(b.store.get('diary').machineMb, 6144);
+});
+
+/* 28-11: its disk and cores too, from any conversation in it; a disk only grows; only what changes is set. */
+test('a shared machine\'s disk and cores: grown or set for all, a smaller disk refused, only what changes set, kept for one that joins', async (t) => {
+    const b = bench(t);
+    b.all.create({ name: 'mail', tool: 'tool', machine: 'assist', machineMb: 4096 }); await b.all.built;
+    b.all.create({ name: 'diary', tool: 'tool', machine: 'assist' }); await b.all.built;
+    await assert.rejects(b.all.resizeShared('diary', { diskGb: 5 }), /can only grow: it has 8 GB/);
+    await assert.rejects(b.all.resizeShared('diary', { diskGb: 8, cpus: 1 }), /Nothing to change/);
+    b.calls.length = 0;
+    /* Cores up to those of the server running the test (a 1-core host keeps 1: only the disk is then set). */
+    const cores = Math.min(2, availableParallelism());
+    await assert.rejects(b.all.resizeShared('diary', { cpus: availableParallelism() + 1 }), /Cores: 1 to/);
+    await b.all.resizeShared('diary', { diskGb: 40, cpus: cores });
+    const said = b.calls.join('\n');
+    assert.match(said, /^vm stop clv-assist[^\n]*\n(?:[^\n]*\n)*vm set clv-assist disk 40\n(?:[^\n]*\n)*vm start clv-assist/m, 'stopped, set, started');
+    if (cores > 1) assert.match(said, /vm set clv-assist cpus 2/); else assert.doesNotMatch(said, /vm set clv-assist cpus/);
+    assert.doesNotMatch(said, /vm set clv-assist memory/, 'its memory untouched');
+    for (const n of ['mail', 'diary']) { const c = b.store.get(n); assert.equal(c.machineDiskGb, 40); assert.equal(c.machineCpus, cores); assert.equal(c.machineMb, 4096); assert.match(c.restarted, /a 40 GB disk/); }
+    await assert.rejects(b.all.resizeShared('mail', { diskGb: 20 }), /can only grow: it has 40 GB/);
+    b.all.create({ name: 'notes', tool: 'tool', machine: 'assist' }); await b.all.built;
+    assert.equal(b.store.get('notes').machineDiskGb, 40, 'one that joins knows the machine\'s disk');
 });
 
 /* MOVED INTO A SHARED MACHINE (#221, 12-11): from a machine of its own, its work following, its tool's state carried. */
