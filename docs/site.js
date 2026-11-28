@@ -152,20 +152,27 @@ document.querySelectorAll('.play').forEach(function (box) {
     start();
   });
 
-/* REMARKS ON THE SITE (annotepage, 28-11): nothing is loaded for a visitor. The owner turns it on in their own browser,
-   from the console: localStorage.annotepage = 'setup' (the first time: the screen that creates the project and shows its
-   key once), then localStorage.annotepage = '<the project id it gives>'; and delete localStorage.annotepage to stop.
-   A confidential project: the key is asked once in that browser, never written in the page. */
+/* REMARKS ON THE SITE (annotepage, 28-11): off for every visitor. The owner turns it on in their own browser by typing
+   in the console:  annotepage.on()  (and annotepage.off() to stop). The choice is kept in this browser only. The key
+   is in the page on purpose (open mode, as annotepage.com itself does): it reads and writes the review notes only,
+   and only pages of https://clavarium.org may write with it. */
 (function () {
-  var want = '';
-  try { want = localStorage.getItem('annotepage') || ''; } catch (e) { return; }
-  if (!want) return;
-  var s = document.createElement('script');
-  s.src = 'https://cdn.jsdelivr.net/npm/annotepage-client@2/dist/annotepage.js';
-  s.setAttribute('data-server', 'https://api.annotepage.com/api.php');
-  if (want === 'setup') s.setAttribute('data-setup', '');
-  else if (/^[A-Za-z0-9_-]{22}$/.test(want)) s.setAttribute('data-project', want);
-  else { console.log('annotepage: localStorage.annotepage is neither "setup" nor a project id (22 characters)'); return; }
-  s.defer = true;
-  document.head.appendChild(s);
+  var FLAG = 'annotepage/on';
+  function load() {
+    if (document.querySelector('script[data-annotepage-on]')) return;
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/annotepage-client@2/dist/annotepage.js';
+    s.setAttribute('data-server', 'https://api.annotepage.com/api.php');
+    s.setAttribute('data-key', 'Xr-PorSCs-5SoXgLw4mi-BDfExKvFuXIcPaNbxHpkh4');
+    s.setAttribute('data-annotepage-on', '');
+    s.defer = true;
+    document.body.appendChild(s);
+  }
+  window.annotepage = {
+    on: function () { try { localStorage.setItem(FLAG, '1'); } catch (e) { /* private mode: this page only */ } load(); return 'on in this browser, on every page; annotepage.off() turns it off'; },
+    off: function () { try { localStorage.removeItem(FLAG); } catch (e) { /* nothing kept */ } location.reload(); return 'off'; }
+  };
+  var wanted = false;
+  try { wanted = localStorage.getItem(FLAG) === '1'; } catch (e) { /* stays off */ }
+  if (wanted) { if (document.body) load(); else document.addEventListener('DOMContentLoaded', load); }
 })();
