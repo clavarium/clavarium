@@ -163,12 +163,13 @@ export class HostTally {
 export class Vms {
     /* `run(argv, options)` reaches the host program; `prefix` is the same
        route as an argument vector, for the one caller that needs a terminal. */
-    #ask; #snapshot = null; #asking = null; #changed = 0; #now; #freshMs; #machineOf; #userOf; tally;
+    #ask; #snapshot = null; #asking = null; #changed = 0; #now; #freshMs; #machineOf; #userOf; #log; tally;
     /* `freshMs`: how long one answer serves every caller (0: only those asking meanwhile). */
     /* `machineOf(conversation)`: the shared machine it lives in (#221), or nothing -- its own, `clv-<conversation>`. */
     /* `tally`: where its commands are counted (HostTally), shared with the server's other commands to the host. */
-    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined, userOf = () => undefined, tally } = {}) {
+    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS, machineOf = () => undefined, userOf = () => undefined, tally, log = (line) => console.log(line) } = {}) {
         this.tally = tally ?? new HostTally({ now });
+        this.#log = log;
         /* `userOf(conversation)`: its own user in a shared machine, { uid, gid } -- what its mounts are owned by there. */
         this.#ask = run; this.prefix = prefix; this.#now = now; this.#freshMs = freshMs; this.#machineOf = machineOf; this.#userOf = userOf;
         /* What changes a machine makes the states asked again (not taken from before it). */
@@ -230,7 +231,17 @@ export class Vms {
        (fstrim; the VM manager's disks take it, discard=unmap), and the disk file on the host shrinks to what
        is really used. Ubuntu does it once a week by itself; asked here every hour and before each stop or
        sleep. A second one is quick: only what changed since is looked at. */
-    trim(conversation, timeoutMs = TRIM_MS) { return this.execMachine(conversation, ['sudo', '-n', 'fstrim', '--all'], { timeoutMs }); }
+    /* 27-11 (Multipass #5617, the owner: « ça fait pas de mal »): each one says in the log what it gave back and
+       how long it took -- « trim clv-x: 1834 MB given back in 3.8 s » --, real figures of real use. */
+    async trim(conversation, timeoutMs = TRIM_MS) {
+        const began = this.#now();
+        const r = await this.execMachine(conversation, ['sudo', '-n', 'fstrim', '--all', '--verbose'], { timeoutMs });
+        if (r && r.code === 0) {
+            const bytes = [...String(r.stdout ?? '').matchAll(/\((\d+) bytes\) trimmed/g)].reduce((n, m) => n + Number(m[1]), 0);
+            this.#log(`trim ${this.vmOf(conversation)}: ${Math.round(bytes / 1048576)} MB given back in ${((this.#now() - began) / 1000).toFixed(1)} s`);
+        }
+        return r;
+    }
     /* The host's list of who lives in a shared machine (vm share / unshare). */
     share(conversation) { return this.run(['vm', 'share', this.vmOf(conversation), conversation]); }
     unshare(conversation) { return this.run(['vm', 'unshare', this.vmOf(conversation), conversation]); }

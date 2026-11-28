@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Self-host Claude Code and other AI agents: install · Clavarium</title>
 <meta name="description" content="One command on Ubuntu Server 24.04 or 26.04. Prerequisites: an x86_64 machine that runs VMs, 1–2 GB RAM per agent, a domain, an AI provider.">
-<link rel="stylesheet" href="style.css">
-<script src="site.js" defer></script>
+<link rel="stylesheet" href="style.css?v=20261125c">
+<script src="site.js?v=20261125d" defer></script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, MIT. Clavarium brings no AI and charges nothing."}}, {"@type": "Question", "name": "No public address at home?", "acceptedAnswer": {"@type": "Answer", "text": "Your machine dials out to the relay. Home opens no port."}}, {"@type": "Question", "name": "How do I upgrade?", "acceptedAnswer": {"@type": "Answer", "text": "It updates itself at night by default. Do not re-run this on an online server."}}]}</script>
 </head>
 <body>
@@ -25,7 +25,8 @@
 
     <section>
       <h2>Try it first</h2>
-      <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
+      <p class="cmd-label">Install on your server, in one line:</p>
+    <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
       <p class="note"><a class="rs" href="https://clavarium.org/install.sh">Read the script</a> · This machine only, no sign-in. From your computer:</p>
       <div class="cmd"><code>ssh -L 7717:127.0.0.1:7717 you@that-machine</code><button type="button">Copy</button></div>
       <p class="note">Then open http://127.0.0.1:7717</p>
@@ -74,7 +75,7 @@ curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --domain "$DOMAIN"
   </main>
 
   <footer>
-    <div class="meta"><span>Free and open source, MIT.</span><a href="index.html">Home</a><a href="https://github.com/clavarium/clavarium">GitHub</a><span>Not affiliated with the AI vendors named.</span></div>
+    <div class="meta"><span>Free and open source, MIT.</span><a class="rs" href="https://clavarium.org/install.sh">Read the script</a><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="built-to-last.html">Built to last</a><a href="https://github.com/clavarium/clavarium">GitHub</a><span>Not affiliated with the AI vendors named.</span></div>
   </footer>
 </div>
 </body>

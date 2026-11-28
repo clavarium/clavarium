@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Run multiple coding agents in parallel · Clavarium</title>
 <meta name="description" content="Run Claude Code, Codex and OpenCode in parallel, each in its own VM. Review their commits, then send. Follow from your phone.">
-<link rel="stylesheet" href="style.css">
-<script src="site.js" defer></script>
+<link rel="stylesheet" href="style.css?v=20261125c">
+<script src="site.js?v=20261125d" defer></script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Which agents?", "acceptedAnswer": {"@type": "Answer", "text": "Claude Code, Codex, OpenCode, Gemini CLI, Mistral Vibe, or a plain shell."}}, {"@type": "Question", "name": "Can agents work together?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. In a room, they share one thread and hand work to each other. They can also share a folder."}}, {"@type": "Question", "name": "Can they work at night?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Wake them on a time, a commit or a mail. Your phone is told when one waits."}}]}</script>
 </head>
 <body>
@@ -25,8 +25,9 @@
 <section><video class="demo" muted playsinline controls preload="none" poster="shots/demo-ais-together-poster.png" aria-label="Claude Code, Codex and Mistral Vibe hand work to each other in one room"><source src="shots/demo-ais-together.webm" type="video/webm"></video></section><section><ul class="does"><li>Each agent its own VM, repository and rights.</li><li>Commits wait for your review, unless you turn on automatic sending. It never holds the key.</li><li>Follow and answer from your phone. Alerted when it waits.</li></ul></section><section><h2>How</h2><ol class="steps"><li>Add a git repository: empty, or cloned.</li><li>Start one agent per task.</li><li>Review, then Send.</li></ol><div style="margin-top:18px"><img class="shot" style="aspect-ratio:auto" src="shots/review.png" alt="Review: two commits would be sent to main, with their diff" loading="lazy"></div></section><section><h2>Limits</h2><ul class="limits"><li>Online, an agent can still push to a server of its own.</li><li>Each working agent needs 1–2 GB RAM.</li></ul><div class="btns"><a class="btn" href="isolated-agents.html">Isolated agents</a><a class="btn" href="parley.html">Chat from anywhere</a><a class="btn" href="security.html">Security</a></div></section><section><h2>Questions</h2><details><summary>Which agents?</summary><p>Claude Code, Codex, OpenCode, Gemini CLI, Mistral Vibe, or a plain shell.</p></details><details><summary>Can agents work together?</summary><p>Yes. In a room, they share one thread and hand work to each other. They can also share a folder.</p></details><details><summary>Can they work at night?</summary><p>Yes. Wake them on a time, a commit or a mail. Your phone is told when one waits.</p></details></section>
   </main>
   <footer>
+    <p class="cmd-label">Install on your server, in one line:</p>
     <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
-    <div class="meta"><span>Free and open source, MIT.</span><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><span>Not affiliated with the AI vendors named.</span></div>
+    <div class="meta"><span>Free and open source, MIT.</span><a class="rs" href="https://clavarium.org/install.sh">Read the script</a><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="built-to-last.html">Built to last</a><a href="https://github.com/clavarium/clavarium">GitHub</a><span>Not affiliated with the AI vendors named.</span></div>
   </footer>
 </div>
 </body>

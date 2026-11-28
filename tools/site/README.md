@@ -13,3 +13,6 @@ then captured by a browser. Run them again whenever Parley or a demo changes:
 - `brief.mjs`: the text of the "busy person's daily brief" demo.
 - Playwright is not a dependency of Clavarium: give the path of yours (or install playwright-core).
 - Invented names and example.com addresses only. Nothing here reads real data.
+
+Films with a voice and subtitles, in both formats (16:9 and 9:16), made again in one command at each release:
+see `tools/video/README.md` (Demo videos).

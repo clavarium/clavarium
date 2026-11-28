@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Run AI agents in isolated VMs · Clavarium</title>
 <meta name="description" content="Run Claude Code, Codex or OpenCode each in its own VM, or several isolated in one shared VM to save RAM. Self-hosted, free, MIT.">
-<link rel="stylesheet" href="style.css">
-<script src="site.js" defer></script>
+<link rel="stylesheet" href="style.css?v=20261125c">
+<script src="site.js?v=20261125d" defer></script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Why not Docker?", "acceptedAnswer": {"@type": "Answer", "text": "A container shares the host's kernel. Here each agent has a whole VM, or its own user in one."}}, {"@type": "Question", "name": "Can one agent read another's key?", "acceptedAnswer": {"@type": "Answer", "text": "No. Tried on a real install: the second agent found no folder, no key, no network path."}}, {"@type": "Question", "name": "What runs the VMs?", "acceptedAnswer": {"@type": "Answer", "text": "Multipass, on Ubuntu Server. Your processor must support virtual machines."}}]}</script>
 </head>
 <body>
@@ -108,8 +108,9 @@
   </main>
 
   <footer>
+    <p class="cmd-label">Install on your server, in one line:</p>
     <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
-    <div class="meta"><span>Free and open source, MIT.</span><a href="index.html">Home</a><a href="install.html">Install</a><span>Not affiliated with the AI vendors named.</span></div>
+    <div class="meta"><span>Free and open source, MIT.</span><a class="rs" href="https://clavarium.org/install.sh">Read the script</a><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="built-to-last.html">Built to last</a><a href="https://github.com/clavarium/clavarium">GitHub</a><span>Not affiliated with the AI vendors named.</span></div>
   </footer>
 </div>
 </body>

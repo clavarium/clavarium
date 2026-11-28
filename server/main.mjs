@@ -32,6 +32,7 @@ import { Vms, runner, HostTally } from './vm.mjs';
 import { Resources, WORK_TAB } from './resources.mjs';
 import { download } from './files.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
+import { People } from './people.mjs';
 import { Shortcuts } from './shortcuts.mjs';
 import { hearBox, Dictation } from './voice.mjs';
 import QRCode from 'qrcode';
@@ -176,6 +177,11 @@ try {
 const DEVICE_FILES = Object.fromEntries(Object.entries(FILES).filter(([path]) => path !== '/').map(([path, file]) => [`/c${path}`, file]));
 DEVICE_FILES['/c/'] = ['web/device.html', 'text/html; charset=utf-8'];
 DEVICE_FILES['/c/device.js'] = ['web/device.js', 'text/javascript; charset=utf-8'];
+/* A MEMBER's page (people.mjs, #419): the same files under /m/, behind the sign-in; its page is the device's,
+   told it is a member's, with member.js (no pairing) in place of device.js. */
+const MEMBER_FILES = Object.fromEntries(Object.entries(FILES).filter(([path]) => path !== '/').map(([path, file]) => [`/m${path}`, file]));
+MEMBER_FILES['/m/member.js'] = ['web/member.js', 'text/javascript; charset=utf-8'];
+const memberPage = () => readFileSync(`${ROOT}web/device.html`, 'utf8').replace('data-door="device"', 'data-door="member"').replace('<script src="device.js"></script>', '<script src="member.js"></script>');
 
 /* Nothing loads from anywhere else, and nothing may frame the page. */
 const HEADERS = {
@@ -202,7 +208,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin, desks } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', memberGate = () => undefined, personOf = null, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, apikeys, relayJoin, desks } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -217,7 +223,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         try { const notice = updates?.notice(); if (notice) response.setHeader('x-clavarium-update', notice); } catch { /* never in the way of an answer */ }
         /* The version that answers, to the page's own questions: a page loaded before an update starts again (app.js). */
         /* Not to a program at /api/ext/: what it may read, its key says (apikeys.mjs). */
-        if (platform?.version && ((pathname.startsWith('/api/') && !pathname.startsWith('/api/ext/')) || pathname.startsWith('/c/api/'))) response.setHeader('x-clavarium-version', platform.version);
+        if (platform?.version && ((pathname.startsWith('/api/') && !pathname.startsWith('/api/ext/')) || pathname.startsWith('/c/api/') || pathname.startsWith('/m/api/'))) response.setHeader('x-clavarium-version', platform.version);
         /* The device door first, and apart: it never consults the gate. */
         /* An address that wakes a tool, called from outside by what its owner
            runs elsewhere: the address is the right. Nothing else is looked at,
@@ -268,7 +274,22 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         }
         /* Before anything else, static files included: see gate.mjs. */
         const who = gate(request.headers);
+        /* Looked at again once a body is read: one made a member or disabled meanwhile does nothing more (audit 8). */
+        request.stillAllowed = () => gate(request.headers) !== undefined;
         if (who === undefined) {
+            /* A MEMBER (people.mjs, #419): its own door, and nothing else of this server -- not a page, not an API,
+               not a file. A page it held from before (an administrator then) is told, and goes to its own. */
+            const member = memberGate(request.headers);
+            if (member !== undefined && door && personOf) {
+                if (await handleDoor(request, response, { ...door, person: { ...personOf(member), still: () => memberGate(request.headers) === member } })) return;
+                if (pathname === '/m/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
+                if (pathname === '/m/' && (request.method === 'GET' || request.method === 'HEAD')) { response.writeHead(200, { ...HEADERS, 'content-type': 'text/html; charset=utf-8' }).end(memberPage()); return; }
+                const file = MEMBER_FILES[pathname];
+                if (file && (request.method === 'GET' || request.method === 'HEAD')) { await sendFile(response, file); return; }
+                if (pathname === '/' && request.method === 'GET') { response.writeHead(302, { ...HEADERS, location: '/m/' }).end(); return; }
+                response.writeHead(403, { ...HEADERS, 'x-clavarium-role': 'member', 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
+                return;
+            }
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
@@ -331,7 +352,23 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
     /* Who may sign in, kept up to date from the page (operators.mjs); none: this machine only. */
     const team = operators.length ? new Operators({ host: runner(host), store: new Store(`${dataDir}/operators.json`), initial: operators }) : null;
-    const gate = makeGate(team ? () => team.allowed() : []);
+    /* WHO IS WHAT (people.mjs, #419): the gate of everything there was admits ADMINISTRATORS only -- pages, API,
+       terminals, the SSH console, all of it -- so a member is refused there by default; members come in through
+       their own door alone (/m/, memberGate). With no member, everybody who may sign in passes, as before. */
+    const people = team ? new People({ path: `${dataDir}/people.json`, install: operators, accounts: () => team.list(), leaving: () => team.leaving, tell: (title, body) => { try { void alerts?.tell?.({ title, body, url: '/?open=settings&at=operators' })?.catch?.(() => {}); } catch { /* said in the log */ } console.error(`people: ${title}: ${body}`); } }) : null;
+    team?.useLastAdmin((email) => people.roleOf(email) === 'admin' && people.isLastAdmin(email));
+    /* The list changed outside the page too: an account gone takes its role and what it was given with it (audit 6). */
+    if (team) {
+        team.people = people;
+        team.onChanged = () => {
+            people.prune();
+            const here = new Set(team.list().map((o) => o.email));
+            if (here.size && team.grants) for (const s of team.grants.subjects('person:')) if (!here.has(s.slice('person:'.length))) team.grants.forgetSubject(s);
+            people.changed();
+        };
+    }
+    const gate = makeGate(team ? () => team.allowed().filter((e) => people.roleOf(e) === 'admin') : []);
+    const memberGate = team ? makeGate(() => team.allowed().filter((e) => people.roleOf(e) === 'member')) : () => undefined;
     const originOk = makeOriginCheck(publicOrigin);
     const instance = new Instance({ file: new JsonFile(`${dataDir}/instance.json`, {}), origin: publicOrigin, given: appName });
     let repairTerminal = async () => { throw new Error('not ready'); };
@@ -352,6 +389,19 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     if (!all.jobs) all.jobs = jobs;
     /* Who may do what with what: ONE table, shared by everything below. */
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
+    if (team) team.grants = grants;
+    /* A MEMBER, as the door sees it (door.mjs, #419): what the table gives `person:<email>`, conversations only. */
+    const personOf = team ? (given) => {
+        const email = String(given).trim().toLowerCase();
+        const subject = `person:${email}`;
+        const mine = () => grants.of(subject, 'conversation').map((g) => g.name).filter((n) => all.list().some((c) => c.name === n));
+        return {
+            email, key: subject,
+            grantsOf: () => grants.of(subject).filter((g) => g.type === 'conversation'),
+            rightsOn: (_key, name) => grants.rightsOf(subject, `conversation:${name}`),
+            conversationOf: (wanted) => { const m = mine(); if (wanted === undefined || wanted === '') return m[0]; return m.includes(wanted) ? wanted : undefined; },
+        };
+    } : null;
     /* Folder-style boxes the owner drops assets into, to tidy the views and hand a whole box at once (groups.mjs). */
     const groups = new Groups({ store: new Store(`${dataDir}/groups.json`) });
     /* The providers and models OpenCode knows (models.dev), for a conversation set up from here (03-11). */
@@ -996,13 +1046,13 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         answerer: answererConfig(env)?.models.length ?? 0, updates: updates.about(), team: team ? team.list().length : null,
         screen: await quick(screenNow(), 1500, null), catalogue: await quick(catalogue.providers().catch(() => []), 1500, []),
     }) });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, desks: new Desks({ file: new JsonFile(`${dataDir}/desktops.json`, {}) }), apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, memberGate, personOf, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, machineList, features, desks: new Desks({ file: new JsonFile(`${dataDir}/desktops.json`, {}) }), apikeys, relayJoin: host.length ? new RelayJoin({ host: asHost }) : null, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); clearInterval(trimTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); clearInterval(stopSigninHelp); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
     browsers.attach(server, WebSocketServer); server.on('close', () => browsers.shutdown());
     /* A machine's shared SSH console, live in its asset panel (sshconsole.mjs): the same checks as the terminal. */
-    attachConsole(server, { tethers, gate, originOk });
+    const consoles = attachConsole(server, { tethers, gate, originOk });
     /* The wake word's weekly threshold tuning (Sunday from 03:00, each box's own time): looked at every 10 minutes. */
     const wakeWeekly = setInterval(() => { try { boxes.wakeWeekly(); } catch (error) { console.error(`wake tuning: ${error.message}`); } }, 10 * 60_000); wakeWeekly.unref?.(); server.on('close', () => clearInterval(wakeWeekly));
     /* A collect session's clock: the stations asked, its end, the speaker told to stop (boxcollect.mjs). */
@@ -1033,7 +1083,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         gate, originOk,
         /* Only a pairing given that conversation's terminal opens it. */
         deviceName: (headers, pairing, wanted) => deviceTerminal(devices, headers, pairing, wanted),
+        /* A member: a conversation whose terminal it was given, by name only (#419). */
+        memberName: (headers, wanted) => { const m = memberGate(headers); if (m === undefined || !personOf) return undefined; const p = personOf(m); return p.conversationOf(wanted) === wanted && p.rightsOn(p.key, wanted).includes('x') ? wanted : undefined; },
     });
+    /* A role or a person's right changed: the terminals it held and lost go at once (#419). */
+    people?.useChanged?.(() => { bridge.recheck(); consoles?.recheck?.(); });
     all.drop = (name) => bridge.drop(name);
     /* What a device was given changes: a terminal it holds and lost goes at once. */
     devices.changed = () => bridge.recheck();

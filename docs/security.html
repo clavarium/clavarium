@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How it is kept safe · Clavarium</title>
 <meta name="description" content="Keys sealed on your server, one VM per agent, commits reviewed unless you allow automatic sending.">
-<link rel="stylesheet" href="style.css">
-<script src="site.js" defer></script>
+<link rel="stylesheet" href="style.css?v=20261125c">
+<script src="site.js?v=20261125d" defer></script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Can one agent read another's key?", "acceptedAnswer": {"@type": "Answer", "text": "No. Tried on a real install (Ubuntu 24.04): the second agent found no folder, no key, no network path."}}, {"@type": "Question", "name": "Can it answer for me at night?", "acceptedAnswer": {"@type": "Answer", "text": "Off by default. All configured models must agree, under your charter. One doubt, and you are asked."}}, {"@type": "Question", "name": "Does anything of yours run outside my house?", "acceptedAnswer": {"@type": "Answer", "text": "Clavarium runs on your server. But the AI provider you choose receives what its agent reads and writes, and a relay, if you use one, carries your connection. Phone alerts go through the browser's push service, encrypted for that device."}}]}</script>
 </head>
 <body>
@@ -33,8 +33,9 @@
 <section><h2>Limits</h2><ul class="limits"><li>Online, an agent can reach any address. Per-agent allow-lists: <a href="roadmap.html">Roadmap</a>.</li><li>Inside its machine, an agent can do anything with what you gave it.</li><li>A trapped mail can push an online agent to send what it read to another address.</li><li>Removing an access does not erase what was already read: it stays in the conversation and with the AI provider.</li></ul><div class="btns"><a class="btn" href="assets-and-keys.html">Keys &amp; assets</a><a class="btn" href="isolated-agents.html">Isolated agents</a><a class="btn u" href="data-sovereignty.html">Data sovereignty</a></div></section><section><h2>Questions</h2><details><summary>Can one agent read another's key?</summary><p>No. Tried on a real install (Ubuntu 24.04): the second agent found no folder, no key, no network path.</p></details><details><summary>Can it answer for me at night?</summary><p>Off by default. All configured models must agree, under your charter. One doubt, and you are asked.</p></details><details><summary>Does anything of yours run outside my house?</summary><p>Clavarium runs on your server. But the AI provider you choose receives what its agent reads and writes, and a relay, if you use one, carries your connection. Phone alerts go through the browser's push service, encrypted for that device.</p></details></section>
   </main>
   <footer>
+    <p class="cmd-label">Install on your server, in one line:</p>
     <div class="cmd"><code>curl -fsSL https://clavarium.org/install.sh | sudo bash</code><button type="button">Copy</button></div>
-    <div class="meta"><span>Free and open source, MIT.</span><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><span>Not affiliated with the AI vendors named.</span></div>
+    <div class="meta"><span>Free and open source, MIT.</span><a class="rs" href="https://clavarium.org/install.sh">Read the script</a><a href="index.html">Home</a><a href="install.html">Install</a><a href="faq.html">FAQ</a><a href="security.html">Security</a><a href="built-to-last.html">Built to last</a><a href="https://github.com/clavarium/clavarium">GitHub</a><span>Not affiliated with the AI vendors named.</span></div>
   </footer>
 </div>
 </body>

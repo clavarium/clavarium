@@ -147,6 +147,7 @@ summary{font-weight:650;cursor:pointer}
 details p{margin:8px 0 2px;color:var(--mute)}
 
 /* code + copy */
+.cmd-label{margin:14px 0 0;font-size:.88rem;font-weight:650;color:var(--mute)}
 .cmd{display:flex;align-items:stretch;background:var(--code);color:var(--code-ink);border-radius:10px;overflow:hidden;margin:10px 0}
 .cmd code{flex:1;min-width:0;font:14px/1.5 var(--mono);padding:12px 14px;overflow-x:auto;white-space:pre}
 .cmd button{flex:none;border:0;border-left:1px solid #333;background:#2a2d28;color:#e9ede6;font:600 .85rem var(--sans);padding:0 14px;cursor:pointer}
@@ -160,10 +161,10 @@ footer .meta a{color:var(--mute)}
 
 /* keys: where each kind of key lives */
 .keys{display:grid;gap:10px}
-.keys>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:10px 16px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.keys>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 7.5rem;gap:10px 16px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
 .keys b{font-weight:650}
 .keys span{color:var(--mute)}
-.keys em{font-style:normal;font-weight:700;font-size:.8rem;border-radius:99px;padding:2px 10px;white-space:nowrap}
+.keys em{justify-self:end;font-style:normal;font-weight:700;font-size:.8rem;border-radius:99px;padding:2px 10px;white-space:nowrap}
 .keys em.in{background:var(--u-bg);color:var(--u)}
 .keys em.out{background:var(--f-bg);color:var(--f)}
 @media (max-width:600px){.keys>div{grid-template-columns:1fr auto}.keys span{grid-column:1/-1;grid-row:2}}
@@ -246,3 +247,19 @@ video.demo.wide{max-width:100%;aspect-ratio:16/10;background:#0f141a}
 .lead:hover .rot-pause,.rot-pause:focus-visible,.rot-stopped .rot-pause{opacity:1}
 @media (hover:none){.rot-pause{display:none}.rot{cursor:pointer}}
 .film-note{margin:6px 0 0;color:var(--mute);font-size:.8rem;text-align:center}
+
+.explainer{margin-top:8px}
+.explainer-play{max-width:880px}
+video.explainer-video{display:block;width:100%;aspect-ratio:16/9;border:1px solid var(--line);border-radius:14px;background:var(--card,#fff)}
+/* Only the site's own play button before the film starts (Chrome on Android adds its own big one). */
+.explainer-video::-webkit-media-controls-start-playback-button,.explainer-video::-webkit-media-controls-overlay-play-button{display:none!important;-webkit-appearance:none}
+.explainer{max-width:880px;margin-left:auto;margin-right:auto}
+.explainer .sec{text-align:left}
+.playbtn.explainer-btn{inset:auto auto 7% 6%;margin:0;width:auto;height:auto;padding:.7em 1.2em;border-radius:999px;font:700 1.05rem/1 inherit;font-family:inherit;display:flex;gap:.5em;align-items:center;background:var(--f,#2c6e5a);color:var(--on,#fff);box-shadow:0 4px 18px rgba(0,0,0,.18)}
+.playbtn.explainer-btn .dur{font-weight:500;opacity:.85}
+@media (max-width:520px){.playbtn.explainer-btn{font-size:.9rem;padding:.55em 1em}}
+/* The explainer framed as a screen, like the demo films lower down: it reads as a video, not as part of the page. */
+.explainer-play{box-sizing:border-box;border:10px solid #15171a;border-radius:22px;background:#15171a;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+video.explainer-video{border:0;border-radius:12px}
+@media (max-width:520px){.explainer-play{border-width:6px;border-radius:16px}video.explainer-video{border-radius:10px}}
+.explainer{margin-bottom:clamp(40px,7vw,72px)}

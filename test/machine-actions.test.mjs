@@ -300,7 +300,7 @@ test('the disk gives back what was erased before a sleep, and every hour in each
     const b = bench(t);
     await b.all.machineAction('demo', 'sleep'); await b.all.acted;
     assert.equal(b.trims.length, 1);
-    assert.equal(b.trims[0], `${b.calls.findLastIndex((c) => c.startsWith('suspend'))}:exec clv-demo -- sudo -n fstrim --all`, 'trimmed just before the sleep');
+    assert.equal(b.trims[0], `${b.calls.findLastIndex((c) => c.startsWith('suspend'))}:exec clv-demo -- sudo -n fstrim --all --verbose`, 'trimmed just before the sleep');
     await b.all.machineAction('demo', 'start'); await b.all.acted;
     await b.all.trimAll();
     assert.equal(b.trims.length, 2);

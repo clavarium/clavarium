@@ -493,7 +493,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/wifi' && wifi) return send(200, await wifi.status()), true;
             if (pathname === '/api/wifi/scan' && wifi) return send(200, await wifi.scan()), true;
             if (pathname === '/api/meshcentral' && meshcentral) return send(200, await meshcentral.status()), true;
-            if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
+            /* Each account with its role and, for a member, the conversations it was given (#419). */
+            if (pathname === '/api/operators') return send(200, team ? { operators: team.list().map((o) => ({ ...o, role: team.people?.roleOf(o.email) ?? 'admin', ...(team.people?.roleOf(o.email) === 'member' ? { given: team.grants?.of(`person:${o.email}`, 'conversation').map((g) => ({ name: g.name, rights: g.rights })) ?? [] } : {}) })), me: identity, defaultRole: team.people?.defaultRole?.() ?? 'admin' } : { local: true }), true;
             if (pathname === '/api/binder/people' && binders) return send(200, { people: binders.people(identity), changes: `${BOOT}:${binders.changes()}` }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
@@ -591,6 +592,7 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
+        if (request.stillAllowed && !request.stillAllowed()) throw new Refusal(403, 'Your account changed: sign in again.');
         /* A SIGN-IN CODE (#405): answered before anything below can see this body (the journal, say). */
         const codeOf = /^\/api\/conversations\/([^/]+)\/signin-code$/.exec(pathname);
         if (codeOf && conversations.signinHelp) return send(200, await conversations.signinHelp.enterCode(decodeURIComponent(codeOf[1]), body?.code)), true;
@@ -791,13 +793,53 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/wifi/handover' && wifi) return send(202, await wifi.handover()), true;
         if (pathname === '/api/meshcentral/enable' && meshcentral) return send(202, await meshcentral.enable()), true;
         if (pathname === '/api/meshcentral/disable' && meshcentral) return send(200, await meshcentral.disable()), true;
-        if (pathname === '/api/operators' && team) return send(201, await team.add(body.email)), true;
+        if (pathname === '/api/operators' && team) {
+            /* Its role said at once (#419): an account removed and added again does not come back as it was. */
+            const role = body.role === 'member' ? 'member' : body.role === 'admin' ? 'admin' : (team.people?.defaultRole?.() ?? 'admin');
+            const adding = String(body.email ?? '').trim().toLowerCase();
+            /* An account there already keeps its role: changed by its own way, with its checks (audit 6, 24-11). */
+            if (team.list().some((o) => o.email === adding)) throw new Refusal(409, 'This account exists already.');
+            /* Nothing of a past account of that address comes back with the new one. */
+            team.grants?.forgetSubject(`person:${adding}`);
+            const undo = team.people?.adding(adding, role);
+            let made;
+            try { made = await team.add(body.email); } catch (error) { undo?.(); throw error; }
+            return send(201, { ...made, role: team.people?.roleOf(made.email) ?? 'admin' }), true;
+        }
+        /* An account made an administrator or a member (#419): never oneself, never the last administrator. */
+        const roleOf = /^\/api\/operators\/([^/]{3,200})\/role$/.exec(pathname);
+        if (roleOf && team?.people) {
+            const email = decodeURIComponent(roleOf[1]).trim().toLowerCase();
+            if (email === identity) throw new Refusal(409, 'You cannot change your own role: ask another administrator.');
+            const changed = team.people.setRole(email, String(body.role ?? ''));
+            /* Made an administrator: what it was given as a member is forgotten, not given back if it is a member again (audit 13). */
+            if (team.people.roleOf(email) === 'admin') team.grants?.forgetSubject(`person:${email}`);
+            return send(200, { operators: changed }), true;
+        }
+        /* A conversation given to a member, or taken back: its chat (read or write) and/or its terminal (#419). */
+        const giving = /^\/api\/operators\/([^/]{3,200})\/(give|take)$/.exec(pathname);
+        if (giving && team?.people && team.grants) {
+            const email = decodeURIComponent(giving[1]).trim().toLowerCase();
+            if (!team.list().some((o) => o.email === email)) throw new Refusal(404, 'No such account.');
+            if (team.people.roleOf(email) !== 'member') throw new Refusal(409, 'Only a member is given conversations: an administrator has them all.');
+            const name = String(body.conversation ?? '');
+            if (!conversations.list().some((c) => c.name === name)) throw new Refusal(404, 'No such conversation.');
+            const rights = giving[2] === 'take' ? '' : `${body.chat === 'write' ? 'rw' : body.chat === 'read' ? 'r' : ''}${body.terminal === true ? 'x' : ''}`;
+            if (rights === '') team.grants.take(`person:${email}`, `conversation:${name}`);
+            else team.grants.give(`person:${email}`, `conversation:${name}`, rights);
+            team.people.changed?.();
+            return send(200, { given: team.grants.of(`person:${email}`, 'conversation').map((g) => ({ name: g.name, rights: g.rights })) }), true;
+        }
         const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
         if (op && team) {
-            const email = decodeURIComponent(op[1]);
+            const email = decodeURIComponent(op[1]).trim().toLowerCase();
             /* Not oneself out: another operator does it, or nobody would see it was a mistake. */
             if (op[2] !== 'password' && op[2] !== 'enable' && email.toLowerCase() === identity) throw new Refusal(409, 'You cannot do that to your own account: ask another operator.');
-            return send(200, op[2] === 'password' ? await team.password(email) : { operators: await team[op[2]](email) }), true;
+            const done = op[2] === 'password' ? await team.password(email) : { operators: await team[op[2]](email) };
+            /* Removed: its role and what it was given go with it (#419). */
+            if (op[2] === 'remove') { team.people?.removed(email); team.grants?.forgetSubject(`person:${email.toLowerCase()}`); }
+            team.people?.changed?.();
+            return send(200, done), true;
         }
         const renaming = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/rename$/.exec(pathname);
         /* Its machines that run get the new name or value now, as a secret given to them does. */

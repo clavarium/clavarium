@@ -56,7 +56,7 @@
     m.appendChild(col('u', 'Use cases', U));
     var foot = el('nav', 'foot');
     foot.setAttribute('aria-label', 'Start here');
-    [['FAQ', 'faq.html'], ['Security', 'security.html']].forEach(function (l) { var a = el('a', '', l[0]); a.href = l[1]; foot.appendChild(a); });
+    [['FAQ', 'faq.html'], ['Security', 'security.html'], ['Built to last', 'built-to-last.html']].forEach(function (l) { var a = el('a', '', l[0]); a.href = l[1]; foot.appendChild(a); });
     m.appendChild(foot);
     return m;
   }
@@ -98,8 +98,11 @@
 document.querySelectorAll('.play').forEach(function (box) {
   var v = box.querySelector('video'), b = box.querySelector('.playbtn');
   if (!v || !b) return;
-  b.addEventListener('click', function () { box.classList.add('on'); v.play(); });
+  b.addEventListener('click', function () { box.classList.add('on'); v.controls = true; v.play(); });
   v.addEventListener('play', function () { box.classList.add('on'); });
+  /* Paused or ended: the big button comes back, so the state is plain; a tap on the film pauses it (phones hide their controls while it plays). */
+  v.addEventListener('pause', function () { box.classList.remove('on'); });
+  v.addEventListener('click', function (e) { if (!v.paused && box.classList.contains('explainer-play') && e.offsetY < v.clientHeight * 0.78) { e.preventDefault(); v.pause(); } });
 });
 
   /* Every film says what it is: invented data, scripted agents. */
