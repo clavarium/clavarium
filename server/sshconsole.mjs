@@ -41,6 +41,8 @@ const machineOf = (tethers, id) => {
 };
 
 export function attachConsole(server, { tethers, gate = () => 'local', originOk }) {
+    /* Each open console and whether it may stay: looked at again when a role changes (#419), not only every 30 s. */
+    const open = new Map();
     const sockets = new WebSocketServer({ noServer: true, maxPayload: KEYS_MAX });
     server.on('upgrade', (request, socket, head) => {
         const url = new URL(request.url ?? '/', 'http://local');
@@ -48,10 +50,19 @@ export function attachConsole(server, { tethers, gate = () => 'local', originOk 
         const target = machineOf(tethers, url.searchParams.get('target'));
         if (!originOk(request.headers) || gate(request.headers) === undefined || !target) { socket.destroy(); return; }
         const cols = Number(url.searchParams.get('cols')); const rows = Number(url.searchParams.get('rows'));
-        sockets.handleUpgrade(request, socket, head, (ws) => { void seat(ws, target, whoOf(request.headers), { cols, rows }); });
+        sockets.handleUpgrade(request, socket, head, (ws) => {
+            /* Still an administrator (#419): made a member, disabled, removed -- the console ends at once. */
+            const still = () => gate(request.headers) !== undefined;
+            const look = () => { if (!still()) { try { ws.close(4403, 'not allowed any more'); } catch { /* gone */ } } };
+            const watch = setInterval(look, 30_000); watch.unref?.();
+            open.set(ws, look); ws.on('close', () => open.delete(ws));
+            ws.on('close', () => clearInterval(watch));
+            ws.on('message', () => { if (!still()) { try { ws.close(4403, 'not allowed any more'); } catch { /* gone */ } } });
+            void seat(ws, target, whoOf(request.headers), { cols, rows }, still);
+        });
     });
 
-    async function seat(ws, target, who, { cols, rows }) {
+    async function seat(ws, target, who, { cols, rows }, still = () => true) {
         const send = (data, binary = false) => { if (ws.readyState === 1) ws.send(data, { binary }); };
         let handle = null; let gone = false; const early = [];
         const onEvent = (e) => {
@@ -73,6 +84,7 @@ export function attachConsole(server, { tethers, gate = () => 'local', originOk 
         /* What came meanwhile is in the replay already: only the latest state is said again. */
         if (early.some((e) => e.type === 'closed')) { try { ws.close(CLOSE_ENDED, 'ended'); } catch { /* gone */ } return; }
         ws.on('message', (data, binary) => {
+            if (!still()) return;
             if (binary) { handle.write(Buffer.from(data).toString('utf8')); return; }
             let m; try { m = JSON.parse(String(data)); } catch { return; }
             if (m?.type === 'resize') handle.resize(Number(m.cols), Number(m.rows));
@@ -82,6 +94,8 @@ export function attachConsole(server, { tethers, gate = () => 'local', originOk 
             else if (m?.type === 'interrupt') handle.interrupt();
         });
     }
+    /* `recheck`: each open console looked at now (a role changed, #419). */
+    sockets.recheck = () => { for (const look of [...open.values()]) look(); };
     return sockets;
 }
 

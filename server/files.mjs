@@ -154,7 +154,8 @@ export async function mailFile(root, relative) {
    is replaced; a folder never is), 'skip' (nothing written).
    `dir`: subfolders under `relative` to make first (a folder dropped whole).
    `batch`: an id the page gives one drop, bounded as a whole (see BATCH_MAX). */
-export async function importFile(root, relative, name, request, { exists = 'keep', dir = '', batch } = {}) {
+/* `ok()`: looked at once the file has come, before it is put in place (it throws when the sender lost its right). */
+export async function importFile(root, relative, name, request, { exists = 'keep', dir = '', batch, ok = () => {} } = {}) {
     if (!isFileName(name)) throw new Refusal(400, 'A file name has no slash, does not start with a dot, and is at most 120 characters.');
     if (!['keep', 'replace', 'skip'].includes(exists)) throw new Refusal(400, 'A name already taken is kept beside, replaced or skipped.');
     const declared = Number(request.headers['content-length']);
@@ -187,6 +188,7 @@ export async function importFile(root, relative, name, request, { exists = 'keep
             const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
             for (let i = 2; await lstat(join(folderPath, final)).then(() => true, () => false); i++) final = `${stem} (${i})${ext}`;
         } else if ((await lstat(join(folderPath, name)).catch(() => undefined))?.isDirectory()) throw new Refusal(409, `"${name}" is a folder here: it is not replaced by a file.`);
+        ok();
         await rename(partial, join(folderPath, final));
         return { name: final, size, ...(taken && exists === 'replace' && final === name ? { replaced: true } : {}) };
     } catch (error) { await unlink(partial).catch(() => {}); throw error; }
@@ -402,7 +404,7 @@ export async function readText(root, relative) {
    not at that version any more (the agent wrote it meanwhile), nothing is
    written and the answer says so (409, kind "changed"); 'any' writes over
    it all the same. `copy`: written beside it under a free name instead. */
-export async function saveText(root, relative, request, { version, copy = false } = {}) {
+export async function saveText(root, relative, request, { version, copy = false, ok = () => {} } = {}) {
     const parts = []; let size = 0;
     for await (const chunk of request) { size += chunk.length; if (size > EDIT_MAX) throw new Refusal(413, `A text edited here is ${EDIT_MAX / 1024 / 1024} MB at most.`); parts.push(chunk); }
     const bytes = Buffer.concat(parts);
@@ -423,6 +425,7 @@ export async function saveText(root, relative, request, { version, copy = false 
         /* Looked at again, the moment before: a write of the agent in between is not lost silently. */
         if (!copy && version !== 'any') { const now = await lstat(at.path).catch(() => undefined); if (!now?.isFile() || versionOf(now) !== version) throw changed(); }
         if (copy && await lstat(target).then(() => true, () => false)) throw new Refusal(409, `"${name}" was just made by someone else: try again.`);
+        ok();
         await rename(partial, target);
     } catch (error) { await unlink(partial).catch(() => {}); throw error; }
     return { name, version: versionOf(await lstat(target)), size: bytes.length };
@@ -495,7 +498,7 @@ async function bridgeFiles(root) {
 }
 
 export const CHANGE_ROUTES = ['/files/thumb', '/files/text', '/files/save', '/files/make', '/files/rename', '/files/move', '/files/remove', '/files/taken'];
-export async function changeRoute(method, route, params, request, folder) {
+export async function changeRoute(method, route, params, request, folder, ok = () => {}) {
     if (!CHANGE_ROUTES.includes(route)) return undefined;
     const p = params.get('p') ?? '';
     if (method === 'GET' && route === '/files/thumb') {
@@ -509,7 +512,7 @@ export async function changeRoute(method, route, params, request, folder) {
     const type = String(request.headers['content-type'] ?? '');
     if (route === '/files/save') {
         if (type !== 'application/octet-stream') return [400, { error: 'A text saved is sent as it is.' }];
-        return [200, await saveText(folder('write'), p, request, { version: params.get('version') ?? '', copy: params.get('copy') === '1' })];
+        return [200, await saveText(folder('write'), p, request, { version: params.get('version') ?? '', copy: params.get('copy') === '1', ok })];
     }
     if (!type.startsWith('application/json')) return [400, { error: 'The request is not JSON.' }];
     const chunks = []; let size = 0;
