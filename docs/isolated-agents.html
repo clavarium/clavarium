@@ -6,7 +6,7 @@
 <title>Run AI agents in isolated VMs · Clavarium</title>
 <meta name="description" content="Run Claude Code, Codex or OpenCode each in its own VM, or several isolated in one shared VM to save RAM. Self-hosted, free, MIT.">
 <link rel="stylesheet" href="style.css?v=20261125c">
-<script src="site.js?v=20261125d" defer></script>
+<script src="site.js?v=20261128a" defer></script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Why not Docker?", "acceptedAnswer": {"@type": "Answer", "text": "A container shares the host's kernel. Here each agent has a whole VM, or its own user in one."}}, {"@type": "Question", "name": "Can one agent read another's key?", "acceptedAnswer": {"@type": "Answer", "text": "No. Tried on a real install: the second agent found no folder, no key, no network path."}}, {"@type": "Question", "name": "What runs the VMs?", "acceptedAnswer": {"@type": "Answer", "text": "Multipass, on Ubuntu Server. Your processor must support virtual machines."}}]}</script>
 </head>
 <body>

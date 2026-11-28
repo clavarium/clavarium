@@ -151,3 +151,21 @@ document.querySelectorAll('.play').forEach(function (box) {
     show(0);
     start();
   });
+
+/* REMARKS ON THE SITE (annotepage, 28-11): nothing is loaded for a visitor. The owner turns it on in their own browser,
+   from the console: localStorage.annotepage = 'setup' (the first time: the screen that creates the project and shows its
+   key once), then localStorage.annotepage = '<the project id it gives>'; and delete localStorage.annotepage to stop.
+   A confidential project: the key is asked once in that browser, never written in the page. */
+(function () {
+  var want = '';
+  try { want = localStorage.getItem('annotepage') || ''; } catch (e) { return; }
+  if (!want) return;
+  var s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/annotepage-client@2/dist/annotepage.js';
+  s.setAttribute('data-server', 'https://api.annotepage.com/api.php');
+  if (want === 'setup') s.setAttribute('data-setup', '');
+  else if (/^[A-Za-z0-9_-]{22}$/.test(want)) s.setAttribute('data-project', want);
+  else { console.log('annotepage: localStorage.annotepage is neither "setup" nor a project id (22 characters)'); return; }
+  s.defer = true;
+  document.head.appendChild(s);
+})();
